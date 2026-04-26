@@ -5,8 +5,29 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_float(value: str, default: float, name: str) -> float:
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        logger.warning("Invalid float for %s=%r, using default %s", name, value, default)
+        return default
+
+
+def _safe_int(value: str | None, default: int | None, name: str) -> int | None:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        logger.warning("Invalid int for %s=%r, using default %s", name, value, default)
+        return default
 
 
 @dataclass
@@ -92,7 +113,7 @@ class SubjectConfig:
             in ("true", "1", "yes"),
             allowed_paths=os.environ.get(
                 "GHRAH_SUBJECT_HITL_ALLOWED_PATHS", ""
-            ).split(":")
+            ).split(";")
             if os.environ.get("GHRAH_SUBJECT_HITL_ALLOWED_PATHS")
             else [],
             workspace_root=os.environ.get("GHRAH_SUBJECT_HITL_WORKSPACE_ROOT"),
@@ -100,20 +121,26 @@ class SubjectConfig:
 
         gateway = GatewayConnectionConfig(
             url=os.environ.get("GHRAH_SUBJECT_GATEWAY_URL", "ws://localhost:8000/ws"),
-            reconnect_interval=float(
-                os.environ.get("GHRAH_SUBJECT_GATEWAY_RECONNECT_INTERVAL", "5.0")
+            reconnect_interval=_safe_float(
+                os.environ.get("GHRAH_SUBJECT_GATEWAY_RECONNECT_INTERVAL", "5.0"),
+                5.0,
+                "GHRAH_SUBJECT_GATEWAY_RECONNECT_INTERVAL",
             ),
-            ping_interval=float(
-                os.environ.get("GHRAH_SUBJECT_GATEWAY_PING_INTERVAL", "30.0")
+            ping_interval=_safe_float(
+                os.environ.get("GHRAH_SUBJECT_GATEWAY_PING_INTERVAL", "30.0"),
+                30.0,
+                "GHRAH_SUBJECT_GATEWAY_PING_INTERVAL",
             ),
-            command_timeout=float(
-                os.environ.get("GHRAH_SUBJECT_GATEWAY_COMMAND_TIMEOUT", "300.0")
+            command_timeout=_safe_float(
+                os.environ.get("GHRAH_SUBJECT_GATEWAY_COMMAND_TIMEOUT", "300.0"),
+                300.0,
+                "GHRAH_SUBJECT_GATEWAY_COMMAND_TIMEOUT",
             ),
         )
 
         max_attempts_str = os.environ.get("GHRAH_SUBJECT_GATEWAY_MAX_RECONNECT_ATTEMPTS")
-        gateway.max_reconnect_attempts = (
-            int(max_attempts_str) if max_attempts_str is not None else None
+        gateway.max_reconnect_attempts = _safe_int(
+            max_attempts_str, None, "GHRAH_SUBJECT_GATEWAY_MAX_RECONNECT_ATTEMPTS"
         )
 
         return cls(
