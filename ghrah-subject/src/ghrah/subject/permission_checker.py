@@ -4,7 +4,7 @@
 与 Core 版本的关键区别：
 - 增加 PermissionDecision 枚举，明确区分 ALLOW / DENY / REQUIRE_HITL
 - 提供 check_ability() 综合方法，用于 AbilityRunner 集成
-- 路径匹配使用 _is_subpath 严格匹配（与 HITLPolicy 保持一致）
+- 路径匹配使用 is_subpath 严格匹配（与 HITLPolicy 保持一致）
 
 权限模型：
 - 读取操作：allowed_paths 白名单 + workspace_root 控制硬性允许/拒绝
@@ -17,6 +17,8 @@ import os
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+from ghrah.subject._utils import is_subpath
 
 __all__ = ["PermissionChecker", "PermissionDecision", "PermissionVerdict"]
 
@@ -32,14 +34,6 @@ class PermissionVerdict:
     decision: PermissionDecision
     reason: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
-
-
-def _is_subpath(path: str, parent: str) -> bool:
-    path_abs = os.path.abspath(path)
-    parent_abs = os.path.abspath(parent)
-    if parent_abs == path_abs:
-        return True
-    return path_abs.startswith(parent_abs + os.sep)
 
 
 class PermissionChecker:
@@ -70,13 +64,13 @@ class PermissionChecker:
         if self._allowed_paths is None:
             return False
         abs_path = os.path.abspath(path)
-        return any(_is_subpath(abs_path, allowed) for allowed in self._allowed_paths)
+        return any(is_subpath(abs_path, allowed) for allowed in self._allowed_paths)
 
     def _is_in_workspace(self, path: str) -> bool:
         if self._workspace_root is None:
             return False
         abs_path = os.path.abspath(path)
-        return _is_subpath(abs_path, self._workspace_root)
+        return is_subpath(abs_path, self._workspace_root)
 
     def _is_path_allowed(self, path: str) -> bool:
         return self._is_in_allowed_paths(path) or self._is_in_workspace(path)

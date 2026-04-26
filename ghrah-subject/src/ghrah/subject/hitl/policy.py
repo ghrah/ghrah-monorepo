@@ -4,15 +4,9 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from ghrah.subject._utils import is_subpath
+
 __all__ = ["HITLVerdict", "HITLPolicy"]
-
-
-def _is_subpath(path: str, parent: str) -> bool:
-    path_abs = os.path.abspath(path)
-    parent_abs = os.path.abspath(parent)
-    if parent_abs == path_abs:
-        return True
-    return path_abs.startswith(parent_abs + os.sep)
 
 
 @dataclass
@@ -43,13 +37,13 @@ class HITLPolicy:
         abs_path = os.path.abspath(path)
         if self._allowed_paths is None:
             return False
-        return any(_is_subpath(abs_path, allowed) for allowed in self._allowed_paths)
+        return any(is_subpath(abs_path, allowed) for allowed in self._allowed_paths)
 
     def _is_in_workspace(self, path: str) -> bool:
         if self._workspace_root is None:
             return False
         abs_path = os.path.abspath(path)
-        return _is_subpath(abs_path, self._workspace_root)
+        return is_subpath(abs_path, self._workspace_root)
 
     def _is_path_allowed(self, path: str) -> bool:
         return self._is_in_allowed_paths(path) or self._is_in_workspace(path)
