@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -58,10 +59,21 @@ class AbilityRunner:
     分布式模式下：
     1. Core 通过 Gateway 发送 execute_ability 请求
     2. Subject AbilityRunner 接收请求
-    3. 权限检查（PermissionChecker 硬性拒绝 + HITLNotary 审批）
-    4. 本地执行 Ability（Subject 持有工作区和物理状态）
-    5. 将 ActionResult 通过 Gateway 返回给 Core
+    3. 路径解析：将相对路径解析为 Agent 工作区内的绝对路径
+    4. 权限检查（PermissionChecker 硬性拒绝 + HITLNotary 审批）
+    5. 本地执行 Ability（Subject 持有工作区和物理状态）
+    6. 将 ActionResult 通过 Gateway 返回给 Core
     """
+
+    # 需要路径解析的 Ability 和对应的路径参数名
+    PATH_ABILITIES: dict[str, list[str]] = {
+        "read_file": ["file_path"],
+        "write_file": ["file_path"],
+        "edit_file": ["file_path"],
+        "delete_file": ["file_path"],
+        "list_directory": ["dir_path"],
+        "move_file": ["source_path", "destination_path"],
+    }
 
     def __init__(
         self,
@@ -73,6 +85,8 @@ class AbilityRunner:
         self._permission_checker = permission_checker or PermissionChecker()
         self._config = config or AbilityRunnerConfig()
         self._on_hitl_promise_created: Callable[[HITLPromise], Awaitable[None]] | None = None
+        # 工作区路径解析器：agent_name → workspace 绝对路径
+        self._workspace_resolver: Callable[[str], str | None] | None = None
 
     def bind_hitl_broadcast(self, callback: Callable[[HITLPromise], Awaitable[None]]) -> None:
         """绑定 HITL Promise 创建回调。
@@ -84,6 +98,19 @@ class AbilityRunner:
             callback: 接收 HITLPromise 的异步回调，用于将 HITL 请求发送给 Observer。
         """
         self._on_hitl_promise_created = callback
+
+    def bind_workspace_resolver(self, resolver: Callable[[str], str | None]) -> None:
+        """绑定工作区路径解析器。
+
+        当 AbilityRunner 执行 Ability 时，调用此解析器将 agent_name 映射到
+        工作区绝对路径，用于将 LLM 提供的相对路径解析为工作区内绝对路径。
+
+        分布式模式下由 SubjectService 调用此方法注入 WorkspaceManager 路径查询。
+
+        Args:
+            resolver: 接收 agent_name，返回工作区绝对路径（str）或 None。
+        """
+        self._workspace_resolver = resolver
 
     async def execute_ability(
         self,
@@ -110,6 +137,9 @@ class AbilityRunner:
                 outcome=ActionOutcome.FAILURE,
                 data={"error": f"Ability not found: {ability_name}"},
             )
+
+        # 路径解析：将 LLM 提供的相对路径解析为 Agent 工作区内的绝对路径
+        tool_args = self._resolve_paths(ability_name, tool_args, agent_name)
 
         perm_verdict = self._permission_checker.check_ability(ability_name, tool_args)
         if perm_verdict.decision == PermissionDecision.DENY:
@@ -280,6 +310,60 @@ class AbilityRunner:
                 outcome=ActionOutcome.FAILURE,
                 data={"error": str(e), "ability_name": ability_name},
             )
+
+    def _resolve_paths(
+        self,
+        ability_name: str,
+        tool_args: dict[str, Any],
+        agent_name: str,
+    ) -> dict[str, Any]:
+        """将 tool_args 中的相对路径解析为 Agent 工作区内的绝对路径。
+
+        LLM 提供的路径（如 "hello.py"）是相对于 Agent 工作区的，
+        但 PermissionChecker 和 Ability 的 execute() 方法需要绝对路径。
+        此方法将相对路径拼接为 workspace_root/agent_name/relative_path。
+
+        如果工作区解析器未绑定或 Agent 无工作区，则不修改路径。
+        绝对路径（以 / 开头）不修改。
+
+        Args:
+            ability_name: Ability 名称
+            tool_args: 工具调用参数
+            agent_name: Agent 名称
+
+        Returns:
+            路径解析后的 tool_args（浅拷贝）
+        """
+        path_keys = self.PATH_ABILITIES.get(ability_name)
+        if path_keys is None:
+            return tool_args
+
+        workspace_path = (
+            self._workspace_resolver(agent_name) if self._workspace_resolver else None
+        )
+        if not workspace_path:
+            logger.debug(
+                "No workspace for agent=%s, using raw paths for ability=%s",
+                agent_name, ability_name,
+            )
+            return tool_args
+
+        resolved = dict(tool_args)
+        for key in path_keys:
+            value = resolved.get(key)
+            if not value or not isinstance(value, str):
+                continue
+            # 跳过绝对路径
+            if os.path.isabs(value):
+                continue
+            # 拼接工作区路径
+            resolved[key] = os.path.join(workspace_path, value)
+            logger.info(
+                "Resolved path for agent=%s ability=%s: %s → %s",
+                agent_name, ability_name, value, resolved[key],
+            )
+
+        return resolved
 
     async def _await_hitl_approval(
         self,

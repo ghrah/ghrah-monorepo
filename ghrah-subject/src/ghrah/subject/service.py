@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any
 from urllib.parse import urlencode, urlparse, urlunparse
 
@@ -161,6 +162,7 @@ class SubjectService:
             config=ability_config,
         )
         self._ability_runner.bind_hitl_broadcast(self._on_hitl_promise_created)
+        self._ability_runner.bind_workspace_resolver(self._resolve_workspace_path)
 
         # 连接 Gateway
         url = self._build_gateway_url()
@@ -400,7 +402,8 @@ class SubjectService:
                 )
                 await self._ws.send(response.model_dump_json())
         except Exception:
-            logger.exception("Error in execute_ability task")
+            logger.exception("Error in execute_ability task","request_id=%s",
+                request_id,)
 
     async def _handle_command(
         self, command: str, payload: dict[str, Any]
@@ -504,6 +507,30 @@ class SubjectService:
         )
         await self._ws.send(msg.model_dump_json())
         logger.info("HITL request broadcasted: promise_id=%s", promise.promise_id)
+
+    def _resolve_workspace_path(self, agent_name: str) -> str | None:
+        """查询 Agent 的工作区绝对路径。
+
+        供 AbilityRunner 在执行 Ability 前解析相对路径使用。
+        工作区路径格式：workspace_root/agent_name/
+
+        Args:
+            agent_name: Agent 名称
+
+        Returns:
+            工作区绝对路径，若 Agent 无工作区则返回 None
+        """
+        if self._workspace_mgr is None:
+            return None
+        workspace = self._workspace_mgr.get_workspace(agent_name)
+        if workspace is not None:
+            return workspace.path
+        # Agent 可能尚未创建工作区（未收到 agent_spawned 事件），
+        # 但工作区目录可能已经存在于文件系统上
+        ws_path = os.path.join(self._workspace_mgr.root_path, agent_name)
+        if os.path.isdir(ws_path):
+            return ws_path
+        return None
 
     async def _send_gateway_message(self, msg: GatewayMessage | dict[str, Any]) -> None:
         """发送 GatewayMessage 到 Gateway WebSocket。"""
