@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,7 +27,7 @@ from ghrah.abilities import (
     ActionOutcome,
     ActionResult,
 )
-from ghrah.subject.hitl.notary import HITLNotary
+from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
 from ghrah.subject.hitl.policy import HITLVerdict
 from ghrah.subject.permission_checker import PermissionChecker, PermissionDecision
 
@@ -71,6 +72,18 @@ class AbilityRunner:
         self._hitl_notary = hitl_notary
         self._permission_checker = permission_checker or PermissionChecker()
         self._config = config or AbilityRunnerConfig()
+        self._on_hitl_promise_created: Callable[[HITLPromise], Awaitable[None]] | None = None
+
+    def bind_hitl_broadcast(self, callback: Callable[[HITLPromise], Awaitable[None]]) -> None:
+        """绑定 HITL Promise 创建回调。
+
+        当 AbilityRunner 创建 HITL Promise 时，调用此回调将请求广播给 Observer。
+        分布式模式下由 SubjectService 调用此方法注入 Gateway 广播逻辑。
+
+        Args:
+            callback: 接收 HITLPromise 的异步回调，用于将 HITL 请求发送给 Observer。
+        """
+        self._on_hitl_promise_created = callback
 
     async def execute_ability(
         self,
@@ -277,6 +290,8 @@ class AbilityRunner:
         """创建 HITL Promise 并等待审批结果。
 
         如果配置了超时，等待超时后自动拒绝。
+        创建 Promise 后调用绑定回调（如 SubjectService 的 Gateway 广播），
+        将 HITL 请求发送给 Observer。
         """
         promise = self._hitl_notary.create_promise(agent_name, ability_name, tool_args)
         logger.info(
@@ -285,6 +300,9 @@ class AbilityRunner:
             agent_name,
             ability_name,
         )
+
+        if self._on_hitl_promise_created is not None:
+            await self._on_hitl_promise_created(promise)
 
         try:
             if self._config.hitl_timeout is not None:

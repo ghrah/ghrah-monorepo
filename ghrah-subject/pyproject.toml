@@ -22,7 +22,6 @@ build-backend = "hatchling.build"
 packages = ["src/ghrah"]
 
 [tool.uv.sources]
-ghrah = { path = "../ghrah-core" }
 agentsconfig = { path = "/home/yuki/gitrepos/agentsconfig/" }
 
 [dependency-groups]

@@ -29,6 +29,7 @@ from ghrah.subject.sandbox import (
     WorkspaceManager,
     WorkspaceStatus,
 )
+from ghrah.subject.service import SubjectService
 
 __all__ = [
     "AbilityRunner",
@@ -52,6 +53,7 @@ __all__ = [
     "HITLPolicy",
     "HITLPromise",
     "HITLVerdict",
+    "SubjectService",
     "WorkspaceManager",
     "WorkspaceStatus",
 ]
