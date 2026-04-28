@@ -70,6 +70,31 @@ _PERSIST_COMMANDS = frozenset({
     "persist_list_agents",
 })
 
+_WORKSPACE_COMMANDS = frozenset({
+    "create_workspace",
+    "destroy_workspace",
+    "workspace_snapshot",
+    "workspace_rollback",
+    "workspace_diff",
+    "workspace_status",
+})
+
+_SUBJECT_FORWARD_COMMANDS = frozenset({
+    "spawn_agent",
+    "terminate_agent",
+    "send_message",
+    "broadcast_message",
+    "register_ability",
+    "unregister_ability",
+    "list_agents",
+    "health_check",
+    "delegate",
+    "get_agent_info",
+    "init_cluster",
+    "shutdown_cluster",
+    "cluster_status",
+})
+
 
 class SubjectService:
     """Subject 运行时编排服务。
@@ -417,6 +442,119 @@ class SubjectService:
 
         return await self._persistence.handle_command(command, payload)
 
+    async def _handle_workspace_command(
+        self, command: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """处理 workspace_* 命令。
+
+        委托 WorkspaceManager 执行。
+        """
+        if self._workspace_mgr is None:
+            return {"success": False, "error": "WorkspaceManager not started"}
+
+        agent_name = payload.get("agent_name", "")
+
+        try:
+            if command == "create_workspace":
+                workspace = await self._workspace_mgr.create_workspace(agent_name)
+                return {"success": True, "data": {"agent_name": agent_name, "path": workspace.path}}
+
+            elif command == "destroy_workspace":
+                await self._workspace_mgr.destroy_workspace(agent_name)
+                return {"success": True, "data": {"agent_name": agent_name, "destroyed": True}}
+
+            elif command == "workspace_snapshot":
+                workspace = self._workspace_mgr.get_workspace(agent_name)
+                if workspace is None:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Workspace not found for"
+                            f" agent '{agent_name}'"
+                        ),
+                    }
+                message = payload.get("message", "")
+                commit_hash = await workspace.snapshot(message=message)
+                return {
+                    "success": True,
+                    "data": {
+                        "agent_name": agent_name,
+                        "snapshot_id": commit_hash,
+                    },
+                }
+
+            elif command == "workspace_rollback":
+                workspace = self._workspace_mgr.get_workspace(agent_name)
+                if workspace is None:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Workspace not found for"
+                            f" agent '{agent_name}'"
+                        ),
+                    }
+                snapshot_id = payload.get("snapshot_id", "")
+                await workspace.rollback(snapshot_id)
+                return {
+                    "success": True,
+                    "data": {
+                        "agent_name": agent_name,
+                        "rolled_back_to": snapshot_id,
+                    },
+                }
+
+            elif command == "workspace_diff":
+                workspace = self._workspace_mgr.get_workspace(agent_name)
+                if workspace is None:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Workspace not found for"
+                            f" agent '{agent_name}'"
+                        ),
+                    }
+                snapshot_id = payload.get("snapshot_id")
+                diff_str = await workspace.diff(
+                    snapshot_id=snapshot_id
+                )
+                return {
+                    "success": True,
+                    "data": {
+                        "agent_name": agent_name,
+                        "diff": diff_str,
+                    },
+                }
+
+            elif command == "workspace_status":
+                workspace = self._workspace_mgr.get_workspace(agent_name)
+                if workspace is None:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Workspace not found for"
+                            f" agent '{agent_name}'"
+                        ),
+                    }
+                status = await workspace.status()
+                return {
+                    "success": True,
+                    "data": {
+                        "agent_name": agent_name,
+                        "branch": status.branch,
+                        "is_clean": status.is_clean,
+                        "staged_files": status.staged_files,
+                        "unstaged_files": status.unstaged_files,
+                        "untracked_files": status.untracked_files,
+                    },
+                }
+
+            else:
+                return {"success": False, "error": f"Unknown workspace command: {command}"}
+
+        except Exception as e:
+            logger.exception("Error handling workspace command %s", command)
+            return {"success": False, "error": str(e)}
+
     async def _handle_core_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """处理从 Gateway 收到的 Core 事件。"""
         if event_type == "agent_spawned":
@@ -541,6 +679,32 @@ class SubjectService:
         else:
             await self._ws.send(json.dumps(msg, ensure_ascii=False))
 
+    async def _handle_forward_to_core(
+        self, msg_type: str, payload: dict[str, Any], request_id: str | None
+    ) -> None:
+        """处理 Observer 转发的 Agent 管理命令。
+
+        这些命令来自 Observer（经 Gateway 转发），Subject 需要将它们转发给 Core，
+        并将 Core 的响应返回给 Observer（经 Gateway）。
+
+        对于某些命令（如 spawn_agent），Subject 还需执行本地操作（如创建工作区），
+        但工作区的创建已通过 agent_spawned 事件自动触发，无需额外处理。
+
+        Args:
+            msg_type: 命令类型
+            payload: 命令载荷
+            request_id: 请求 ID，用于关联响应
+        """
+        logger.info("Forwarding command to Core: %s (request_id=%s)", msg_type, request_id)
+
+        cmd_msg = GatewayMessage(
+            type=msg_type,
+            payload=payload,
+            request_id=request_id,
+            client_type="subject",
+        )
+        await self._send_gateway_message(cmd_msg)
+
     async def _message_loop(self) -> None:
         """从 Gateway 接收消息并分发。
 
@@ -548,6 +712,8 @@ class SubjectService:
         - command_result: 关联到 pending_requests 中的 Future
         - execute_ability: 在后台 Task 执行（可能阻塞等待 HITL）
         - persist_*: 直接调用 persistence
+        - workspace_*: 直接调用 WorkspaceManager
+        - subject_forward_commands (spawn_agent, send_message 等): 转发给 Core
         - core events: 调用 _handle_core_event
         - hitl_response: 调用 _handle_hitl_response resolve Promise
         - ping: 响应 pong
@@ -588,6 +754,21 @@ class SubjectService:
                             request_id=request_id,
                         )
                         await self._ws.send(response.model_dump_json())
+
+                # Workspace 管理命令：直接调用
+                elif msg_type in _WORKSPACE_COMMANDS:
+                    result = await self._handle_workspace_command(msg_type, payload)
+                    if self._running and self._ws is not None:
+                        response = GatewayMessage(
+                            type=SystemType.COMMAND_RESULT.value,
+                            payload=result,
+                            request_id=request_id,
+                        )
+                        await self._ws.send(response.model_dump_json())
+
+                # Observer 转发的 Agent 管理命令：转发给 Core 并等待响应
+                elif msg_type in _SUBJECT_FORWARD_COMMANDS:
+                    await self._handle_forward_to_core(msg_type, payload, request_id)
 
                 # Core 事件
                 elif msg_type in _CORE_EVENT_TYPES:
