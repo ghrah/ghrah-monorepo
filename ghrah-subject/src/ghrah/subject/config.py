@@ -56,14 +56,14 @@ class GatewayConnectionConfig:
     Subject 通过 WebSocket 连接 Gateway，接收命令并推送事件。
 
     Attributes:
-        url: Gateway WebSocket URL，如 "ws://localhost:8000/ws"
+        url: Gateway WebSocket URL，如 "ws://localhost:4111/ws"
         reconnect_interval: 重连间隔（秒）
         max_reconnect_attempts: 最大重连尝试次数，None 表示无限重试
         ping_interval: 心跳间隔（秒）
         command_timeout: 命令执行超时时间（秒）
     """
 
-    url: str = "ws://localhost:8000/ws"
+    url: str = "ws://localhost:4111/ws"
     reconnect_interval: float = 5.0
     max_reconnect_attempts: int | None = None
     ping_interval: float = 30.0
@@ -120,7 +120,7 @@ class SubjectConfig:
         )
 
         gateway = GatewayConnectionConfig(
-            url=os.environ.get("GHRAH_SUBJECT_GATEWAY_URL", "ws://localhost:8000/ws"),
+            url=os.environ.get("GHRAH_SUBJECT_GATEWAY_URL", "ws://localhost:4111/ws"),
             reconnect_interval=_safe_float(
                 os.environ.get("GHRAH_SUBJECT_GATEWAY_RECONNECT_INTERVAL", "5.0"),
                 5.0,

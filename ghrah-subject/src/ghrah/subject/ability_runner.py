@@ -20,7 +20,7 @@ import logging
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ghrah.abilities import (
     AbilityExecutionContext,
@@ -31,6 +31,9 @@ from ghrah.abilities import (
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
 from ghrah.subject.hitl.policy import HITLVerdict
 from ghrah.subject.permission_checker import PermissionChecker, PermissionDecision
+
+if TYPE_CHECKING:
+    from ghrah.subject.sandbox.executor import SandboxExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -75,15 +78,22 @@ class AbilityRunner:
         "move_file": ["source_path", "destination_path"],
     }
 
+    # 需要工作目录路径解析的 Ability（working_dir 参数需要相对→绝对路径转换）
+    WORKING_DIR_ABILITIES: dict[str, list[str]] = {
+        "execute_command": ["working_dir"],
+    }
+
     def __init__(
         self,
         hitl_notary: HITLNotary,
         permission_checker: PermissionChecker | None = None,
         config: AbilityRunnerConfig | None = None,
+        sandbox_executor: SandboxExecutor | None = None,
     ) -> None:
         self._hitl_notary = hitl_notary
         self._permission_checker = permission_checker or PermissionChecker()
         self._config = config or AbilityRunnerConfig()
+        self._sandbox_executor = sandbox_executor
         self._on_hitl_promise_created: Callable[[HITLPromise], Awaitable[None]] | None = None
         # 工作区路径解析器：agent_name → workspace 绝对路径
         self._workspace_resolver: Callable[[str], str | None] | None = None
@@ -103,7 +113,7 @@ class AbilityRunner:
         """绑定工作区路径解析器。
 
         当 AbilityRunner 执行 Ability 时，调用此解析器将 agent_name 映射到
-        工作区绝对路径，用于将 LLM 提供的相对路径解析为工作区内绝对路径。
+        工作区绝对路径，用于将 Agent 提供的相对路径解析为工作区内绝对路径。
 
         分布式模式下由 SubjectService 调用此方法注入 WorkspaceManager 路径查询。
 
@@ -123,7 +133,7 @@ class AbilityRunner:
 
         Args:
             ability_name: Ability 名称（在 AbilityRegistry 中注册的类型名）
-            tool_args: 工具调用参数（从 LLM tool call 解析）
+            tool_args: 工具调用参数（从 tool call 解析）
             agent_name: 请求的 Agent 名称
             agent_state: Agent 状态（可选，用于构建执行上下文）
 
@@ -138,7 +148,7 @@ class AbilityRunner:
                 data={"error": f"Ability not found: {ability_name}"},
             )
 
-        # 路径解析：将 LLM 提供的相对路径解析为 Agent 工作区内的绝对路径
+        # 路径解析：将 Agent 提供的相对路径解析为 Agent 工作区内的绝对路径
         tool_args = self._resolve_paths(ability_name, tool_args, agent_name)
 
         perm_verdict = self._permission_checker.check_ability(ability_name, tool_args)
@@ -187,7 +197,10 @@ class AbilityRunner:
                 )
 
         try:
-            ability = ability_cls()
+            if ability_name == "execute_command" and self._sandbox_executor is not None:
+                ability = ability_cls(command_runner=self._sandbox_executor)
+            else:
+                ability = ability_cls()
             context = AbilityExecutionContext(
                 current_ability_name=ability_name,
                 tool_args=tool_args,
@@ -241,7 +254,7 @@ class AbilityRunner:
         """并行执行多个 tool_calls。
 
         Args:
-            tool_calls: LLM 返回的 tool_calls 列表
+            tool_calls: tool_calls 列表
             agent_name: 请求的 Agent 名称
             agent_state: Agent 状态
 
@@ -319,7 +332,7 @@ class AbilityRunner:
     ) -> dict[str, Any]:
         """将 tool_args 中的相对路径解析为 Agent 工作区内的绝对路径。
 
-        LLM 提供的路径（如 "hello.py"）是相对于 Agent 工作区的，
+        Agent 提供的路径（如 "hello.py"）是相对于 Agent 工作区的，
         但 PermissionChecker 和 Ability 的 execute() 方法需要绝对路径。
         此方法将相对路径拼接为 workspace_root/agent_name/relative_path。
 
@@ -335,7 +348,9 @@ class AbilityRunner:
             路径解析后的 tool_args（浅拷贝）
         """
         path_keys = self.PATH_ABILITIES.get(ability_name)
-        if path_keys is None:
+        working_dir_keys = self.WORKING_DIR_ABILITIES.get(ability_name)
+
+        if path_keys is None and working_dir_keys is None:
             return tool_args
 
         workspace_path = (
@@ -349,19 +364,32 @@ class AbilityRunner:
             return tool_args
 
         resolved = dict(tool_args)
-        for key in path_keys:
-            value = resolved.get(key)
-            if not value or not isinstance(value, str):
-                continue
-            # 跳过绝对路径
-            if os.path.isabs(value):
-                continue
-            # 拼接工作区路径
-            resolved[key] = os.path.join(workspace_path, value)
-            logger.info(
-                "Resolved path for agent=%s ability=%s: %s → %s",
-                agent_name, ability_name, value, resolved[key],
-            )
+
+        if path_keys:
+            for key in path_keys:
+                value = resolved.get(key)
+                if not value or not isinstance(value, str):
+                    continue
+                if os.path.isabs(value):
+                    continue
+                resolved[key] = os.path.join(workspace_path, value)
+                logger.info(
+                    "Resolved path for agent=%s ability=%s: %s → %s",
+                    agent_name, ability_name, value, resolved[key],
+                )
+
+        if working_dir_keys:
+            for key in working_dir_keys:
+                value = resolved.get(key)
+                if not value or not isinstance(value, str):
+                    continue
+                if os.path.isabs(value):
+                    continue
+                resolved[key] = os.path.join(workspace_path, value)
+                logger.info(
+                    "Resolved working_dir for agent=%s ability=%s: %s → %s",
+                    agent_name, ability_name, value, resolved[key],
+                )
 
         return resolved
 
