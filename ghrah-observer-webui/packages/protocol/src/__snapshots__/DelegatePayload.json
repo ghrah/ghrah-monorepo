@@ -1,0 +1,5 @@
+{
+  "from_agent": "a1",
+  "to_agent": "a2",
+  "content": "delegate msg"
+}

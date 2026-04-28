@@ -1,0 +1,10 @@
+{
+  "type": "spawn_agent",
+  "payload": {
+    "name": "test-agent"
+  },
+  "request_id": "abc123",
+  "timestamp": 12345.678,
+  "client_type": null,
+  "seq_id": null
+}

@@ -1,0 +1,11 @@
+{
+  "name": "agent-1",
+  "config": {
+    "name": "agent-1",
+    "agent_config_name": null,
+    "description": "",
+    "system_prompt": "",
+    "max_iterations": 10,
+    "gateway_url": null
+  }
+}

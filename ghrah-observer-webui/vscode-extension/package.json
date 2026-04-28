@@ -1,0 +1,85 @@
+{
+  "name": "ghrah-vscode-extension",
+  "displayName": "Ghrah - Actor-Agent Platform",
+  "description": "AI Agent orchestration with Human-in-the-Loop",
+  "version": "0.1.0",
+  "publisher": "ghrah",
+  "type": "module",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:ghrah.openDashboard"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ghrah.openDashboard",
+        "title": "Ghrah: Open Dashboard"
+      },
+      {
+        "command": "ghrah.startCluster",
+        "title": "Ghrah: Start Cluster"
+      },
+      {
+        "command": "ghrah.stopCluster",
+        "title": "Ghrah: Stop Cluster"
+      }
+    ],
+    "configuration": {
+      "title": "Ghrah",
+      "properties": {
+        "ghrah.gateway.url": {
+          "type": "string",
+          "default": "ws://localhost:8000/ws",
+          "description": "Gateway WebSocket URL"
+        },
+        "ghrah.gateway.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start Gateway on extension activation"
+        },
+        "ghrah.gateway.launchMethod": {
+          "type": "string",
+          "enum": [
+            "uv",
+            "binary"
+          ],
+          "default": "uv",
+          "description": "Method to launch Gateway (uv run or pre-built binary)"
+        },
+        "ghrah.gateway.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to pre-built Gateway binary (when launchMethod is 'binary')"
+        },
+        "ghrah.workspace.root": {
+          "type": "string",
+          "default": "",
+          "description": "Workspace root directory for Subject"
+        },
+        "ghrah.subject.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start Subject on extension activation"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=esm --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=esm --platform=node --watch",
+    "package": "vsce package",
+    "type-check": "tsc --noEmit",
+    "lint": "biome check src/"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}

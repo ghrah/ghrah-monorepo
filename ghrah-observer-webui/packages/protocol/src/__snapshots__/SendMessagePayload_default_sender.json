@@ -1,0 +1,5 @@
+{
+  "target": "agent-1",
+  "content": "hello",
+  "sender": "user"
+}

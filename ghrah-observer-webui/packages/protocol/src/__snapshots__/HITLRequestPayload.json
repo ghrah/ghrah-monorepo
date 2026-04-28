@@ -1,0 +1,7 @@
+{
+  "promise_id": "p-001",
+  "agent_name": "agent-1",
+  "ability_name": "bash",
+  "tool_args": {},
+  "context": {}
+}

@@ -1,0 +1,7 @@
+{
+  "sender": "agent-1",
+  "recipient": "user",
+  "content": "result",
+  "message_type": "result",
+  "metadata": {}
+}
