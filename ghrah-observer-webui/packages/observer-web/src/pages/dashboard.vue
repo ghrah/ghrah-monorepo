@@ -6,59 +6,20 @@ import HitlInbox from "@/components/hitl/hitl-inbox.vue";
 </script>
 
 <template>
-  <div class="dashboard">
-    <div class="dashboard-main">
-      <aside class="dashboard-sidebar">
+  <div class="flex flex-col h-full">
+    <div class="flex flex-1 min-h-0">
+      <aside class="w-56 border-r border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-900">
         <AgentList />
       </aside>
-      <section class="dashboard-chat">
+      <section class="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-900">
         <ChatPanel />
       </section>
-      <aside class="dashboard-chain">
+      <aside class="w-72 border-l border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-900">
         <ActionChainPanel />
       </aside>
     </div>
-    <footer class="dashboard-hitl">
+    <footer class="border-t border-gray-200 dark:border-gray-700 max-h-52 overflow-y-auto bg-white dark:bg-gray-900">
       <HitlInbox />
     </footer>
   </div>
 </template>
-
-<style scoped>
-.dashboard {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-.dashboard-main {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.dashboard-sidebar {
-  width: 220px;
-  border-right: 1px solid #ddd;
-  overflow-y: auto;
-}
-
-.dashboard-chat {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.dashboard-chain {
-  width: 300px;
-  border-left: 1px solid #ddd;
-  overflow-y: auto;
-}
-
-.dashboard-hitl {
-  border-top: 1px solid #ddd;
-  max-height: 200px;
-  overflow-y: auto;
-}
-</style>

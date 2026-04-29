@@ -3,6 +3,7 @@ import {
   ClientType,
   CommandType,
   EventType,
+  MANIFEST_COMMANDS,
   PERSIST_COMMANDS,
   SUBJECT_FORWARD_COMMANDS,
   SystemType,
@@ -55,9 +56,19 @@ describe("CommandType", () => {
     "workspace_rollback",
     "workspace_diff",
     "workspace_status",
+    "manifest_list_abilities",
+    "manifest_get_ability",
+    "manifest_put_ability",
+    "manifest_delete_ability",
+    "manifest_list_agents",
+    "manifest_get_agent",
+    "manifest_put_agent",
+    "manifest_delete_agent",
+    "manifest_resolve_agent",
+    "manifest_validate",
   ]);
 
-  it("has exactly 27 values matching Python CommandType", () => {
+  it("has exactly 37 values matching Python CommandType", () => {
     const tsValues = new Set(Object.values(CommandType));
     expect(tsValues).toEqual(PYTHON_COMMAND_VALUES);
   });
@@ -83,9 +94,15 @@ describe("EventType", () => {
     "workspace_destroyed",
     "workspace_snapshot_created",
     "workspace_rolled_back",
+    "manifest_ability_created",
+    "manifest_ability_updated",
+    "manifest_ability_deleted",
+    "manifest_agent_created",
+    "manifest_agent_updated",
+    "manifest_agent_deleted",
   ]);
 
-  it("has exactly 13 values matching Python EventType", () => {
+  it("has exactly 19 values matching Python EventType", () => {
     const tsValues = new Set(Object.values(EventType));
     expect(tsValues).toEqual(PYTHON_EVENT_VALUES);
   });
@@ -156,5 +173,24 @@ describe("WORKSPACE_COMMANDS", () => {
 
   it("contains exactly 6 workspace command values", () => {
     expect(WORKSPACE_COMMANDS).toEqual(PYTHON_WORKSPACE);
+  });
+});
+
+describe("MANIFEST_COMMANDS", () => {
+  const PYTHON_MANIFEST = new Set([
+    "manifest_list_abilities",
+    "manifest_get_ability",
+    "manifest_put_ability",
+    "manifest_delete_ability",
+    "manifest_list_agents",
+    "manifest_get_agent",
+    "manifest_put_agent",
+    "manifest_delete_agent",
+    "manifest_resolve_agent",
+    "manifest_validate",
+  ]);
+
+  it("contains exactly 10 manifest command values", () => {
+    expect(MANIFEST_COMMANDS).toEqual(PYTHON_MANIFEST);
   });
 });

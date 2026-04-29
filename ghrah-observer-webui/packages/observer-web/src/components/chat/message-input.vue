@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref } from "vue";
 
-const emit = defineEmits<{
-  send: [content: string];
-}>();
+defineProps<{ disabled?: boolean }>();
+
+const emit = defineEmits<{ send: [content: string] }>();
 
 const input = ref("");
 
@@ -16,38 +16,21 @@ function handleSubmit() {
 </script>
 
 <template>
-  <form class="message-input" @submit.prevent="handleSubmit">
-    <input v-model="input" type="text" placeholder="Type a message..." />
-    <button type="submit" :disabled="!input.trim()">Send</button>
+  <form class="flex gap-2 p-2 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900" @submit.prevent="handleSubmit">
+    <input
+      v-model="input"
+      type="text"
+      :disabled="disabled"
+      class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm dark:text-gray-100 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+      placeholder="Type a message..."
+      @keydown.ctrl.enter="handleSubmit"
+    />
+    <button
+      type="submit"
+      :disabled="disabled || !input.trim()"
+      class="btn-primary text-sm"
+    >
+      Send
+    </button>
   </form>
 </template>
-
-<style scoped>
-.message-input {
-  display: flex;
-  gap: 0.5rem;
-  padding: 0.5rem;
-  border-top: 1px solid #ddd;
-}
-
-.message-input input {
-  flex: 1;
-  padding: 0.375rem 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-
-.message-input button {
-  padding: 0.375rem 0.75rem;
-  border: none;
-  border-radius: 4px;
-  background: #0066cc;
-  color: white;
-  cursor: pointer;
-}
-
-.message-input button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-</style>

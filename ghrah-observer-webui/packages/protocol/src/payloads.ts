@@ -17,6 +17,7 @@ export const AbilityDefinitionPayloadSchema = z.object({
 export const SpawnAgentPayloadSchema = z.object({
   config: AgentConfigPayloadSchema,
   abilities: z.array(AbilityDefinitionPayloadSchema).nullable().optional(),
+  manifest_ref: z.string().nullable().optional(),
 });
 
 export const TerminateAgentPayloadSchema = z.object({
@@ -207,6 +208,48 @@ export const WorkspaceRolledBackPayloadSchema = z.object({
   snapshot_id: z.string(),
 });
 
+// ─── Manifest CRUD Payloads ───
+
+export const ManifestListPayloadSchema = z.object({
+  namespace: z.string().nullable().optional(),
+});
+
+export const ManifestGetPayloadSchema = z.object({
+  full_name: z.string(),
+});
+
+export const ManifestPutPayloadSchema = z.object({
+  full_name: z.string(),
+  content: z.string(),
+  overwrite: z.boolean().optional().default(false),
+});
+
+export const ManifestDeletePayloadSchema = z.object({
+  full_name: z.string(),
+});
+
+export const ManifestValidatePayloadSchema = z.object({
+  content: z.string(),
+  manifest_type: z.string(),
+});
+
+export const ManifestResolvePayloadSchema = z.object({
+  agent_full_name: z.string(),
+  runtime_name: z.string().nullable().optional(),
+});
+
+// ─── Manifest Event Payloads ───
+
+export const ManifestAbilityEventPayloadSchema = z.object({
+  full_name: z.string(),
+  namespace: z.string(),
+});
+
+export const ManifestAgentEventPayloadSchema = z.object({
+  full_name: z.string(),
+  namespace: z.string(),
+});
+
 export const CommandResultPayloadSchema = z.object({
   request_id: z.string(),
   success: z.boolean(),
@@ -263,3 +306,11 @@ export type WorkspaceSnapshotCreatedPayload = z.infer<typeof WorkspaceSnapshotCr
 export type WorkspaceRolledBackPayload = z.infer<typeof WorkspaceRolledBackPayloadSchema>;
 export type CommandResultPayload = z.infer<typeof CommandResultPayloadSchema>;
 export type ErrorPayload = z.infer<typeof ErrorPayloadSchema>;
+export type ManifestListPayload = z.infer<typeof ManifestListPayloadSchema>;
+export type ManifestGetPayload = z.infer<typeof ManifestGetPayloadSchema>;
+export type ManifestPutPayload = z.infer<typeof ManifestPutPayloadSchema>;
+export type ManifestDeletePayload = z.infer<typeof ManifestDeletePayloadSchema>;
+export type ManifestValidatePayload = z.infer<typeof ManifestValidatePayloadSchema>;
+export type ManifestResolvePayload = z.infer<typeof ManifestResolvePayloadSchema>;
+export type ManifestAbilityEventPayload = z.infer<typeof ManifestAbilityEventPayloadSchema>;
+export type ManifestAgentEventPayload = z.infer<typeof ManifestAgentEventPayloadSchema>;

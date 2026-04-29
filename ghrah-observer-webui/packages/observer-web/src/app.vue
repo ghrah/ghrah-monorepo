@@ -1,49 +1,91 @@
 <script setup lang="ts">
-import { useConnectionStore } from "@ghrah/observer-core";
+import { onMounted, onUnmounted } from "vue";
+import { useObserver } from "@/composables/useObserver";
 
-const connection = useConnectionStore();
+const { connection, error, autoConnect, disconnect } = useObserver();
+
+let retryTimer: ReturnType<typeof setInterval> | null = null;
+let connecting = false;
+
+onMounted(async () => {
+  await autoConnect();
+
+  retryTimer = setInterval(async () => {
+    if (connection.state === "disconnected" && !error.value && !connecting) {
+      connecting = true;
+      try {
+        await autoConnect();
+      } finally {
+        connecting = false;
+      }
+    }
+  }, 10_000);
+});
+
+onUnmounted(() => {
+  if (retryTimer) {
+    clearInterval(retryTimer);
+    retryTimer = null;
+  }
+  disconnect();
+});
+
+const statusClass: Record<string, string> = {
+  connected: "bg-green-200 text-green-900",
+  connecting: "bg-yellow-200 text-yellow-900",
+  reconnecting: "bg-yellow-200 text-yellow-900",
+  disconnected: "bg-red-200 text-red-900",
+};
+
+const statusDot: Record<string, string> = {
+  connected: "bg-green-500",
+  connecting: "bg-yellow-500 animate-pulse",
+  reconnecting: "bg-yellow-500 animate-pulse",
+  disconnected: "bg-red-500",
+};
+
+const statusText: Record<string, string> = {
+  connected: "Connected",
+  connecting: "Connecting...",
+  reconnecting: "Reconnecting...",
+  disconnected: "Disconnected",
+};
 </script>
 
 <template>
-  <header class="app-header">
-    <h1>Ghrah Observer</h1>
-    <span :class="['connection-status', connection.state]">
-      {{ connection.state }}
-    </span>
-  </header>
-  <main>
-    <RouterView />
-  </main>
+  <div class="h-screen flex flex-col bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
+    <header class="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+      <div class="flex items-center gap-3">
+        <h1 class="text-lg font-bold tracking-tight">Ghrah Observer</h1>
+        <span :class="['badge', statusClass[connection.state]]">
+          <span :class="['inline-block w-2 h-2 rounded-full mr-1', statusDot[connection.state]]" />
+          {{ statusText[connection.state] }}
+        </span>
+      </div>
+      <div class="flex items-center gap-2 text-sm">
+        <span class="text-gray-500 dark:text-gray-400 font-mono text-xs">{{ connection.gatewayUrl }}</span>
+        <button
+          v-if="connection.state === 'connected'"
+          class="btn-secondary text-xs"
+          @click="disconnect"
+        >
+          Disconnect
+        </button>
+        <button
+          v-else
+          class="btn-primary text-xs"
+          :disabled="connection.state === 'connecting' || connection.state === 'reconnecting'"
+          @click="autoConnect()"
+        >
+          Connect
+        </button>
+      </div>
+    </header>
+    <div v-if="error" class="px-4 py-1 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 text-xs">
+      {{ error }}
+    </div>
+    <main class="flex-1 min-h-0">
+      <RouterView />
+    </main>
+  </div>
 </template>
-
-<style scoped>
-.app-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid #ddd;
-}
-
-.connection-status {
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.875rem;
-}
-
-.connection-status.connected {
-  background: #d4edda;
-  color: #155724;
-}
-
-.connection-status.disconnected,
-.connection-status.reconnecting {
-  background: #f8d7da;
-  color: #721c24;
-}
-
-.connection-status.connecting {
-  background: #fff3cd;
-  color: #856404;
-}
-</style>

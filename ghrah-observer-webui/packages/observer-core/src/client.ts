@@ -316,6 +316,134 @@ export class ObserverClient extends GatewayClient {
     return this.request(msg, 30_000);
   }
 
+  // ── Manifest CRUD ──
+
+  async listManifestAbilities(namespace?: string | null): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = {};
+    if (namespace != null) payload["namespace"] = namespace;
+
+    const msg: GatewayMessage = {
+      type: CommandType.MANIFEST_LIST_ABILITIES,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async getAbility(fullName: string): Promise<CommandResultPayload> {
+    const msg: GatewayMessage = {
+      type: CommandType.MANIFEST_GET_ABILITY,
+      payload: { full_name: fullName },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async putAbility(
+    fullName: string,
+    content: string,
+    overwrite?: boolean,
+  ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { full_name: fullName, content };
+    if (overwrite != null) payload["overwrite"] = overwrite;
+
+    const msg: GatewayMessage = {
+      type: CommandType.MANIFEST_PUT_ABILITY,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async deleteAbility(fullName: string): Promise<CommandResultPayload> {
+    const msg: GatewayMessage = {
+      type: CommandType.MANIFEST_DELETE_ABILITY,
+      payload: { full_name: fullName },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async listManifestAgents(namespace?: string | null): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = {};
+    if (namespace != null) payload["namespace"] = namespace;
+
+    const msg: GatewayMessage = {
+      type: CommandType.MANIFEST_LIST_AGENTS,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async getAgent(fullName: string): Promise<CommandResultPayload> {
+    const msg: GatewayMessage = {
+      type: CommandType.MANIFEST_GET_AGENT,
+      payload: { full_name: fullName },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async putAgent(
+    fullName: string,
+    content: string,
+    overwrite?: boolean,
+  ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { full_name: fullName, content };
+    if (overwrite != null) payload["overwrite"] = overwrite;
+
+    const msg: GatewayMessage = {
+      type: CommandType.MANIFEST_PUT_AGENT,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async deleteAgent(fullName: string): Promise<CommandResultPayload> {
+    const msg: GatewayMessage = {
+      type: CommandType.MANIFEST_DELETE_AGENT,
+      payload: { full_name: fullName },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async resolveAgent(
+    agentFullName: string,
+    runtimeName?: string | null,
+  ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { agent_full_name: agentFullName };
+    if (runtimeName != null) payload["runtime_name"] = runtimeName;
+
+    const msg: GatewayMessage = {
+      type: CommandType.MANIFEST_RESOLVE_AGENT,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async validateManifest(content: string, manifestType: string): Promise<CommandResultPayload> {
+    const msg: GatewayMessage = {
+      type: CommandType.MANIFEST_VALIDATE,
+      payload: { content, manifest_type: manifestType },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
   // ── 内部方法 ──
 
   protected async _syncInitialState(): Promise<void> {

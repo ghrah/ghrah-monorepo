@@ -43,6 +43,17 @@ export enum CommandType {
   WORKSPACE_ROLLBACK = "workspace_rollback",
   WORKSPACE_DIFF = "workspace_diff",
   WORKSPACE_STATUS = "workspace_status",
+
+  MANIFEST_LIST_ABILITIES = "manifest_list_abilities",
+  MANIFEST_GET_ABILITY = "manifest_get_ability",
+  MANIFEST_PUT_ABILITY = "manifest_put_ability",
+  MANIFEST_DELETE_ABILITY = "manifest_delete_ability",
+  MANIFEST_LIST_AGENTS = "manifest_list_agents",
+  MANIFEST_GET_AGENT = "manifest_get_agent",
+  MANIFEST_PUT_AGENT = "manifest_put_agent",
+  MANIFEST_DELETE_AGENT = "manifest_delete_agent",
+  MANIFEST_RESOLVE_AGENT = "manifest_resolve_agent",
+  MANIFEST_VALIDATE = "manifest_validate",
 }
 
 export enum EventType {
@@ -59,6 +70,13 @@ export enum EventType {
   WORKSPACE_DESTROYED = "workspace_destroyed",
   WORKSPACE_SNAPSHOT_CREATED = "workspace_snapshot_created",
   WORKSPACE_ROLLED_BACK = "workspace_rolled_back",
+
+  MANIFEST_ABILITY_CREATED = "manifest_ability_created",
+  MANIFEST_ABILITY_UPDATED = "manifest_ability_updated",
+  MANIFEST_ABILITY_DELETED = "manifest_ability_deleted",
+  MANIFEST_AGENT_CREATED = "manifest_agent_created",
+  MANIFEST_AGENT_UPDATED = "manifest_agent_updated",
+  MANIFEST_AGENT_DELETED = "manifest_agent_deleted",
 }
 
 export enum SystemType {
@@ -103,6 +121,19 @@ export const WORKSPACE_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.WORKSPACE_ROLLBACK,
   CommandType.WORKSPACE_DIFF,
   CommandType.WORKSPACE_STATUS,
+]);
+
+export const MANIFEST_COMMANDS: ReadonlySet<string> = new Set([
+  CommandType.MANIFEST_LIST_ABILITIES,
+  CommandType.MANIFEST_GET_ABILITY,
+  CommandType.MANIFEST_PUT_ABILITY,
+  CommandType.MANIFEST_DELETE_ABILITY,
+  CommandType.MANIFEST_LIST_AGENTS,
+  CommandType.MANIFEST_GET_AGENT,
+  CommandType.MANIFEST_PUT_AGENT,
+  CommandType.MANIFEST_DELETE_AGENT,
+  CommandType.MANIFEST_RESOLVE_AGENT,
+  CommandType.MANIFEST_VALIDATE,
 ]);
 
 export type MessageType = CommandType | EventType | SystemType;

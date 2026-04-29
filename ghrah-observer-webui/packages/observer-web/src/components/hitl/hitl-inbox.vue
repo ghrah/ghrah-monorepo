@@ -3,49 +3,27 @@ import { useHitlStore } from "@ghrah/observer-core";
 import HitlRequestItem from "./hitl-request-item.vue";
 
 const hitl = useHitlStore();
-
-function handleApprove(promiseId: string) {
-  hitl.removeRequest(promiseId);
-}
-
-function handleReject(promiseId: string) {
-  hitl.removeRequest(promiseId);
-}
 </script>
 
 <template>
-  <div class="hitl-inbox">
-    <h3>HITL Inbox</h3>
-    <ul v-if="hitl.pendingRequests.length > 0">
+  <div class="p-3">
+    <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+      HITL Inbox
+      <span v-if="hitl.pendingRequests.length > 0" class="bg-yellow-200 dark:bg-yellow-800 text-yellow-900 dark:text-yellow-100 px-1.5 py-0.5 rounded-full text-xs ml-2">
+        {{ hitl.pendingRequests.length }}
+      </span>
+    </h3>
+
+    <div v-if="hitl.pendingRequests.length === 0" class="text-gray-400 dark:text-gray-600 text-sm italic">
+      No pending requests
+    </div>
+
+    <ul v-else class="space-y-2">
       <HitlRequestItem
         v-for="req in hitl.pendingRequests"
         :key="req.promiseId"
         :request="req"
-        @approve="handleApprove"
-        @reject="handleReject"
       />
     </ul>
-    <p v-else class="empty">No pending requests</p>
   </div>
 </template>
-
-<style scoped>
-.hitl-inbox {
-  padding: 0.5rem;
-}
-
-.hitl-inbox h3 {
-  margin: 0 0 0.5rem;
-}
-
-.hitl-inbox ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-
-.empty {
-  color: #999;
-  font-size: 0.875rem;
-}
-</style>

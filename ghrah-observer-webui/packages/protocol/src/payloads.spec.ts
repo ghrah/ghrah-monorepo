@@ -23,6 +23,14 @@ import {
   HITLResponsePayloadSchema,
   InitClusterPayloadSchema,
   ListAgentsPayloadSchema,
+  ManifestAbilityEventPayloadSchema,
+  ManifestAgentEventPayloadSchema,
+  ManifestDeletePayloadSchema,
+  ManifestGetPayloadSchema,
+  ManifestListPayloadSchema,
+  ManifestPutPayloadSchema,
+  ManifestResolvePayloadSchema,
+  ManifestValidatePayloadSchema,
   PersistDeletePayloadSchema,
   PersistListPayloadSchema,
   PersistLoadPayloadSchema,
@@ -534,5 +542,104 @@ describe("System payload schemas", () => {
       details: { field: "name" },
     });
     expect(result.details).toEqual({ field: "name" });
+  });
+});
+
+describe("Manifest payload schemas", () => {
+  it("ManifestListPayloadSchema with namespace", () => {
+    const result = ManifestListPayloadSchema.parse({ namespace: "ghrah.fs" });
+    expect(result.namespace).toBe("ghrah.fs");
+  });
+
+  it("ManifestListPayloadSchema without namespace", () => {
+    const result = ManifestListPayloadSchema.parse({});
+    expect(result.namespace).toBeUndefined();
+  });
+
+  it("ManifestGetPayloadSchema", () => {
+    const result = ManifestGetPayloadSchema.parse({ full_name: "ghrah.fs.read_file" });
+    expect(result.full_name).toBe("ghrah.fs.read_file");
+  });
+
+  it("ManifestPutPayloadSchema with default overwrite", () => {
+    const result = ManifestPutPayloadSchema.parse({
+      full_name: "ghrah.fs.read_file",
+      content: "yaml: content",
+    });
+    expect(result.full_name).toBe("ghrah.fs.read_file");
+    expect(result.content).toBe("yaml: content");
+    expect(result.overwrite).toBe(false);
+  });
+
+  it("ManifestPutPayloadSchema with overwrite=true", () => {
+    const result = ManifestPutPayloadSchema.parse({
+      full_name: "ghrah.fs.read_file",
+      content: "yaml: updated",
+      overwrite: true,
+    });
+    expect(result.overwrite).toBe(true);
+  });
+
+  it("ManifestDeletePayloadSchema", () => {
+    const result = ManifestDeletePayloadSchema.parse({ full_name: "ghrah.fs.read_file" });
+    expect(result.full_name).toBe("ghrah.fs.read_file");
+  });
+
+  it("ManifestValidatePayloadSchema", () => {
+    const result = ManifestValidatePayloadSchema.parse({
+      content: "yaml: content",
+      manifest_type: "ability",
+    });
+    expect(result.content).toBe("yaml: content");
+    expect(result.manifest_type).toBe("ability");
+  });
+
+  it("ManifestResolvePayloadSchema without runtime_name", () => {
+    const result = ManifestResolvePayloadSchema.parse({
+      agent_full_name: "my_project.designer",
+    });
+    expect(result.agent_full_name).toBe("my_project.designer");
+    expect(result.runtime_name).toBeUndefined();
+  });
+
+  it("ManifestResolvePayloadSchema with runtime_name", () => {
+    const result = ManifestResolvePayloadSchema.parse({
+      agent_full_name: "my_project.designer",
+      runtime_name: "dev-agent-1",
+    });
+    expect(result.runtime_name).toBe("dev-agent-1");
+  });
+
+  it("ManifestAbilityEventPayloadSchema", () => {
+    const result = ManifestAbilityEventPayloadSchema.parse({
+      full_name: "ghrah.fs.read_file",
+      namespace: "ghrah.fs",
+    });
+    expect(result.full_name).toBe("ghrah.fs.read_file");
+    expect(result.namespace).toBe("ghrah.fs");
+  });
+
+  it("ManifestAgentEventPayloadSchema", () => {
+    const result = ManifestAgentEventPayloadSchema.parse({
+      full_name: "my_project.designer",
+      namespace: "my_project",
+    });
+    expect(result.full_name).toBe("my_project.designer");
+    expect(result.namespace).toBe("my_project");
+  });
+
+  it("SpawnAgentPayloadSchema with manifest_ref", () => {
+    const result = SpawnAgentPayloadSchema.parse({
+      config: { name: "agent-1" },
+      manifest_ref: "my_project.designer",
+    });
+    expect(result.manifest_ref).toBe("my_project.designer");
+  });
+
+  it("SpawnAgentPayloadSchema without manifest_ref", () => {
+    const result = SpawnAgentPayloadSchema.parse({
+      config: { name: "agent-1" },
+    });
+    expect(result.manifest_ref).toBeUndefined();
   });
 });
