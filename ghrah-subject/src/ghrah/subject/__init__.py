@@ -14,6 +14,7 @@ from ghrah.subject.ledger import (
     LedgerNode,
     PersistenceError,
 )
+from ghrah.subject.manifest_store import ManifestStore
 from ghrah.subject.permission_checker import (
     PermissionChecker,
     PermissionDecision,
@@ -40,6 +41,7 @@ __all__ = [
     "CommandResult",
     "DAGEntry",
     "LedgerNode",
+    "ManifestStore",
     "PersistenceError",
     "PermissionChecker",
     "PermissionDecision",

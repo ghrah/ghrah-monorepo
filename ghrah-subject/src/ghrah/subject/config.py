@@ -87,6 +87,7 @@ class SubjectConfig:
 
     workspace_root: str = os.path.expanduser("~/ghrah-workspace")
     db_path: str = os.path.expanduser("~/.ghrah/subject.db")
+    manifest_root: str = os.path.expanduser("~/.ghrah/manifests")
     hitl_policy: HITLPolicyConfig = field(default_factory=HITLPolicyConfig)
     gateway: GatewayConnectionConfig = field(default_factory=GatewayConnectionConfig)
     log_level: str = "INFO"
@@ -149,6 +150,9 @@ class SubjectConfig:
             ),
             db_path=os.environ.get(
                 "GHRAH_SUBJECT_DB_PATH", os.path.expanduser("~/.ghrah/subject.db")
+            ),
+            manifest_root=os.environ.get(
+                "GHRAH_SUBJECT_MANIFEST_ROOT", os.path.expanduser("~/.ghrah/manifests")
             ),
             hitl_policy=hitl_policy,
             gateway=gateway,

@@ -40,6 +40,9 @@ from ghrah.subject.config import SubjectConfig
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
 from ghrah.subject.hitl.policy import HITLPolicy, HITLVerdict
 from ghrah.subject.ledger.chain import ActionChainLedger
+from ghrah.subject.manifest_store.builtins import ensure_builtins
+from ghrah.subject.manifest_store.service import _MANIFEST_COMMANDS
+from ghrah.subject.manifest_store.store import ManifestStore
 from ghrah.subject.permission_checker import PermissionChecker
 from ghrah.subject.persistence.service import SubjectPersistenceService
 from ghrah.subject.sandbox.executor import SandboxExecutor, SandboxExecutorConfig
@@ -131,6 +134,7 @@ class SubjectService:
         self._hitl_notary: HITLNotary | None = None
         self._ability_runner: AbilityRunner | None = None
         self._permission_checker: PermissionChecker | None = None
+        self._manifest_store: ManifestStore | None = None
 
     async def start(self) -> None:
         """启动服务：初始化子系统，连接 Gateway，进入消息循环。"""
@@ -188,6 +192,11 @@ class SubjectService:
         )
         self._ability_runner.bind_hitl_broadcast(self._on_hitl_promise_created)
         self._ability_runner.bind_workspace_resolver(self._resolve_workspace_path)
+
+        # 初始化 ManifestStore
+        self._manifest_store = ManifestStore(self._config.manifest_root)
+        self._manifest_store.ensure_dirs()
+        ensure_builtins(self._manifest_store)
 
         # 连接 Gateway
         url = self._build_gateway_url()
@@ -555,6 +564,20 @@ class SubjectService:
             logger.exception("Error handling workspace command %s", command)
             return {"success": False, "error": str(e)}
 
+    async def _handle_manifest_command(
+        self, command: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """处理 manifest 命令。
+
+        委托 ManifestStore 和 handle_manifest_command 执行。
+        """
+        from ghrah.subject.manifest_store.service import handle_manifest_command
+
+        if self._manifest_store is None:
+            return {"success": False, "error": "ManifestStore not initialized"}
+
+        return handle_manifest_command(command, payload, self._manifest_store)
+
     async def _handle_core_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """处理从 Gateway 收到的 Core 事件。"""
         if event_type == "agent_spawned":
@@ -687,6 +710,12 @@ class SubjectService:
         这些命令来自 Observer（经 Gateway 转发），Subject 需要将它们转发给 Core，
         并将 Core 的响应返回给 Observer（经 Gateway）。
 
+        完整的请求-响应链：
+        Observer → GW(_handle_subject_forward, 创建 Future) → Subject(本方法)
+        → GW(_handle_spawn_agent 等, 返回 command_result) → Subject 收到 command_result
+        → Subject 将 command_result 回传给 GW → GW(resolve_command_result, 解析 Future)
+        → Observer 收到响应
+
         对于某些命令（如 spawn_agent），Subject 还需执行本地操作（如创建工作区），
         但工作区的创建已通过 agent_spawned 事件自动触发，无需额外处理。
 
@@ -704,6 +733,71 @@ class SubjectService:
             client_type="subject",
         )
         await self._send_gateway_message(cmd_msg)
+
+        # 如果没有 request_id，无法关联响应，回退到 fire-and-forget 模式
+        if request_id is None:
+            logger.warning(
+                "Forwarded command %s has no request_id, "
+                "cannot relay response (fire-and-forget)",
+                msg_type,
+            )
+            return
+
+        # 等待 Gateway 的 command_result 响应，然后回传给 Gateway
+        # 使 Gateway 的 _handle_subject_forward Future 正确 resolve
+        try:
+            result = await self._wait_for_response(request_id, timeout=30.0)
+        except TimeoutError:
+            logger.error(
+                "Forwarded command %s timed out waiting for Core response "
+                "(request_id=%s)",
+                msg_type,
+                request_id,
+            )
+            if self._running and self._ws is not None:
+                error_response = GatewayMessage(
+                    type=SystemType.COMMAND_RESULT.value,
+                    payload={
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Forwarded command {msg_type} timed out",
+                    },
+                    request_id=request_id,
+                )
+                await self._ws.send(error_response.model_dump_json())
+            return
+        except Exception:
+            logger.exception(
+                "Error waiting for forwarded command response (request_id=%s)",
+                request_id,
+            )
+            if self._running and self._ws is not None:
+                error_response = GatewayMessage(
+                    type=SystemType.COMMAND_RESULT.value,
+                    payload={
+                        "request_id": request_id,
+                        "success": False,
+                        "error": f"Forwarded command {msg_type} failed",
+                    },
+                    request_id=request_id,
+                )
+                await self._ws.send(error_response.model_dump_json())
+            return
+
+        # 将 command_result 回传给 Gateway
+        if self._running and self._ws is not None:
+            response = GatewayMessage(
+                type=SystemType.COMMAND_RESULT.value,
+                payload=result,
+                request_id=request_id,
+            )
+            await self._ws.send(response.model_dump_json())
+            logger.info(
+                "Forwarded command %s completed, response relayed "
+                "(request_id=%s)",
+                msg_type,
+                request_id,
+            )
 
     async def _message_loop(self) -> None:
         """从 Gateway 接收消息并分发。
@@ -766,9 +860,26 @@ class SubjectService:
                         )
                         await self._ws.send(response.model_dump_json())
 
-                # Observer 转发的 Agent 管理命令：转发给 Core 并等待响应
+                # Manifest CRUD 命令：直接调用
+                elif msg_type in _MANIFEST_COMMANDS:
+                    result = await self._handle_manifest_command(msg_type, payload)
+                    if self._running and self._ws is not None:
+                        response = GatewayMessage(
+                            type=SystemType.COMMAND_RESULT.value,
+                            payload=result,
+                            request_id=request_id,
+                        )
+                        await self._ws.send(response.model_dump_json())
+
+                # Observer 转发的 Agent 管理命令：后台 Task 执行
+                # _handle_forward_to_core 会等待 Core 响应并回传 command_result，
+                # 可能阻塞较长时间，因此作为后台任务运行避免阻塞消息循环
                 elif msg_type in _SUBJECT_FORWARD_COMMANDS:
-                    await self._handle_forward_to_core(msg_type, payload, request_id)
+                    task = asyncio.create_task(
+                        self._handle_forward_to_core(msg_type, payload, request_id)
+                    )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
 
                 # Core 事件
                 elif msg_type in _CORE_EVENT_TYPES:
