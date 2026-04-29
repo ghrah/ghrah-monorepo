@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import logging
 import os
@@ -35,6 +36,7 @@ from ghrah.gateway.protocol import (
     SystemType,
     generate_request_id,
 )
+from ghrah.manifest.resolver import ManifestResolver
 from ghrah.subject.ability_runner import AbilityRunner, AbilityRunnerConfig
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
@@ -97,6 +99,22 @@ _SUBJECT_FORWARD_COMMANDS = frozenset({
     "shutdown_cluster",
     "cluster_status",
 })
+
+
+def _manifest_event_type(command: str, payload: dict[str, Any]) -> str | None:
+    """根据命令和 payload 推断 manifest 变更事件类型。"""
+    overwrite = payload.get("overwrite", False)
+    event_map: dict[str, str] = {
+        "manifest_put_ability": (
+            "manifest_ability_updated" if overwrite else "manifest_ability_created"
+        ),
+        "manifest_delete_ability": "manifest_ability_deleted",
+        "manifest_put_agent": (
+            "manifest_agent_updated" if overwrite else "manifest_agent_created"
+        ),
+        "manifest_delete_agent": "manifest_agent_deleted",
+    }
+    return event_map.get(command)
 
 
 class SubjectService:
@@ -569,14 +587,31 @@ class SubjectService:
     ) -> dict[str, Any]:
         """处理 manifest 命令。
 
-        委托 ManifestStore 和 handle_manifest_command 执行。
+        委托 ManifestStore 和 handle_manifest_command 执行，
+        成功 put/delete 后向 Gateway 发射变更事件。
         """
         from ghrah.subject.manifest_store.service import handle_manifest_command
 
         if self._manifest_store is None:
             return {"success": False, "error": "ManifestStore not initialized"}
 
-        return handle_manifest_command(command, payload, self._manifest_store)
+        result = handle_manifest_command(command, payload, self._manifest_store)
+
+        if result.get("success") and self._ws is not None:
+            event_type = _manifest_event_type(command, payload)
+            if event_type is not None:
+                full_name = result.get("data", {}).get("full_name", "")
+                namespace = full_name.rsplit(".", 1)[0] if "." in full_name else ""
+                event_msg = GatewayMessage(
+                    type=event_type,
+                    payload={"full_name": full_name, "namespace": namespace},
+                )
+                try:
+                    await self._ws.send(event_msg.model_dump_json())
+                except Exception:
+                    logger.warning("Failed to emit manifest event %s", event_type)
+
+        return result
 
     async def _handle_core_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """处理从 Gateway 收到的 Core 事件。"""
@@ -726,6 +761,9 @@ class SubjectService:
         """
         logger.info("Forwarding command to Core: %s (request_id=%s)", msg_type, request_id)
 
+        if msg_type == "spawn_agent" and payload.get("manifest_ref"):
+            payload = self._resolve_spawn_manifest(payload)
+
         cmd_msg = GatewayMessage(
             type=msg_type,
             payload=payload,
@@ -798,6 +836,73 @@ class SubjectService:
                 msg_type,
                 request_id,
             )
+
+    def _resolve_spawn_manifest(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """将 manifest_ref 解析为完整的 spawn_agent payload。
+
+        从 ManifestStore 加载 AgentManifest，通过 ManifestResolver 解析，
+        将结果展开为标准 spawn payload（不含 manifest_ref）。
+        """
+        manifest_ref = payload["manifest_ref"]
+        config_payload = payload.get("config", {})
+        runtime_name = config_payload.get("name")
+
+        if self._manifest_store is None:
+            raise RuntimeError(
+                "ManifestStore is not initialized. "
+                "Ensure SubjectService.start() has been called."
+            )
+
+        manifest = self._manifest_store.get_agent(manifest_ref)
+        resolver = ManifestResolver(self._manifest_store)
+        resolved = resolver.resolve(manifest, runtime_name=runtime_name)
+
+        expanded_config: dict[str, Any] = {
+            "name": resolved.config.name,
+            "agent_config_name": resolved.config.agent_config_name,
+            "description": resolved.config.description,
+            "system_prompt": resolved.config.system_prompt,
+            "max_iterations": resolved.config.max_iterations,
+            "gateway_url": (
+                resolved.config.gateway_url or config_payload.get("gateway_url")
+            ),
+            "window": (
+                dataclasses.asdict(resolved.config.window)
+                if resolved.config.window
+                else None
+            ),
+            "context": (
+                dataclasses.asdict(resolved.config.context)
+                if resolved.config.context
+                else None
+            ),
+            "model_overrides": (
+                dataclasses.asdict(resolved.config.model_overrides)
+                if resolved.config.model_overrides
+                else None
+            ),
+        }
+
+        expanded_abilities: list[dict[str, Any]] = []
+        for a in resolved.abilities:
+            impl = a.implementation
+            if impl.type == "builtin" and impl.handler:
+                expanded_abilities.append({
+                    "ability_type": impl.handler,
+                    "params": {},
+                })
+            else:
+                logger.warning(
+                    "Skipping non-builtin ability '%s' (type=%s) in manifest spawn",
+                    a.ability_name,
+                    impl.type,
+                )
+
+        return {
+            "config": expanded_config,
+            "abilities": expanded_abilities if expanded_abilities else None,
+            "manifest_ref": None,
+        }
 
     async def _message_loop(self) -> None:
         """从 Gateway 接收消息并分发。
