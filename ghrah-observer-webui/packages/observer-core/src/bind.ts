@@ -8,6 +8,8 @@ import type {
   CommandResultPayload,
   GatewayMessage,
   HITLRequestPayload,
+  ManifestAbilityEventPayload,
+  ManifestAgentEventPayload,
 } from "@ghrah/protocol";
 import { EventType, SystemType } from "@ghrah/protocol";
 import type { ObserverClient } from "./client.js";
@@ -17,6 +19,7 @@ import { useChangesStore } from "./stores/changes.js";
 import { useChatStore } from "./stores/chat.js";
 import { useConnectionStore } from "./stores/connection.js";
 import { useHitlStore } from "./stores/hitl.js";
+import { useManifestsStore } from "./stores/manifests.js";
 
 type AgentListItem = { name: string; config: AgentConfigPayload };
 
@@ -27,6 +30,7 @@ export function connectStores(client: ObserverClient): () => void {
   const hitl = useHitlStore();
   const chat = useChatStore();
   const changes = useChangesStore();
+  const manifests = useManifestsStore();
 
   const pendingToolArgs = new Map<string, Record<string, unknown>>();
 
@@ -87,6 +91,25 @@ export function connectStores(client: ObserverClient): () => void {
     // Agent error: 后续可扩展 ErrorStore
   });
 
+  client.on(EventType.MANIFEST_ABILITY_CREATED, (msg: GatewayMessage) =>
+    manifests.onManifestAbilityCreated(msg.payload as ManifestAbilityEventPayload),
+  );
+  client.on(EventType.MANIFEST_ABILITY_UPDATED, (msg: GatewayMessage) =>
+    manifests.onManifestAbilityInvalidated(msg.payload as ManifestAbilityEventPayload),
+  );
+  client.on(EventType.MANIFEST_ABILITY_DELETED, (msg: GatewayMessage) =>
+    manifests.onManifestAbilityDeleted(msg.payload as ManifestAbilityEventPayload),
+  );
+  client.on(EventType.MANIFEST_AGENT_CREATED, (msg: GatewayMessage) =>
+    manifests.onManifestAgentCreated(msg.payload as ManifestAgentEventPayload),
+  );
+  client.on(EventType.MANIFEST_AGENT_UPDATED, (msg: GatewayMessage) =>
+    manifests.onManifestAgentInvalidated(msg.payload as ManifestAgentEventPayload),
+  );
+  client.on(EventType.MANIFEST_AGENT_DELETED, (msg: GatewayMessage) =>
+    manifests.onManifestAgentDeleted(msg.payload as ManifestAgentEventPayload),
+  );
+
   const eventTypes = [
     EventType.AGENT_SPAWNED,
     EventType.AGENT_TERMINATED,
@@ -95,6 +118,12 @@ export function connectStores(client: ObserverClient): () => void {
     EventType.AGENT_RESPONSE,
     EventType.ABILITY_RESULT,
     EventType.AGENT_ERROR,
+    EventType.MANIFEST_ABILITY_CREATED,
+    EventType.MANIFEST_ABILITY_UPDATED,
+    EventType.MANIFEST_ABILITY_DELETED,
+    EventType.MANIFEST_AGENT_CREATED,
+    EventType.MANIFEST_AGENT_UPDATED,
+    EventType.MANIFEST_AGENT_DELETED,
   ] as const;
 
   return () => {

@@ -1,5 +1,11 @@
 import {
+  type AbilityManifestInfo,
+  type AgentManifestInfo,
   connectStores,
+  extractAbilityList,
+  extractAgentList,
+  extractManifestEntry,
+  extractValidationResult,
   ObserverClient,
   useActionChainsStore,
   useAgentsStore,
@@ -7,6 +13,7 @@ import {
   useChatStore,
   useConnectionStore,
   useHitlStore,
+  useManifestsStore,
 } from "@ghrah/observer-core";
 import type { AbilityDefinitionPayload, AgentConfigPayload } from "@ghrah/protocol";
 import { ref, shallowRef } from "vue";
@@ -32,6 +39,7 @@ export function useObserver() {
   const hitl = useHitlStore();
   const chat = useChatStore();
   const changes = useChangesStore();
+  const manifests = useManifestsStore();
 
   async function connect(gatewayUrl?: string) {
     const url = gatewayUrl ?? connection.gatewayUrl;
@@ -96,6 +104,101 @@ export function useObserver() {
     return withClient((c) => c.workspaceDiff(agentName, snapshotId ?? undefined));
   }
 
+  // ── Manifest: Ability ──
+
+  async function listManifestAbilities(namespace?: string | null) {
+    const result = await withClient((c) => c.listManifestAbilities(namespace));
+    if (result?.success) {
+      const abilities = extractAbilityList(result.data);
+      if (abilities) manifests.setAbilities(abilities);
+    }
+    return result;
+  }
+
+  async function getAbility(fullName: string) {
+    const result = await withClient((c) => c.getAbility(fullName));
+    if (result?.success) {
+      const entry = extractManifestEntry(result.data);
+      if (entry) manifests.upsertAbility(entry as AbilityManifestInfo);
+    }
+    return result;
+  }
+
+  async function putAbility(fullName: string, content: string, overwrite?: boolean) {
+    const result = await withClient((c) => c.putAbility(fullName, content, overwrite));
+    if (result?.success) {
+      const entry = extractManifestEntry(result.data);
+      if (entry) manifests.upsertAbility(entry as AbilityManifestInfo);
+    }
+    return result;
+  }
+
+  async function deleteAbility(fullName: string) {
+    const result = await withClient((c) => c.deleteAbility(fullName));
+    if (result?.success) manifests.removeAbility(fullName);
+    return result;
+  }
+
+  // ── Manifest: Agent ──
+
+  async function listManifestAgents(namespace?: string | null) {
+    const result = await withClient((c) => c.listManifestAgents(namespace));
+    if (result?.success) {
+      const agents = extractAgentList(result.data);
+      if (agents) manifests.setAgents(agents);
+    }
+    return result;
+  }
+
+  async function getAgent(fullName: string) {
+    const result = await withClient((c) => c.getAgent(fullName));
+    if (result?.success) {
+      const entry = extractManifestEntry(result.data);
+      if (entry) manifests.upsertAgent(entry as AgentManifestInfo);
+    }
+    return result;
+  }
+
+  async function putAgent(fullName: string, content: string, overwrite?: boolean) {
+    const result = await withClient((c) => c.putAgent(fullName, content, overwrite));
+    if (result?.success) {
+      const entry = extractManifestEntry(result.data);
+      if (entry) manifests.upsertAgent(entry as AgentManifestInfo);
+    }
+    return result;
+  }
+
+  async function deleteAgent(fullName: string) {
+    const result = await withClient((c) => c.deleteAgent(fullName));
+    if (result?.success) manifests.removeAgent(fullName);
+    return result;
+  }
+
+  // ── Manifest: Utility ──
+
+  async function resolveAgent(agentFullName: string, runtimeName?: string | null) {
+    return withClient((c) => c.resolveAgent(agentFullName, runtimeName));
+  }
+
+  async function validateManifest(content: string, manifestType: string) {
+    manifests.setValidating(true);
+    manifests.setValidationResult(null);
+    const result = await withClient((c) => c.validateManifest(content, manifestType));
+    manifests.setValidating(false);
+    if (result?.success) {
+      const vr = extractValidationResult(result.data);
+      if (vr) {
+        manifests.setValidationResult(vr);
+      }
+    } else if (result && !result.success) {
+      manifests.setValidationResult({
+        is_valid: false,
+        errors: [result.error ?? "Validation failed"],
+      });
+    }
+    return result;
+  }
+
   return {
     client,
     connection,
@@ -104,6 +207,7 @@ export function useObserver() {
     hitl,
     chat,
     changes,
+    manifests,
     error,
     connect,
     disconnect,
@@ -115,5 +219,15 @@ export function useObserver() {
     createWorkspace,
     workspaceSnapshot,
     workspaceDiff,
+    listManifestAbilities,
+    getAbility,
+    putAbility,
+    deleteAbility,
+    listManifestAgents,
+    getAgent,
+    putAgent,
+    deleteAgent,
+    resolveAgent,
+    validateManifest,
   };
 }
