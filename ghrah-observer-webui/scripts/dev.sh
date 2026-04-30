@@ -7,6 +7,8 @@ echo "=== Starting Gateway ==="
 (cd "$ROOT_DIR/../ghrah-gateway" && uv run ghrah-gateway) &
 GATEWAY_PID=$!
 
+sleep 5s
+
 echo "=== Starting Subject ==="
 (cd "$ROOT_DIR/../ghrah-subject" && uv run ghrah-subject) &
 SUBJECT_PID=$!

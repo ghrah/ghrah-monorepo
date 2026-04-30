@@ -1,15 +1,14 @@
 <script setup lang="ts">
+import ConfigNav from "@/components/config/config-nav.vue";
 </script>
 
 <template>
-  <div class="config-page">
-    <h2>Configuration</h2>
-    <p>LLM Provider, Agent Templates, Subject settings.</p>
+  <div class="flex h-full">
+    <aside class="w-44 shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 overflow-y-auto">
+      <ConfigNav />
+    </aside>
+    <main class="flex-1 min-w-0 overflow-y-auto p-4">
+      <RouterView />
+    </main>
   </div>
 </template>
-
-<style scoped>
-.config-page {
-  padding: 1rem;
-}
-</style>

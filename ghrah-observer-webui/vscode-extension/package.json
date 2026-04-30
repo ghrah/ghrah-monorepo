@@ -22,6 +22,10 @@
         "title": "Ghrah: Open Dashboard"
       },
       {
+        "command": "ghrah.openConfig",
+        "title": "Ghrah: Open Config"
+      },
+      {
         "command": "ghrah.startCluster",
         "title": "Ghrah: Start Cluster"
       },
@@ -35,7 +39,7 @@
       "properties": {
         "ghrah.gateway.url": {
           "type": "string",
-          "default": "ws://localhost:8000/ws",
+          "default": "ws://localhost:4111/ws",
           "description": "Gateway WebSocket URL"
         },
         "ghrah.gateway.autoStart": {
@@ -66,6 +70,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically start Subject on extension activation"
+        },
+        "ghrah.manifest.root": {
+          "type": "string",
+          "default": "~/.ghrah/manifests",
+          "description": "Manifest YAML files root directory"
         }
       }
     }
@@ -78,6 +87,7 @@
     "lint": "biome check src/"
   },
   "devDependencies": {
+    "@types/node": "^25.6.0",
     "@types/vscode": "^1.95.0",
     "esbuild": "^0.24.0",
     "typescript": "^5.7.0"

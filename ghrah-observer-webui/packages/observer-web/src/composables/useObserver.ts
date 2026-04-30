@@ -15,7 +15,7 @@ import {
   useHitlStore,
   useManifestsStore,
 } from "@ghrah/observer-core";
-import type { AbilityDefinitionPayload, AgentConfigPayload } from "@ghrah/protocol";
+import type { AgentConfigPayload } from "@ghrah/protocol";
 import { ref, shallowRef } from "vue";
 
 const client = shallowRef<ObserverClient | null>(null);
@@ -84,8 +84,8 @@ export function useObserver() {
     }
   }
 
-  async function spawnAgent(config: AgentConfigPayload, abilities?: AbilityDefinitionPayload[]) {
-    return withClient((c) => c.spawnAgent(config, abilities ?? null));
+  async function spawnAgent(config: AgentConfigPayload, manifestRef?: string | null) {
+    return withClient((c) => c.spawnAgent(config, null, manifestRef ?? null));
   }
 
   async function terminateAgent(name: string) {

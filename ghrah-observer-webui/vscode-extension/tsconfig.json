@@ -4,7 +4,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "lib": ["ES2022"],
-    "types": ["vscode"]
+    "types": ["vscode", "node"]
   },
   "include": ["src"]
 }

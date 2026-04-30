@@ -1,0 +1,50 @@
+<script setup lang="ts">
+import type { AgentManifestInfo } from "@ghrah/observer-core";
+
+defineProps<{
+  manifest: AgentManifestInfo;
+  selected: boolean;
+}>();
+
+defineEmits<{
+  select: [];
+  spawn: [];
+  edit: [];
+  delete: [];
+}>();
+</script>
+
+<template>
+  <div
+    :class="[
+      'p-3 rounded border cursor-pointer transition-colors',
+      selected
+        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900 dark:border-blue-400'
+        : 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-600',
+    ]"
+    @click="$emit('select')"
+  >
+    <div class="flex items-center justify-between mb-1">
+      <span class="font-medium text-sm truncate">{{ manifest.title || manifest.name }}</span>
+      <span class="badge bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs">{{ manifest.namespace }}</span>
+    </div>
+    <p v-if="manifest.description" class="text-xs text-gray-500 dark:text-gray-400 truncate mb-2">{{ manifest.description }}</p>
+    <div v-if="manifest.ability_refs.length > 0" class="flex flex-wrap gap-1">
+      <span
+        v-for="ref in manifest.ability_refs.slice(0, 5)"
+        :key="ref"
+        class="badge bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-300 text-xs"
+      >
+        {{ ref.split('.').pop() }}
+      </span>
+      <span v-if="manifest.ability_refs.length > 5" class="text-xs text-gray-400">
+        +{{ manifest.ability_refs.length - 5 }}
+      </span>
+    </div>
+    <div class="flex gap-1 mt-2">
+      <button class="btn-primary text-xs px-2 py-0.5" @click.stop="$emit('spawn')">Spawn</button>
+      <button class="btn-secondary text-xs px-2 py-0.5" @click.stop="$emit('edit')">Edit YAML</button>
+      <button class="btn-danger text-xs px-2 py-0.5" @click.stop="$emit('delete')">Delete</button>
+    </div>
+  </div>
+</template>

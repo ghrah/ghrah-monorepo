@@ -52,9 +52,11 @@ export class ObserverClient extends GatewayClient {
   async spawnAgent(
     config: AgentConfigPayload,
     abilities?: AbilityDefinitionPayload[] | null,
+    manifestRef?: string | null,
   ): Promise<CommandResultPayload> {
     const payload: Record<string, unknown> = { config };
     if (abilities != null) payload["abilities"] = abilities;
+    if (manifestRef != null) payload["manifest_ref"] = manifestRef;
 
     const msg: GatewayMessage = {
       type: CommandType.SPAWN_AGENT,

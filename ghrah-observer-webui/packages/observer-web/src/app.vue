@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from "vue";
+import { useRoute } from "vue-router";
 import { useObserver } from "@/composables/useObserver";
 
+const route = useRoute();
 const { connection, error, autoConnect, disconnect } = useObserver();
 
 let retryTimer: ReturnType<typeof setInterval> | null = null;
@@ -62,6 +64,10 @@ const statusText: Record<string, string> = {
           {{ statusText[connection.state] }}
         </span>
       </div>
+      <nav class="flex gap-1 text-sm">
+        <RouterLink to="/" :class="['px-3 py-1 rounded transition-colors', route.path === '/' ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800']">Dashboard</RouterLink>
+        <RouterLink to="/config" :class="['px-3 py-1 rounded transition-colors', route.path.startsWith('/config') ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800']">Config</RouterLink>
+      </nav>
       <div class="flex items-center gap-2 text-sm">
         <span class="text-gray-500 dark:text-gray-400 font-mono text-xs">{{ connection.gatewayUrl }}</span>
         <button

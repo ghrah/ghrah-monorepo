@@ -10,8 +10,23 @@ const router = createRouter({
     },
     {
       path: "/config",
-      name: "config",
       component: () => import("./pages/config.vue"),
+      children: [
+        {
+          path: "",
+          redirect: "/config/agents",
+        },
+        {
+          path: "agents",
+          name: "config-agents",
+          component: () => import("./components/config/agent-config-page.vue"),
+        },
+        {
+          path: "abilities",
+          name: "config-abilities",
+          component: () => import("./components/config/ability-config-page.vue"),
+        },
+      ],
     },
     {
       path: "/changes",
