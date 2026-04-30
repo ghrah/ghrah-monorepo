@@ -39,7 +39,6 @@ def store(tmp_path: Path) -> ManifestStore:
 def _make_service_with_store(store: ManifestStore) -> MagicMock:
     svc = MagicMock()
     svc._manifest_store = store
-    from ghrah.subject.service import SubjectService
 
     return svc
 

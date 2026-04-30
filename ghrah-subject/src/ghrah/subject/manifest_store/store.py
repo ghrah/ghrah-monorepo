@@ -82,6 +82,13 @@ class ManifestStore:
         content = path.read_text(encoding="utf-8")
         return parse_ability_manifest(content)
 
+    def get_ability_source(self, full_name: str) -> str:
+        """返回 Ability Manifest 的原始 YAML 源文本。"""
+        path = self._ability_path(full_name)
+        if not path.exists():
+            raise ManifestNotFoundError(f"Ability manifest not found: {full_name}")
+        return path.read_text(encoding="utf-8")
+
     def load_ability(self, full_name: str) -> AbilityManifest:
         """ManifestStoreProtocol.load_ability 委托给 get_ability。"""
         return self.get_ability(full_name)
@@ -113,6 +120,13 @@ class ManifestStore:
             raise ManifestNotFoundError(f"Agent manifest not found: {full_name}")
         content = path.read_text(encoding="utf-8")
         return parse_agent_manifest(content)
+
+    def get_agent_source(self, full_name: str) -> str:
+        """返回 Agent Manifest 的原始 YAML 源文本。"""
+        path = self._agent_path(full_name)
+        if not path.exists():
+            raise ManifestNotFoundError(f"Agent manifest not found: {full_name}")
+        return path.read_text(encoding="utf-8")
 
     def load_agent(self, full_name: str) -> AgentManifest:
         """ManifestStoreProtocol.load_agent 委托给 get_agent。"""

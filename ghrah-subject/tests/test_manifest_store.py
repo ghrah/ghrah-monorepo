@@ -214,6 +214,17 @@ class TestManifestStoreAbilityCRUD:
         with pytest.raises(ManifestNotFoundError):
             store.get_ability("ghrah.fs.nonexistent")
 
+    def test_get_ability_source(self, store: ManifestStore) -> None:
+        store.put_ability("ghrah.fs.read_file", VALID_ABILITY_YAML)
+        source = store.get_ability_source("ghrah.fs.read_file")
+        assert isinstance(source, str)
+        assert "ghrah.fs" in source
+        assert "read_file" in source
+
+    def test_get_ability_source_nonexistent(self, store: ManifestStore) -> None:
+        with pytest.raises(ManifestNotFoundError):
+            store.get_ability_source("ghrah.fs.nonexistent")
+
 
 class TestManifestStoreAgentCRUD:
     def test_put_and_get_agent(self, store: ManifestStore) -> None:
@@ -262,6 +273,17 @@ class TestManifestStoreAgentCRUD:
     def test_put_agent_wrong_type_raises(self, store: ManifestStore) -> None:
         with pytest.raises(ManifestValidationError):
             store.put_agent("ghrah.fs.read_file", VALID_ABILITY_YAML)
+
+    def test_get_agent_source(self, store: ManifestStore) -> None:
+        store.put_agent("my_project.dev_agent", VALID_AGENT_YAML)
+        source = store.get_agent_source("my_project.dev_agent")
+        assert isinstance(source, str)
+        assert "my_project" in source
+        assert "dev_agent" in source
+
+    def test_get_agent_source_nonexistent(self, store: ManifestStore) -> None:
+        with pytest.raises(ManifestNotFoundError):
+            store.get_agent_source("my_project.nonexistent")
 
 
 class TestManifestStorePathMapping:
@@ -406,6 +428,9 @@ class TestManifestServiceCommand:
         )
         assert result["success"] is True
         assert result["data"]["manifest"]["manifest"] == "ability"
+        assert "source" in result["data"]
+        assert isinstance(result["data"]["source"], str)
+        assert "ghrah.fs" in result["data"]["source"]
 
     def test_get_ability_not_found(self, store: ManifestStore) -> None:
         result = handle_manifest_command(
@@ -422,6 +447,8 @@ class TestManifestServiceCommand:
         )
         assert result["success"] is True
         assert result["data"]["full_name"] == "ghrah.fs.read_file"
+        assert "manifest" in result["data"]
+        assert "source" in result["data"]
 
     def test_put_ability_duplicate(self, store: ManifestStore) -> None:
         handle_manifest_command(
@@ -480,6 +507,9 @@ class TestManifestServiceCommand:
         )
         assert result["success"] is True
         assert result["data"]["manifest"]["manifest"] == "agent"
+        assert "source" in result["data"]
+        assert isinstance(result["data"]["source"], str)
+        assert "my_project" in result["data"]["source"]
 
     def test_put_agent(self, store: ManifestStore) -> None:
         result = handle_manifest_command(
@@ -488,6 +518,8 @@ class TestManifestServiceCommand:
             store,
         )
         assert result["success"] is True
+        assert "manifest" in result["data"]
+        assert "source" in result["data"]
 
     def test_delete_agent(self, store: ManifestStore) -> None:
         store.put_agent("my_project.dev_agent", VALID_AGENT_YAML)

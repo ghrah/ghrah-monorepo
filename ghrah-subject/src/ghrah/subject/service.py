@@ -606,9 +606,18 @@ class SubjectService:
             if event_type is not None:
                 full_name = result.get("data", {}).get("full_name", "")
                 namespace = full_name.rsplit(".", 1)[0] if "." in full_name else ""
+                event_payload: dict[str, Any] = {
+                    "full_name": full_name,
+                    "namespace": namespace,
+                }
+                data = result.get("data", {})
+                if "manifest" in data:
+                    event_payload["manifest"] = data["manifest"]
+                if "source" in data:
+                    event_payload["source"] = data["source"]
                 event_msg = GatewayMessage(
                     type=event_type,
-                    payload={"full_name": full_name, "namespace": namespace},
+                    payload=event_payload,
                 )
                 try:
                     await self._ws.send(event_msg.model_dump_json())
