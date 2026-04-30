@@ -88,6 +88,7 @@ class ActionChainLedger:
                 agent_name=agent_name,
                 branches=data.get("branches", {}),
                 current_state=data.get("current_state", {}),
+                active_session_id=data.get("active_session_id", ""),
             )
         else:
             self._chain_metas[agent_name] = ChainMeta(
@@ -134,6 +135,7 @@ class ActionChainLedger:
         agent_name: str,
         branches: dict[str, str],
         current_state: dict[str, Any],
+        active_session_id: str = "",
     ) -> None:
         result = await self._persistence.handle_command(
             "persist_save_chain_meta",
@@ -141,6 +143,7 @@ class ActionChainLedger:
                 "agent_name": agent_name,
                 "branches": branches,
                 "current_state": current_state,
+                "active_session_id": active_session_id,
             },
         )
         if not result.get("success", False):
@@ -154,6 +157,7 @@ class ActionChainLedger:
                 agent_name=agent_name,
                 branches=branches,
                 current_state=current_state,
+                active_session_id=active_session_id,
             )
 
             if agent_name in self._chains:

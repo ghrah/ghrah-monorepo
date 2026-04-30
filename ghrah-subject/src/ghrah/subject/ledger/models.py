@@ -20,6 +20,7 @@ class LedgerNode(BaseModel):
     id: str
     parent_id: str | None = None
     agent_name: str = ""
+    session_id: str = ""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     iteration: int = 0
     ability_names: list[str] = Field(default_factory=list)
@@ -51,6 +52,7 @@ class ChainMeta(BaseModel):
     agent_name: str
     branches: dict[str, str] = Field(default_factory=dict)
     current_state: dict[str, Any] = Field(default_factory=dict)
+    active_session_id: str = ""
 
 
 class DAGEntry(BaseModel):

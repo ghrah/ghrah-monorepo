@@ -13,6 +13,10 @@ Subject 的 SubjectPersistenceService 接收命令，委托给 SqliteBackend 执
 - persist_load_messages → 加载消息
 - persist_delete_chain → 删除链
 - persist_list_agents → 列出 agents
+- persist_save_session → 保存 session
+- persist_load_session → 加载 session
+- persist_list_sessions → 列出 sessions
+- persist_delete_sessions → 删除 sessions
 """
 
 from __future__ import annotations
@@ -39,6 +43,10 @@ _PERSIST_COMMANDS = frozenset({
     "persist_load_messages",
     "persist_delete_chain",
     "persist_list_agents",
+    "persist_save_session",
+    "persist_load_session",
+    "persist_list_sessions",
+    "persist_delete_sessions",
 })
 
 
@@ -169,7 +177,8 @@ async def _handle_save_chain_meta(
 
     branches: dict[str, str] = payload.get("branches", {})
     current_state: dict[str, Any] = payload.get("current_state", {})
-    await backend.save_chain_meta(agent_name, branches, current_state)
+    active_session_id: str = payload.get("active_session_id", "")
+    await backend.save_chain_meta(agent_name, branches, current_state, active_session_id)
     return {"success": True}
 
 
@@ -184,8 +193,15 @@ async def _handle_load_chain_meta(
     if result is None:
         return {"success": True, "data": None}
 
-    branches, current_state = result
-    return {"success": True, "data": {"branches": branches, "current_state": current_state}}
+    branches, active_session_id, current_state = result
+    return {
+        "success": True,
+        "data": {
+            "branches": branches,
+            "active_session_id": active_session_id,
+            "current_state": current_state,
+        },
+    }
 
 
 async def _handle_save_messages(
@@ -238,6 +254,62 @@ async def _handle_list_agents(
     return {"success": True, "data": {"agents": agents}}
 
 
+async def _handle_save_session(
+    backend: SqliteBackend, payload: dict[str, Any]
+) -> dict[str, Any]:
+    from ghrah.context.persistence.serialization import deserialize_session
+
+    session_data = payload.get("session")
+    if session_data is None:
+        return {"success": False, "error": "Missing 'session' in payload"}
+
+    session = deserialize_session(session_data)
+    await backend.save_session(session)
+    return {"success": True}
+
+
+async def _handle_load_session(
+    backend: SqliteBackend, payload: dict[str, Any]
+) -> dict[str, Any]:
+    from ghrah.context.persistence.serialization import serialize_session
+
+    session_id = payload.get("session_id")
+    if not session_id:
+        return {"success": False, "error": "Missing 'session_id' in payload"}
+
+    session = await backend.load_session(session_id)
+    if session is None:
+        return {"success": True, "data": {"session": None}}
+
+    serialized = serialize_session(session)
+    return {"success": True, "data": {"session": serialized}}
+
+
+async def _handle_list_sessions(
+    backend: SqliteBackend, payload: dict[str, Any]
+) -> dict[str, Any]:
+    from ghrah.context.persistence.serialization import serialize_session
+
+    agent_name = payload.get("agent_name")
+    if not agent_name:
+        return {"success": False, "error": "Missing 'agent_name' in payload"}
+
+    sessions = await backend.list_sessions(agent_name)
+    serialized = [serialize_session(s) for s in sessions]
+    return {"success": True, "data": {"sessions": serialized}}
+
+
+async def _handle_delete_sessions(
+    backend: SqliteBackend, payload: dict[str, Any]
+) -> dict[str, Any]:
+    agent_name = payload.get("agent_name")
+    if not agent_name:
+        return {"success": False, "error": "Missing 'agent_name' in payload"}
+
+    await backend.delete_sessions(agent_name)
+    return {"success": True}
+
+
 _HANDLER_TYPE = Callable[[SqliteBackend, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 _HANDLERS: dict[str, _HANDLER_TYPE] = {
@@ -250,4 +322,8 @@ _HANDLERS: dict[str, _HANDLER_TYPE] = {
     "persist_load_messages": _handle_load_messages,
     "persist_delete_chain": _handle_delete_chain,
     "persist_list_agents": _handle_list_agents,
+    "persist_save_session": _handle_save_session,
+    "persist_load_session": _handle_load_session,
+    "persist_list_sessions": _handle_list_sessions,
+    "persist_delete_sessions": _handle_delete_sessions,
 }

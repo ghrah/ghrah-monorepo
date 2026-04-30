@@ -73,6 +73,10 @@ _PERSIST_COMMANDS = frozenset({
     "persist_load_messages",
     "persist_delete_chain",
     "persist_list_agents",
+    "persist_save_session",
+    "persist_load_session",
+    "persist_list_sessions",
+    "persist_delete_sessions",
 })
 
 _WORKSPACE_COMMANDS = frozenset({
