@@ -34,13 +34,14 @@ def _safe_int(value: str | None, default: int | None, name: str) -> int | None:
 class HITLPolicyConfig:
     """HITL 权限策略配置。
 
-    控制哪些 Ability 操作需要人工审批。
+    运行时覆盖层，用于收紧 manifest 声明的权限：
+    - auto_approve_abilities：管理员强制放行的能力（覆盖 manifest 的 require_hitl=True）
+    - require_approval_by_default：对未在 manifest 中注册的能力的兜底策略
+    - allowed_paths：允许访问的路径白名单（用于文件系统权限检查）
+    - workspace_root：工作区根路径，此路径下的操作自动放行
 
-    Attributes:
-        auto_approve_abilities: 自动放行的 Ability 名称列表（无需 HITL 审批）
-        require_approval_by_default: 默认是否需要审批，True 表示未明确放行的操作都需要审批
-        allowed_paths: 允许访问的路径白名单（用于文件系统权限检查）
-        workspace_root: 工作区根路径，此路径下的操作自动放行
+    注意：能力的 require_hitl/fs_write/fs_read_only/shell_access 标记
+    从 manifest PermissionFlags 中获取，不再在此配置中指定。
     """
 
     auto_approve_abilities: list[str] = field(default_factory=list)

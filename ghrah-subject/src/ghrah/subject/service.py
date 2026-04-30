@@ -36,7 +36,9 @@ from ghrah.gateway.protocol import (
     SystemType,
     generate_request_id,
 )
+from ghrah.manifest.builtins import load_all_builtin_manifests
 from ghrah.manifest.resolver import ManifestResolver
+from ghrah.manifest.types import PermissionFlags
 from ghrah.subject.ability_runner import AbilityRunner, AbilityRunnerConfig
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
@@ -159,18 +161,82 @@ class SubjectService:
         self._manifest_store: ManifestStore | None = None
 
     async def start(self) -> None:
-        """启动服务：初始化子系统，连接 Gateway，进入消息循环。"""
+        """启动服务：初始化子系统，连接 Gateway，进入消息循环。
+
+        仅连接一次，连接失败则抛出异常。如需自动重连，请使用 run_forever()。
+        """
+        await self._init_subsystems()
+        await self._connect_gateway()
+        self._recv_task = asyncio.create_task(self._message_loop())
+        logger.info("SubjectService started")
+
+    async def run_forever(self) -> None:
+        """持续运行，断线自动重连。
+
+        初始化子系统后进入重连循环：连接 Gateway → 消息循环 →
+        断线后等待 reconnect_interval → 重新连接。
+        仅在收到 asyncio.CancelledError 或 stop() 被调用时退出。
+        """
+        await self._init_subsystems()
+        url = self._build_gateway_url()
+        reconnect_interval = self._config.gateway.reconnect_interval
+        self._running = True
+        first_connect = True
+
+        while self._running:
+            try:
+                self._ws = await websockets.connect(
+                    url,
+                    ping_interval=self._config.gateway.ping_interval,
+                    ping_timeout=10,
+                )
+                if first_connect:
+                    logger.info("SubjectService connected to Gateway at %s", url)
+                    first_connect = False
+                else:
+                    logger.info("SubjectService reconnected to Gateway at %s", url)
+                    self._pending_requests.clear()
+                self._running = True
+                await self._message_loop()
+            except (websockets.ConnectionClosed, OSError, TimeoutError) as e:
+                self._ws = None
+                if self._running:
+                    logger.warning(
+                        "SubjectService disconnected: %s. Reconnecting in %.1fs...",
+                        e,
+                        reconnect_interval,
+                    )
+                    await asyncio.sleep(reconnect_interval)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self._ws = None
+                if self._running:
+                    logger.error(
+                        "SubjectService unexpected error: %s. Reconnecting in %.1fs...",
+                        e,
+                        reconnect_interval,
+                    )
+                    await asyncio.sleep(reconnect_interval)
+            else:
+                self._ws = None
+                if self._running:
+                    logger.warning(
+                        "SubjectService connection closed cleanly. Reconnecting in %.1fs...",
+                        reconnect_interval,
+                    )
+                    await asyncio.sleep(reconnect_interval)
+
+    async def _init_subsystems(self) -> None:
+        """初始化所有子系统。"""
         logger.info("SubjectService starting...")
 
-        # 初始化持久化
         self._persistence = SubjectPersistenceService(db_path=self._config.db_path)
         await self._persistence.start()
 
-        # 初始化 ActionChain 分类账
         self._ledger = ActionChainLedger(self._persistence)
         await self._ledger.start()
 
-        # 初始化沙箱和工作区管理
         sandbox_config = SandboxExecutorConfig(
             default_timeout=self._config.gateway.command_timeout,
         )
@@ -185,25 +251,30 @@ class SubjectService:
         )
         await self._workspace_mgr.start()
 
-        # 初始化 HITL 子系统
+        self._manifest_store = ManifestStore(self._config.manifest_root)
+        self._manifest_store.ensure_dirs()
+        ensure_builtins(self._manifest_store)
+
+        manifest_permissions = self._load_manifest_permissions()
+
         hitl_policy = HITLPolicy(
             auto_approve_abilities=self._config.hitl_policy.auto_approve_abilities,
             require_approval_by_default=self._config.hitl_policy.require_approval_by_default,
             workspace_root=self._config.hitl_policy.workspace_root
             or self._config.workspace_root,
             allowed_paths=self._config.hitl_policy.allowed_paths or None,
+            manifest_permissions=manifest_permissions,
         )
         self._hitl_notary = HITLNotary(hitl_policy)
 
-        # 初始化权限检查器
         self._permission_checker = PermissionChecker(
             allowed_paths=self._config.hitl_policy.allowed_paths or None,
             workspace_root=self._config.hitl_policy.workspace_root
             or self._config.workspace_root,
             require_approval=self._config.hitl_policy.require_approval_by_default,
+            manifest_permissions=manifest_permissions,
         )
 
-        # 初始化 AbilityRunner
         ability_config = AbilityRunnerConfig(
             hitl_timeout=self._config.gateway.command_timeout,
         )
@@ -215,17 +286,18 @@ class SubjectService:
         self._ability_runner.bind_hitl_broadcast(self._on_hitl_promise_created)
         self._ability_runner.bind_workspace_resolver(self._resolve_workspace_path)
 
-        # 初始化 ManifestStore
         self._manifest_store = ManifestStore(self._config.manifest_root)
         self._manifest_store.ensure_dirs()
         ensure_builtins(self._manifest_store)
 
-        # 连接 Gateway
+    async def _connect_gateway(self) -> None:
+        """连接 Gateway（单次尝试，失败抛出异常）。"""
         url = self._build_gateway_url()
         try:
             self._ws = await websockets.connect(
                 url,
                 ping_interval=self._config.gateway.ping_interval,
+                ping_timeout=10,
             )
             self._running = True
             logger.info("SubjectService connected to Gateway at %s", url)
@@ -233,10 +305,6 @@ class SubjectService:
             logger.error("Failed to connect to Gateway: %s", e)
             await self.stop()
             raise
-
-        # 启动消息循环
-        self._recv_task = asyncio.create_task(self._message_loop())
-        logger.info("SubjectService started")
 
     async def stop(self) -> None:
         """优雅关闭所有子系统。"""
@@ -739,6 +807,47 @@ class SubjectService:
         ws_path = os.path.join(self._workspace_mgr.root_path, agent_name)
         if os.path.isdir(ws_path):
             return ws_path
+
+    def _load_manifest_permissions(self) -> dict[str, PermissionFlags]:
+        """从 ManifestStore 和 builtin manifests 加载能力权限声明。
+
+        将 manifest 的 PermissionFlags 按 ability handler 名（简名）
+        建立索引，供 HITLPolicy 和 PermissionChecker 消费。
+
+        Returns:
+            dict[str, PermissionFlags]，key 为能力简名
+            （如 "conversation"），value 为对应权限标志
+        """
+        permissions: dict[str, PermissionFlags] = {}
+
+        # 从 builtin manifests 加载
+        builtins = load_all_builtin_manifests()
+        for full_name, manifest in builtins.items():
+            handler = manifest.implementation.handler
+            if handler:
+                permissions[handler] = manifest.metadata.permissions
+
+        # 从 ManifestStore 加载用户自定义 manifests（覆盖 builtin）
+        if self._manifest_store is not None:
+            try:
+                ability_names = self._manifest_store.list_abilities()
+                for full_name in ability_names:
+                    try:
+                        manifest = self._manifest_store.get_ability(full_name)
+                        handler = manifest.implementation.handler
+                        if handler:
+                            permissions[handler] = manifest.metadata.permissions
+                    except Exception:
+                        logger.warning("Failed to load manifest: %s", full_name)
+            except Exception:
+                logger.warning("Failed to list abilities from ManifestStore")
+
+        logger.info(
+            "Loaded manifest permissions for %d abilities: %s",
+            len(permissions),
+            list(permissions.keys()),
+        )
+        return permissions
         return None
 
     async def _send_gateway_message(self, msg: GatewayMessage | dict[str, Any]) -> None:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+from ghrah.manifest.types import PermissionFlags
+
 from ghrah.subject.permission_checker import (
     PermissionChecker,
     PermissionDecision,
@@ -90,45 +92,136 @@ class TestPermissionCheckerWritePaths:
         assert "Permission denied" in status
 
 
-class TestPermissionCheckerCheckAbility:
-    def test_write_ability_allowed_path(self) -> None:
-        checker = PermissionChecker(allowed_paths=["/tmp/safe"])
+class TestPermissionCheckerManifestAbilities:
+    def test_conversation_no_path_concern(self) -> None:
+        manifest_perms = {
+            "conversation": PermissionFlags(),
+        }
+        checker = PermissionChecker(manifest_permissions=manifest_perms)
+        verdict = checker.check_ability("conversation")
+        assert verdict.decision == PermissionDecision.ALLOW
+        assert verdict.reason == "no_path_security_concern"
+
+    def test_end_task_no_path_concern(self) -> None:
+        manifest_perms = {
+            "end_task": PermissionFlags(),
+        }
+        checker = PermissionChecker(manifest_permissions=manifest_perms)
+        verdict = checker.check_ability("end_task")
+        assert verdict.decision == PermissionDecision.ALLOW
+        assert verdict.reason == "no_path_security_concern"
+
+    def test_read_file_manifest_read_path(self) -> None:
+        manifest_perms = {
+            "read_file": PermissionFlags(fs_read_only=True),
+        }
+        checker = PermissionChecker(
+            allowed_paths=["/tmp/data"],
+            manifest_permissions=manifest_perms,
+        )
+        verdict = checker.check_ability(
+            "read_file", {"file_path": "/tmp/data/input.txt"}
+        )
+        assert verdict.decision == PermissionDecision.ALLOW
+
+    def test_read_file_manifest_denied_path(self) -> None:
+        manifest_perms = {
+            "read_file": PermissionFlags(
+                fs_read_only=True,
+                denied_paths=["/etc/shadow"],
+            ),
+        }
+        checker = PermissionChecker(
+            allowed_paths=["/tmp/data"],
+            manifest_permissions=manifest_perms,
+        )
+        verdict = checker.check_ability(
+            "read_file", {"file_path": "/etc/shadow"}
+        )
+        assert verdict.decision == PermissionDecision.DENY
+        assert "denied by manifest" in verdict.reason.lower()
+
+    def test_write_file_manifest_allowed_path(self) -> None:
+        manifest_perms = {
+            "write_file": PermissionFlags(fs_write=True, require_hitl=True),
+        }
+        checker = PermissionChecker(
+            allowed_paths=["/tmp/safe"],
+            manifest_permissions=manifest_perms,
+        )
         verdict = checker.check_ability(
             "write_file", {"file_path": "/tmp/safe/output.txt"}
         )
         assert verdict.decision == PermissionDecision.ALLOW
 
-    def test_write_ability_outside_path_require_hitl(self) -> None:
+    def test_write_file_manifest_outside_path_require_hitl(self) -> None:
+        manifest_perms = {
+            "write_file": PermissionFlags(fs_write=True, require_hitl=True),
+        }
         checker = PermissionChecker(
-            allowed_paths=["/tmp/safe"], require_approval=True
+            allowed_paths=["/tmp/safe"], require_approval=True,
+            manifest_permissions=manifest_perms,
         )
         verdict = checker.check_ability(
             "write_file", {"file_path": "/etc/config.ini"}
         )
         assert verdict.decision == PermissionDecision.REQUIRE_HITL
 
-    def test_write_ability_outside_path_denied(self) -> None:
+    def test_write_file_manifest_outside_path_denied(self) -> None:
+        manifest_perms = {
+            "write_file": PermissionFlags(fs_write=True, require_hitl=True),
+        }
         checker = PermissionChecker(
-            allowed_paths=["/tmp/safe"], require_approval=False
+            allowed_paths=["/tmp/safe"], require_approval=False,
+            manifest_permissions=manifest_perms,
         )
         verdict = checker.check_ability(
             "write_file", {"file_path": "/etc/config.ini"}
         )
         assert verdict.decision == PermissionDecision.DENY
 
-    def test_read_ability_allowed_path(self) -> None:
-        checker = PermissionChecker(allowed_paths=["/tmp/data"])
+    def test_write_file_manifest_denied_path(self) -> None:
+        manifest_perms = {
+            "write_file": PermissionFlags(
+                fs_write=True,
+                require_hitl=True,
+                denied_paths=["/etc"],
+            ),
+        }
+        checker = PermissionChecker(
+            allowed_paths=["/tmp/safe"],
+            manifest_permissions=manifest_perms,
+        )
         verdict = checker.check_ability(
-            "read_file", {"file_path": "/tmp/data/input.txt"}
+            "write_file", {"file_path": "/etc/config.ini"}
+        )
+        assert verdict.decision == PermissionDecision.DENY
+        assert "denied by manifest" in verdict.reason.lower()
+
+    def test_execute_command_manifest_safe_command(self) -> None:
+        manifest_perms = {
+            "execute_command": PermissionFlags(shell_access=True, require_hitl=True),
+        }
+        checker = PermissionChecker(manifest_permissions=manifest_perms)
+        verdict = checker.check_ability(
+            "execute_command", {"command": "ls -la", "working_dir": "/tmp"}
         )
         assert verdict.decision == PermissionDecision.ALLOW
 
-    def test_read_ability_outside_path_denied(self) -> None:
-        checker = PermissionChecker(allowed_paths=["/tmp/data"])
+    def test_execute_command_manifest_denied_command(self) -> None:
+        manifest_perms = {
+            "execute_command": PermissionFlags(
+                shell_access=True,
+                require_hitl=True,
+                denied_commands=["rm -rf"],
+            ),
+        }
+        checker = PermissionChecker(manifest_permissions=manifest_perms)
         verdict = checker.check_ability(
-            "read_file", {"file_path": "/etc/passwd"}
+            "execute_command", {"command": "rm -rf /"}
         )
         assert verdict.decision == PermissionDecision.DENY
+        assert "denied by manifest" in verdict.reason.lower()
 
     def test_unknown_ability_returns_allow(self) -> None:
         checker = PermissionChecker(require_approval=True)
@@ -141,41 +234,79 @@ class TestPermissionCheckerCheckAbility:
         verdict = checker.check_ability("unknown_ability")
         assert verdict.decision == PermissionDecision.ALLOW
 
-    def test_move_file_checks_both_paths_src_denied(self) -> None:
+
+class TestPermissionCheckerLegacyCompat:
+    def test_no_manifest_write_ability_path_check(self) -> None:
         checker = PermissionChecker(
-            allowed_paths=["/tmp/dest"], require_approval=False
+            allowed_paths=["/tmp/safe"], require_approval=True,
+            manifest_permissions={},
+        )
+        verdict = checker.check_ability("write_file", {"file_path": "/tmp/safe/out.txt"})
+        assert verdict.decision == PermissionDecision.ALLOW
+        assert verdict.reason == "no_path_security_concern"
+
+    def test_move_file_checks_both_paths_src_denied(self) -> None:
+        manifest_perms = {
+            "move_file": PermissionFlags(fs_write=True, fs_read_only=True, require_hitl=True),
+        }
+        checker = PermissionChecker(
+            allowed_paths=["/tmp/dest"], require_approval=False,
+            manifest_permissions=manifest_perms,
         )
         verdict = checker.check_ability(
             "move_file",
-            {"file_path": "/etc/secret", "destination_path": "/tmp/dest/file.txt"},
+            {"source_path": "/etc/secret", "destination_path": "/tmp/dest/file.txt"},
         )
         assert verdict.decision == PermissionDecision.DENY
 
     def test_move_file_checks_both_paths_dst_requires_hitl(self) -> None:
+        manifest_perms = {
+            "move_file": PermissionFlags(fs_write=True, fs_read_only=True, require_hitl=True),
+        }
         checker = PermissionChecker(
-            allowed_paths=["/tmp/src"], require_approval=True
+            allowed_paths=["/tmp/src"], require_approval=True,
+            manifest_permissions=manifest_perms,
         )
         verdict = checker.check_ability(
             "move_file",
-            {"file_path": "/tmp/src/file.txt", "destination_path": "/etc/destination"},
+            {"source_path": "/tmp/src/file.txt", "destination_path": "/etc/destination"},
         )
         assert verdict.decision == PermissionDecision.REQUIRE_HITL
 
     def test_move_file_both_paths_allowed(self) -> None:
-        checker = PermissionChecker(allowed_paths=["/tmp/safe"])
+        manifest_perms = {
+            "move_file": PermissionFlags(fs_write=True, fs_read_only=True, require_hitl=True),
+        }
+        checker = PermissionChecker(
+            allowed_paths=["/tmp/safe"],
+            manifest_permissions=manifest_perms,
+        )
         verdict = checker.check_ability(
             "move_file",
-            {"file_path": "/tmp/safe/src.txt", "destination_path": "/tmp/safe/dst.txt"},
+            {"source_path": "/tmp/safe/src.txt", "destination_path": "/tmp/safe/dst.txt"},
         )
         assert verdict.decision == PermissionDecision.ALLOW
 
     def test_no_tool_args_write_ability_returns_allow(self) -> None:
-        checker = PermissionChecker(require_approval=True)
+        manifest_perms = {
+            "write_file": PermissionFlags(fs_write=True, require_hitl=True),
+        }
+        checker = PermissionChecker(
+            require_approval=True,
+            manifest_permissions=manifest_perms,
+        )
         verdict = checker.check_ability("write_file")
         assert verdict.decision == PermissionDecision.ALLOW
+        assert verdict.reason == "no_path_security_concern"
 
     def test_no_tool_args_read_ability_returns_allow(self) -> None:
-        checker = PermissionChecker(require_approval=True)
+        manifest_perms = {
+            "read_file": PermissionFlags(fs_read_only=True),
+        }
+        checker = PermissionChecker(
+            require_approval=True,
+            manifest_permissions=manifest_perms,
+        )
         verdict = checker.check_ability("read_file")
         assert verdict.decision == PermissionDecision.ALLOW
 

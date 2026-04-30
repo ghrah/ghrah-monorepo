@@ -6,6 +6,7 @@ import pytest
 from ghrah.abilities import AbilityRegistry, ActionOutcome, ActionResult
 from ghrah.abilities.base import Ability
 from ghrah.abilities.context import AbilityExecutionContext
+from ghrah.manifest.types import PermissionFlags
 
 from ghrah.subject.ability_runner import AbilityRunner, AbilityRunnerConfig
 from ghrah.subject.hitl.notary import HITLNotary
@@ -136,6 +137,7 @@ class TestAbilityRunnerPermissionCheck:
         checker = PermissionChecker(
             allowed_paths=["/tmp/safe"],
             require_approval=False,
+            manifest_permissions={"read_file": PermissionFlags(fs_read_only=True)},
         )
         runner = AbilityRunner(hitl_notary=notary, permission_checker=checker)
 

@@ -1,16 +1,17 @@
 """Subject 端权限检查器。
 
-迁移自 Core 的 FSPermissionChecker，适配 Subject 端执行环境。
-与 Core 版本的关键区别：
-- 增加 PermissionDecision 枚举，明确区分 ALLOW / DENY / REQUIRE_HITL
-- 提供 check_ability() 综合方法，用于 AbilityRunner 集成
-- 路径匹配使用 is_subpath 严格匹配（与 HITLPolicy 保持一致）
-- 支持 execute_command 命令安全检查（委托 Core 的 CommandSafetyChecker）
+基于 manifest PermissionFlags 进行权限判断，替代原先硬编码的能力分类集合。
 
 权限模型：
-- 读取操作：allowed_paths 白名单 + workspace_root 控制硬性允许/拒绝
-- 写入操作：白名单内自动批准，白名单外需要 HITL 审批或拒绝
-- 命令操作：CommandSafetyChecker 分类 + 工作目录路径权限
+- manifest 权限标志（fs_write, fs_read_only, shell_access, require_hitl）决定能力分类
+- 路径权限：allowed_paths 白名单 + workspace_root 控制硬性允许/拒绝
+- 命令权限：CommandSafetyChecker 分类 + denied_commands 黑名单
+- Manifest 中声明的 denied_paths 直接拒绝
+- 未在 manifest 中注册的能力走兜底逻辑（无路径安全关注 → ALLOW）
+
+与 HITLPolicy 的职责划分：
+- PermissionChecker：硬性权限（DENY / REQUIRE_HITL / ALLOW）
+- HITLPolicy：审批策略（是否需要 HITL 审批）
 """
 
 from __future__ import annotations
@@ -18,16 +19,14 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ghrah.abilities.builtin.command_safety import (
     CommandSafetyCategory,
     CommandSafetyChecker,
 )
+from ghrah.manifest.types import PermissionFlags
 from ghrah.subject._utils import is_subpath
-
-if TYPE_CHECKING:
-    pass
 
 __all__ = ["PermissionChecker", "PermissionDecision", "PermissionVerdict"]
 
@@ -51,14 +50,15 @@ class PermissionChecker:
     统一管理 allowed_paths 白名单和 workspace_root 工作路径，
     为 AbilityRunner 提供硬性权限检查（拒绝 vs 需要 HITL vs 允许）。
 
-    支持：
-    - 文件系统 Ability：路径权限（读取/写入）
-    - 命令执行 Ability：命令安全分类 + 工作目录路径权限
-    """
+    能力分类从 manifest PermissionFlags 中获取：
+    - fs_write=True → 写入路径检查
+    - fs_read_only=True（且 fs_write=False）→ 读取路径检查
+    - shell_access=True → 命令安全检查 + 工作目录权限
+    - 均为 False → 无路径安全关注，返回 ALLOW
+    - 未在 manifest 中注册 → 返回 ALLOW（由 HITLPolicy 决定是否需要审批）
 
-    WRITE_ABILITIES = {"write_file", "edit_file", "move_file", "delete_file"}
-    READ_ABILITIES = {"read_file", "list_directory"}
-    COMMAND_ABILITIES = {"execute_command"}
+    manifest 的 denied_paths 和 denied_commands 直接作为硬性拒绝规则。
+    """
 
     def __init__(
         self,
@@ -66,11 +66,13 @@ class PermissionChecker:
         workspace_root: str | None = None,
         require_approval: bool = True,
         command_checker: CommandSafetyChecker | None = None,
+        manifest_permissions: dict[str, PermissionFlags] | None = None,
     ) -> None:
         self._allowed_paths = self._normalize_paths(allowed_paths) if allowed_paths else None
         self._workspace_root = os.path.abspath(workspace_root) if workspace_root else None
         self._require_approval = require_approval
         self._command_checker = command_checker or CommandSafetyChecker()
+        self._manifest_permissions: dict[str, PermissionFlags] = manifest_permissions or {}
 
     @staticmethod
     def _normalize_paths(paths: list[str]) -> list[str]:
@@ -92,12 +94,7 @@ class PermissionChecker:
         return self._is_in_allowed_paths(path) or self._is_in_workspace(path)
 
     def check_read_path(self, path: str) -> tuple[bool, str]:
-        """检查读取路径权限。
-
-        Returns:
-            (True, ""): 允许访问
-            (False, reason): 拒绝访问
-        """
+        """检查读取路径权限。"""
         abs_path = os.path.abspath(path)
         if self._allowed_paths is None and self._workspace_root is None:
             return True, ""
@@ -106,13 +103,7 @@ class PermissionChecker:
         return False, f"Permission denied: {path} not in allowed paths"
 
     def check_write_path(self, path: str) -> tuple[bool, str | None]:
-        """检查写入路径权限。
-
-        Returns:
-            (True, None): 自动批准
-            (True, "pending"): 需要 HITL 审批
-            (False, reason): 拒绝
-        """
+        """检查写入路径权限。"""
         abs_path = os.path.abspath(path)
         if self._allowed_paths is None and self._workspace_root is None:
             if self._require_approval:
@@ -131,31 +122,83 @@ class PermissionChecker:
     ) -> PermissionVerdict:
         """综合检查 Ability 操作权限。
 
-        写入类 Ability 检查写入路径权限；
-        读取类 Ability 检查读取路径权限；
-        命令类 Ability 检查命令安全性 + 工作目录权限；
-        其他 Ability 无路径安全关注，返回 ALLOW（由 HITLPolicy 决定是否需要 HITL）。
+        基于 manifest PermissionFlags 决定能力分类：
+        - shell_access=True → 命令安全检查
+        - fs_write=True → 写入路径检查
+        - fs_read_only=True（且非 fs_write）→ 读取路径检查
+        - 均为 False 或未注册 → 无路径安全关注，返回 ALLOW
+
+        manifest 的 denied_paths 在路径检查前优先判断（硬性拒绝）。
+        manifest 的 denied_commands 在命令检查前优先判断（硬性拒绝）。
         """
-        if ability_name in self.COMMAND_ABILITIES and tool_args:
-            return self._check_command(ability_name, tool_args)
+        manifest_perms = self._manifest_permissions.get(ability_name)
 
-        if ability_name in self.WRITE_ABILITIES and tool_args:
+        # 未在 manifest 中注册的能力：无路径安全关注
+        if manifest_perms is None:
+            return PermissionVerdict(
+                decision=PermissionDecision.ALLOW,
+                reason="no_path_security_concern",
+            )
+
+        # 命令类能力
+        if manifest_perms.shell_access and tool_args:
+            return self._check_command(ability_name, tool_args, manifest_perms)
+
+        # 写入类能力（fs_write 隐含 fs_read_only 的含义，因为 move 也读）
+        if manifest_perms.fs_write and tool_args:
             paths = self._extract_paths(ability_name, tool_args)
-            if paths:
-                return self._check_write_paths(ability_name, paths)
+            # 写入路径检查
+            write_paths = paths
+            if manifest_perms.fs_read_only and ability_name == "move_file":
+                src = tool_args.get("source_path") or tool_args.get("file_path")
+                dst = tool_args.get("destination_path")
+                write_paths = [dst] if dst else []
+                read_paths = [src] if src else []
+                for rp in read_paths:
+                    if manifest_perms.denied_paths and self._path_in_deny_list(rp, manifest_perms.denied_paths):
+                        return PermissionVerdict(
+                            decision=PermissionDecision.DENY,
+                            reason=f"Path denied by manifest: {rp}",
+                            metadata={"path": rp, "ability_name": ability_name},
+                        )
+                    allowed, reason = self.check_read_path(rp)
+                    if not allowed:
+                        return PermissionVerdict(
+                            decision=PermissionDecision.DENY,
+                            reason=reason,
+                            metadata={"path": rp, "ability_name": ability_name},
+                        )
+            return self._check_write_paths_with_deny(ability_name, write_paths, manifest_perms)
 
-        if ability_name in self.READ_ABILITIES and tool_args:
+        # 只读类能力
+        if manifest_perms.fs_read_only and tool_args:
             paths = self._extract_paths(ability_name, tool_args)
-            if paths:
-                return self._check_read_paths(ability_name, paths)
+            return self._check_read_paths_with_deny(ability_name, paths, manifest_perms)
 
+        # 其他能力（如 conversation, end_task）：无路径安全关注
         return PermissionVerdict(
             decision=PermissionDecision.ALLOW,
             reason="no_path_security_concern",
         )
 
-    def _check_write_paths(self, ability_name: str, paths: list[str]) -> PermissionVerdict:
+    def _path_in_deny_list(self, path: str, denied_paths: list[str]) -> bool:
+        """检查路径是否在 manifest denied_paths 中。"""
+        abs_path = os.path.abspath(path)
+        for denied in denied_paths:
+            if is_subpath(abs_path, os.path.abspath(denied)):
+                return True
+        return False
+
+    def _check_write_paths_with_deny(
+        self, ability_name: str, paths: list[str], manifest_perms: PermissionFlags
+    ) -> PermissionVerdict:
         for path in paths:
+            if manifest_perms.denied_paths and self._path_in_deny_list(path, manifest_perms.denied_paths):
+                return PermissionVerdict(
+                    decision=PermissionDecision.DENY,
+                    reason=f"Path denied by manifest: {path}",
+                    metadata={"path": path, "ability_name": ability_name},
+                )
             allowed, status = self.check_write_path(path)
             if not allowed:
                 return PermissionVerdict(
@@ -175,8 +218,16 @@ class PermissionChecker:
             metadata={"paths": paths, "ability_name": ability_name},
         )
 
-    def _check_read_paths(self, ability_name: str, paths: list[str]) -> PermissionVerdict:
+    def _check_read_paths_with_deny(
+        self, ability_name: str, paths: list[str], manifest_perms: PermissionFlags
+    ) -> PermissionVerdict:
         for path in paths:
+            if manifest_perms.denied_paths and self._path_in_deny_list(path, manifest_perms.denied_paths):
+                return PermissionVerdict(
+                    decision=PermissionDecision.DENY,
+                    reason=f"Path denied by manifest: {path}",
+                    metadata={"path": path, "ability_name": ability_name},
+                )
             allowed, reason = self.check_read_path(path)
             if not allowed:
                 return PermissionVerdict(
@@ -194,16 +245,9 @@ class PermissionChecker:
         self,
         ability_name: str,
         tool_args: dict[str, Any],
+        manifest_perms: PermissionFlags,
     ) -> PermissionVerdict:
-        """检查命令类 Ability 权限。
-
-        命令安全检查逻辑：
-        - 工作目录：如果在 workspace 外且不在 allowed_paths → DENY
-        - 命令安全性：委托 CommandSafetyChecker（含子命令路由）
-        - SAFE → ALLOW
-        - DANGEROUS → DENY
-        - REQUIRE_HITL → REQUIRE_HITL
-        """
+        """检查命令类 Ability 权限。"""
         command = tool_args.get("command", "")
         if not command:
             return PermissionVerdict(
@@ -211,6 +255,16 @@ class PermissionChecker:
                 reason="Empty command",
                 metadata={"ability_name": ability_name},
             )
+
+        # manifest denied_commands 优先判断
+        if manifest_perms.denied_commands:
+            for denied_cmd in manifest_perms.denied_commands:
+                if command.strip() == denied_cmd.strip() or command.strip().startswith(denied_cmd.strip() + " "):
+                    return PermissionVerdict(
+                        decision=PermissionDecision.DENY,
+                        reason=f"Command denied by manifest: {denied_cmd}",
+                        metadata={"command": command, "ability_name": ability_name},
+                    )
 
         working_dir = tool_args.get("working_dir")
         if working_dir:
@@ -247,7 +301,7 @@ class PermissionChecker:
     def _extract_paths(ability_name: str, tool_args: dict[str, Any]) -> list[str]:
         paths: list[str] = []
         if ability_name == "move_file":
-            src = tool_args.get("file_path")
+            src = tool_args.get("source_path") or tool_args.get("file_path")
             dst = tool_args.get("destination_path")
             if src:
                 paths.append(src)
@@ -258,7 +312,7 @@ class PermissionChecker:
             if wd:
                 paths.append(wd)
         else:
-            path = tool_args.get("file_path")
+            path = tool_args.get("file_path") or tool_args.get("dir_path")
             if path:
                 paths.append(path)
         return paths

@@ -10,15 +10,12 @@ from ghrah.subject.service import SubjectService
 
 
 async def run() -> None:
-    """异步入口：创建并运行 SubjectService。"""
+    """异步入口：创建并运行 SubjectService（断线自动重连）。"""
     config = SubjectConfig.from_env()
     service = SubjectService(config)
 
     try:
-        await service.start()
-        # 保持运行，直到被中断
-        while service._running:
-            await asyncio.sleep(1)
+        await service.run_forever()
     except KeyboardInterrupt:
         logger = logging.getLogger(__name__)
         logger.info("Received KeyboardInterrupt, shutting down...")
