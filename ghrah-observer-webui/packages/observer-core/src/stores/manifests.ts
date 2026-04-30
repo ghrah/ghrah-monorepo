@@ -56,7 +56,9 @@ export function extractAgentList(data: unknown): AgentManifestInfo[] | null {
   return d.agents as AgentManifestInfo[];
 }
 
-export function extractManifestEntry(data: unknown): AbilityManifestInfo | AgentManifestInfo | null {
+export function extractManifestEntry(
+  data: unknown,
+): AbilityManifestInfo | AgentManifestInfo | null {
   if (data == null || typeof data !== "object") return null;
   const d = data as Record<string, unknown>;
   if (d.manifest == null || typeof d.manifest !== "object") return null;

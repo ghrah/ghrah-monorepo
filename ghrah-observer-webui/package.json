@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "./scripts/dev.sh",
+    "dev:extension": "./scripts/dev-extension.sh",
+    "test:extension": "./scripts/test-extension.sh",
     "build": "./scripts/build.sh",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",

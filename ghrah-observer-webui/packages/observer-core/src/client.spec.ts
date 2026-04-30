@@ -1,4 +1,4 @@
-import type { AbilityDefinitionPayload } from "@ghrah/protocol";
+import type { AbilityDefinitionPayload, CommandResultPayload } from "@ghrah/protocol";
 import { ClientType, CommandType, type WebSocketLike } from "@ghrah/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObserverClient } from "./client.js";
@@ -31,7 +31,10 @@ function createClient(mockWs: MockWebSocket): ObserverClient {
   });
 }
 
+let syncSpy: ReturnType<typeof vi.spyOn<any, any>> | null = null;
+
 async function connectClient(client: ObserverClient, mockWs: MockWebSocket): Promise<void> {
+  syncSpy = vi.spyOn(client as any, "_syncInitialState").mockResolvedValue(undefined);
   const connectPromise = client.connect();
   mockWs.onopen!();
   await connectPromise;
@@ -50,6 +53,10 @@ describe("ObserverClient", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    if (syncSpy) {
+      syncSpy.mockRestore();
+      syncSpy = null;
+    }
     if (client.connected) {
       client.disconnect();
     }
@@ -294,6 +301,39 @@ describe("ObserverClient", () => {
       });
 
       await expect(wpPromise).resolves.toBeDefined();
+    });
+  });
+
+  describe("_syncInitialState", () => {
+    it("calls listAgents and listManifestAgents", async () => {
+      const listAgentsSpy = vi.spyOn(client, "listAgents").mockResolvedValue({
+        request_id: "r0",
+        success: true,
+        data: { agents: [] },
+      } satisfies CommandResultPayload);
+      const listManifestSpy = vi.spyOn(client, "listManifestAgents").mockResolvedValue({
+        request_id: "r1",
+        success: true,
+        data: { agents: [] },
+      } satisfies CommandResultPayload);
+
+      await (client as any)._syncInitialState();
+
+      expect(listAgentsSpy).toHaveBeenCalledOnce();
+      expect(listManifestSpy).toHaveBeenCalledOnce();
+    });
+
+    it("continues on listAgents failure", async () => {
+      vi.spyOn(client, "listAgents").mockRejectedValue(new Error("fail"));
+      const listManifestSpy = vi.spyOn(client, "listManifestAgents").mockResolvedValue({
+        request_id: "r1",
+        success: true,
+        data: { agents: [] },
+      } satisfies CommandResultPayload);
+
+      await (client as any)._syncInitialState();
+
+      expect(listManifestSpy).toHaveBeenCalledOnce();
     });
   });
 });

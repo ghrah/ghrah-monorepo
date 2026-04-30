@@ -97,7 +97,9 @@ describe("useManifestsStore", () => {
   it("upsertAbility updates existing entry with all fields", () => {
     const store = useManifestsStore();
     store.upsertAbility(makeAbility("ghrah.fs.read_file", { title: "old", tags: ["v1"] }));
-    store.upsertAbility(makeAbility("ghrah.fs.read_file", { title: "new", tags: ["v2", "updated"] }));
+    store.upsertAbility(
+      makeAbility("ghrah.fs.read_file", { title: "new", tags: ["v2", "updated"] }),
+    );
     const ability = store.abilities.get("ghrah.fs.read_file");
     expect(ability?.title).toBe("new");
     expect(ability?.tags).toEqual(["v2", "updated"]);

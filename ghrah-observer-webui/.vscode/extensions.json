@@ -4,6 +4,7 @@
     "vitest.explorer",
     "ms-playwright.playwright",
     "biomejs.biome",
-    "EditorConfig.EditorConfig"
+    "EditorConfig.EditorConfig",
+    "ms-vscode.extension-test-runner"
   ]
 }

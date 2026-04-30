@@ -454,6 +454,11 @@ export class ObserverClient extends GatewayClient {
     } catch {
       // 静默忽略初始同步失败
     }
+    try {
+      await this.listManifestAgents();
+    } catch {
+      // 静默忽略初始同步失败
+    }
   }
 }
 

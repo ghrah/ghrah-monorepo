@@ -43,6 +43,14 @@ export function useObserver() {
 
   async function connect(gatewayUrl?: string) {
     const url = gatewayUrl ?? connection.gatewayUrl;
+
+    if (client.value) {
+      unbind?.();
+      unbind = null;
+      await client.value.disconnect();
+      client.value = null;
+    }
+
     connection.setConnecting();
     error.value = null;
 
@@ -142,12 +150,17 @@ export function useObserver() {
   // ── Manifest: Agent ──
 
   async function listManifestAgents(namespace?: string | null) {
-    const result = await withClient((c) => c.listManifestAgents(namespace));
-    if (result?.success) {
-      const agents = extractAgentList(result.data);
-      if (agents) manifests.setAgents(agents);
+    manifests.agentsLoading = true;
+    try {
+      const result = await withClient((c) => c.listManifestAgents(namespace));
+      if (result?.success) {
+        const agents = extractAgentList(result.data);
+        if (agents) manifests.setAgents(agents);
+      }
+      return result;
+    } finally {
+      manifests.agentsLoading = false;
     }
-    return result;
   }
 
   async function getAgent(fullName: string) {

@@ -53,9 +53,11 @@ export class GatewayClient {
   protected _eventHandlers = new Map<string, Set<EventHandler>>();
   protected _systemHandlers = new Map<string, Set<EventHandler>>();
   protected _pendingRequests = new Map<string, Deferred<CommandResultPayload>>();
+  protected _requestCommandTypes = new Map<string, string>();
 
   protected _subscriptions: SubscribePayload[] = [];
   protected _foldedState = new Map<string, Record<string, unknown>>();
+  protected readonly _clientId: string;
 
   protected _onConnectedCallbacks: Array<() => void> = [];
   protected _onDisconnectedCallbacks: Array<() => void> = [];
@@ -76,6 +78,9 @@ export class GatewayClient {
     this._maxReconnectDelay = opts?.maxReconnectDelay ?? 60_000;
     this._initialReconnectDelay = opts?.initialReconnectDelay ?? 1_000;
     this._wsFactory = opts?.wsFactory ?? defaultWebSocketFactory;
+    this._clientId = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 
   get connected(): boolean {
@@ -98,6 +103,7 @@ export class GatewayClient {
     const url = this._buildUrl();
     this._running = true;
     await this._doConnect(url);
+    await this._syncInitialState();
   }
 
   async disconnect(): Promise<void> {
@@ -119,12 +125,14 @@ export class GatewayClient {
   async request(message: GatewayMessage, timeout = 30_000): Promise<CommandResultPayload> {
     const requestId = message.request_id ?? generateRequestId();
     message.request_id = requestId;
+    this._requestCommandTypes.set(requestId, message.type);
 
     const deferred = createDeferred<CommandResultPayload>();
     this._pendingRequests.set(requestId, deferred);
 
     const timer = setTimeout(() => {
       this._pendingRequests.delete(requestId);
+      this._requestCommandTypes.delete(requestId);
       deferred.reject(new TimeoutError(`Request ${requestId} timed out after ${timeout}ms`));
     }, timeout);
 
@@ -135,6 +143,7 @@ export class GatewayClient {
     } finally {
       clearTimeout(timer);
       this._pendingRequests.delete(requestId);
+      this._requestCommandTypes.delete(requestId);
     }
   }
 
@@ -180,7 +189,7 @@ export class GatewayClient {
 
   protected _buildUrl(): string {
     const sep = this._gatewayUrl.includes("?") ? "&" : "?";
-    let url = `${this._gatewayUrl}${sep}client_type=${this._clientType}`;
+    let url = `${this._gatewayUrl}${sep}client_type=${this._clientType}&client_id=${this._clientId}`;
     if (this._lastSeqId > 0) {
       url += `&last_seq_id=${this._lastSeqId}`;
     }
@@ -249,6 +258,7 @@ export class GatewayClient {
       const url = this._buildUrl();
       await this._doConnect(url);
       await this._resubscribe();
+      await this._syncInitialState();
     } catch {
       this._scheduleReconnect();
     }
@@ -266,6 +276,8 @@ export class GatewayClient {
     }
   }
 
+  protected async _syncInitialState(): Promise<void> {}
+
   protected _processMessage(raw: string): void {
     const message = parseMessage(raw);
     this._seqId++;
@@ -282,10 +294,17 @@ export class GatewayClient {
 
     if (msgType === SystemType.COMMAND_RESULT) {
       const payload = message.payload as CommandResultPayload;
-      if (payload.request_id) {
-        const deferred = this._pendingRequests.get(payload.request_id);
+      const requestId = (payload as Record<string, unknown>).request_id as string | undefined || message.request_id;
+      if (requestId) {
+        const originalCommand = this._requestCommandTypes.get(requestId);
+        if (originalCommand) {
+          (payload as Record<string, unknown>).original_command = originalCommand;
+        }
+        const deferred = this._pendingRequests.get(requestId);
         if (deferred) {
-          this._pendingRequests.delete(payload.request_id);
+          this._pendingRequests.delete(requestId);
+          this._requestCommandTypes.delete(requestId);
+          (payload as Record<string, unknown>).request_id = requestId;
           deferred.resolve(payload);
         }
       }

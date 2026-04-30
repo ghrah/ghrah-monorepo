@@ -11,7 +11,7 @@ import type {
   ManifestAbilityEventPayload,
   ManifestAgentEventPayload,
 } from "@ghrah/protocol";
-import { EventType, SystemType } from "@ghrah/protocol";
+import { CommandType, EventType, SystemType } from "@ghrah/protocol";
 import type { ObserverClient } from "./client.js";
 import { useActionChainsStore } from "./stores/action-chains.js";
 import { useAgentsStore } from "./stores/agents.js";
@@ -36,11 +36,12 @@ export function connectStores(client: ObserverClient): () => void {
 
   client.onConnected(() => {
     connection.setConnected();
-    client.listAgents();
   });
   client.onDisconnected(() => connection.setDisconnected());
   client.onReconnecting(() => connection.setReconnecting());
-  client.onReconnected(() => connection.setConnected());
+  client.onReconnected(() => {
+    connection.setConnected();
+  });
 
   client.on(EventType.AGENT_SPAWNED, (msg: GatewayMessage) =>
     agents.onAgentSpawned(msg.payload as AgentSpawnedPayload),
@@ -82,7 +83,10 @@ export function connectStores(client: ObserverClient): () => void {
     const payload = msg.payload as CommandResultPayload;
     if (!payload.success || !payload.data) return;
     const data = payload.data as Record<string, unknown>;
-    if (Array.isArray(data.agents)) {
+    const originalCommand = (payload as Record<string, unknown>).original_command as
+      | string
+      | undefined;
+    if (originalCommand === CommandType.LIST_AGENTS && Array.isArray(data.agents)) {
       agents.setAgentsFromList(data.agents as AgentListItem[]);
     }
   });

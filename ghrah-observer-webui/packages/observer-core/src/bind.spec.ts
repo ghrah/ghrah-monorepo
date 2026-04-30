@@ -1,5 +1,5 @@
-import type { GatewayMessage } from "@ghrah/protocol";
-import { EventType, SystemType, type WebSocketLike } from "@ghrah/protocol";
+import type { CommandResultPayload, GatewayMessage } from "@ghrah/protocol";
+import { CommandType, EventType, SystemType, type WebSocketLike } from "@ghrah/protocol";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectStores } from "./bind.js";
@@ -10,6 +10,7 @@ import { useChangesStore } from "./stores/changes.js";
 import { useChatStore } from "./stores/chat.js";
 import { useConnectionStore } from "./stores/connection.js";
 import { useHitlStore } from "./stores/hitl.js";
+import { useManifestsStore } from "./stores/manifests.js";
 
 const WS_OPEN = 1;
 
@@ -75,13 +76,20 @@ describe("connectStores", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    if (skipSyncInitialState) {
+      skipSyncInitialState.mockRestore();
+      skipSyncInitialState = null;
+    }
     if (disconnect) disconnect();
     if (client.connected) {
       client.disconnect();
     }
   });
 
+  let skipSyncInitialState: ReturnType<typeof vi.spyOn<any, any>> | null = null;
+
   async function connectClient() {
+    skipSyncInitialState = vi.spyOn(client as any, "_syncInitialState").mockResolvedValue(undefined);
     disconnect = connectStores(client);
     const connectPromise = client.connect();
     mockWs.onopen!();
@@ -268,6 +276,7 @@ describe("connectStores", () => {
         makeMsg(SystemType.COMMAND_RESULT, {
           request_id: "r1",
           success: true,
+          original_command: CommandType.LIST_AGENTS,
           data: {
             agents: [
               { name: "agent-1", config: { ...DEFAULT_CONFIG, name: "agent-1" } },
@@ -314,6 +323,58 @@ describe("connectStores", () => {
 
       expect(agentsStore.agents.size).toBe(0);
     });
+
+    it("does not pollute agents store with manifest_list_agents result", async () => {
+      await connectClient();
+      const agentsStore = useAgentsStore();
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "r1",
+          success: true,
+          original_command: CommandType.MANIFEST_LIST_AGENTS,
+          data: {
+            agents: [
+              {
+                full_name: "my_project.dev_agent",
+                namespace: "my_project",
+                name: "dev_agent",
+                title: "Dev Agent",
+                description: "A dev agent",
+                tags: [],
+                agent_config_name: "gpt-4o",
+                system_prompt: "You are a dev agent.",
+                ability_refs: [],
+                max_iterations: 10,
+              },
+            ],
+          },
+        }),
+      );
+
+      expect(agentsStore.agents.size).toBe(0);
+    });
+
+    it("ignores command_result without original_command", async () => {
+      await connectClient();
+      const agentsStore = useAgentsStore();
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "r1",
+          success: true,
+          data: {
+            agents: [
+              { name: "agent-1", config: { ...DEFAULT_CONFIG, name: "agent-1" } },
+            ],
+          },
+        }),
+      );
+
+      expect(agentsStore.agents.size).toBe(0);
+    });
   });
 
   describe("disconnect", () => {
@@ -335,6 +396,73 @@ describe("connectStores", () => {
       );
 
       expect(chatStore.getMessages("agent-1")).toHaveLength(0);
+    });
+  });
+
+  describe("manifest agent sync on connect", () => {
+    it("calls listManifestAgents on connect and populates store", async () => {
+      const manifestAgents = [
+        {
+          full_name: "my_project.dev_agent",
+          namespace: "my_project",
+          name: "dev_agent",
+          title: "Dev Agent",
+          description: "A dev agent",
+          tags: [],
+          agent_config_name: "gpt-4o",
+          system_prompt: "You are a dev agent.",
+          ability_refs: [],
+          max_iterations: 10,
+        },
+        {
+          full_name: "my_project.test_agent",
+          namespace: "my_project",
+          name: "test_agent",
+          title: "Test Agent",
+          description: "A test agent",
+          tags: [],
+          agent_config_name: "gpt-4o-mini",
+          system_prompt: "You are a test agent.",
+          ability_refs: [],
+          max_iterations: 5,
+        },
+      ];
+      vi.spyOn(client, "listManifestAgents").mockResolvedValue({
+        request_id: "r1",
+        success: true,
+        data: { agents: manifestAgents },
+      } satisfies CommandResultPayload);
+
+      await connectClient();
+
+      expect(client.listManifestAgents).toHaveBeenCalled();
+      const manifestsStore = useManifestsStore();
+      await vi.runOnlyPendingTimersAsync();
+      expect(manifestsStore.agents.size).toBe(2);
+      expect(manifestsStore.agents.has("my_project.dev_agent")).toBe(true);
+      expect(manifestsStore.agents.has("my_project.test_agent")).toBe(true);
+    });
+
+    it("handles listManifestAgents failure gracefully", async () => {
+      vi.spyOn(client, "listManifestAgents").mockRejectedValue(new Error("connection failed"));
+
+      await connectClient();
+
+      const manifestsStore = useManifestsStore();
+      expect(manifestsStore.agents.size).toBe(0);
+    });
+
+    it("calls listManifestAgents on connect via onConnected callback", async () => {
+      const listManifestSpy = vi.spyOn(client, "listManifestAgents").mockResolvedValue({
+        request_id: "r1",
+        success: true,
+        data: { agents: [] },
+      } satisfies CommandResultPayload);
+
+      await connectClient();
+
+      expect(listManifestSpy).toHaveBeenCalled();
+      listManifestSpy.mockRestore();
     });
   });
 });

@@ -6,29 +6,11 @@ import { useObserver } from "@/composables/useObserver";
 const route = useRoute();
 const { connection, error, autoConnect, disconnect } = useObserver();
 
-let retryTimer: ReturnType<typeof setInterval> | null = null;
-let connecting = false;
-
 onMounted(async () => {
   await autoConnect();
-
-  retryTimer = setInterval(async () => {
-    if (connection.state === "disconnected" && !error.value && !connecting) {
-      connecting = true;
-      try {
-        await autoConnect();
-      } finally {
-        connecting = false;
-      }
-    }
-  }, 10_000);
 });
 
 onUnmounted(() => {
-  if (retryTimer) {
-    clearInterval(retryTimer);
-    retryTimer = null;
-  }
   disconnect();
 });
 
