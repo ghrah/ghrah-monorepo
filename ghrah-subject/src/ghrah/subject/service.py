@@ -1,7 +1,7 @@
 """SubjectService：Subject 的运行时编排器。
 
 全链路测试核心组件。负责：
-- WebSocket 连接管理（连接 Gateway）
+- WebSocket 连接管理（连接 Core）
 - 命令分发（execute_ability, persist_*）
 - 事件处理（agent_spawned, action_chain_updated）
 - HITL 流程（广播请求、接收审批）
@@ -21,24 +21,26 @@ import dataclasses
 import json
 import logging
 import os
+import uuid
 from typing import Any
 from urllib.parse import urlencode, urlparse, urlunparse
 
 import websockets
 
 from ghrah.abilities import ActionOutcome
-from ghrah.gateway.protocol import (
-    AbilityDefinitionPayload,
-    AgentConfigPayload,
-    EventType,
-    GatewayMessage,
-    HITLRequestPayload,
-    SystemType,
-    generate_request_id,
-)
 from ghrah.manifest.builtins import load_all_builtin_manifests
 from ghrah.manifest.resolver import ManifestResolver
 from ghrah.manifest.types import PermissionFlags
+from ghrah.protocol.types import (
+    CORE_COMMANDS,
+    AbilityDefinitionPayload,
+    AgentConfigPayload,
+    EventType,
+    HITLRequestPayload,
+    Message,
+    SystemType,
+    generate_request_id,
+)
 from ghrah.subject.ability_runner import AbilityRunner, AbilityRunnerConfig
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
@@ -90,21 +92,7 @@ _WORKSPACE_COMMANDS = frozenset({
     "workspace_status",
 })
 
-_SUBJECT_FORWARD_COMMANDS = frozenset({
-    "spawn_agent",
-    "terminate_agent",
-    "send_message",
-    "broadcast_message",
-    "register_ability",
-    "unregister_ability",
-    "list_agents",
-    "health_check",
-    "delegate",
-    "get_agent_info",
-    "init_cluster",
-    "shutdown_cluster",
-    "cluster_status",
-})
+_SUBJECT_FORWARD_COMMANDS = CORE_COMMANDS
 
 
 def _manifest_event_type(command: str, payload: dict[str, Any]) -> str | None:
@@ -126,14 +114,14 @@ def _manifest_event_type(command: str, payload: dict[str, Any]) -> str | None:
 class SubjectService:
     """Subject 运行时编排服务。
 
-    负责连接 Gateway，接收命令并分发给各子系统，
-    将处理结果通过 Gateway 回传。
+    负责连接 Core，接收命令并分发给各子系统，
+    将处理结果通过 Core 回传。
 
     公开接口：
-    - start(): 启动服务，连接 Gateway，初始化子系统
+    - start(): 启动服务，连接 Core，初始化子系统
     - stop(): 优雅关闭所有子系统
-    - spawn_agent(): 通过 Gateway 创建 Agent
-    - send_message(): 通过 Gateway 向 Agent 发送消息
+    - spawn_agent(): 通过 Core 创建 Agent
+    - send_message(): 通过 Core 向 Agent 发送消息
 
     内部接口：
     - _handle_execute_ability(): 处理 Ability 执行命令
@@ -150,6 +138,7 @@ class SubjectService:
         self._recv_task: asyncio.Task[None] | None = None
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._pending_requests: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._client_id: str = uuid.uuid4().hex[:16]  # 进程重启后会变化，无法驱逐旧 session
 
         # 子系统（在 start() 中初始化）
         self._persistence: SubjectPersistenceService | None = None
@@ -161,25 +150,25 @@ class SubjectService:
         self._manifest_store: ManifestStore | None = None
 
     async def start(self) -> None:
-        """启动服务：初始化子系统，连接 Gateway，进入消息循环。
+        """启动服务：初始化子系统，连接 Core，进入消息循环。
 
         仅连接一次，连接失败则抛出异常。如需自动重连，请使用 run_forever()。
         """
         await self._init_subsystems()
-        await self._connect_gateway()
+        await self._connect_core()
         self._recv_task = asyncio.create_task(self._message_loop())
         logger.info("SubjectService started")
 
     async def run_forever(self) -> None:
         """持续运行，断线自动重连。
 
-        初始化子系统后进入重连循环：连接 Gateway → 消息循环 →
+        初始化子系统后进入重连循环：连接 Core → 消息循环 →
         断线后等待 reconnect_interval → 重新连接。
         仅在收到 asyncio.CancelledError 或 stop() 被调用时退出。
         """
         await self._init_subsystems()
-        url = self._build_gateway_url()
-        reconnect_interval = self._config.gateway.reconnect_interval
+        url = self._build_core_url()
+        reconnect_interval = self._config.core.reconnect_interval
         self._running = True
         first_connect = True
 
@@ -187,14 +176,14 @@ class SubjectService:
             try:
                 self._ws = await websockets.connect(
                     url,
-                    ping_interval=self._config.gateway.ping_interval,
+                    ping_interval=self._config.core.ping_interval,
                     ping_timeout=10,
                 )
                 if first_connect:
-                    logger.info("SubjectService connected to Gateway at %s", url)
+                    logger.info("SubjectService connected to Core at %s", url)
                     first_connect = False
                 else:
-                    logger.info("SubjectService reconnected to Gateway at %s", url)
+                    logger.info("SubjectService reconnected to Core at %s", url)
                     self._pending_requests.clear()
                 self._running = True
                 await self._message_loop()
@@ -238,7 +227,7 @@ class SubjectService:
         await self._ledger.start()
 
         sandbox_config = SandboxExecutorConfig(
-            default_timeout=self._config.gateway.command_timeout,
+            default_timeout=self._config.core.command_timeout,
         )
         sandbox = SandboxExecutor(
             workspace_root=self._config.workspace_root,
@@ -276,7 +265,7 @@ class SubjectService:
         )
 
         ability_config = AbilityRunnerConfig(
-            hitl_timeout=self._config.gateway.command_timeout,
+            hitl_timeout=self._config.core.command_timeout,
         )
         self._ability_runner = AbilityRunner(
             hitl_notary=self._hitl_notary,
@@ -290,19 +279,19 @@ class SubjectService:
         self._manifest_store.ensure_dirs()
         ensure_builtins(self._manifest_store)
 
-    async def _connect_gateway(self) -> None:
-        """连接 Gateway（单次尝试，失败抛出异常）。"""
-        url = self._build_gateway_url()
+    async def _connect_core(self) -> None:
+        """连接 Core（单次尝试，失败抛出异常）。"""
+        url = self._build_core_url()
         try:
             self._ws = await websockets.connect(
                 url,
-                ping_interval=self._config.gateway.ping_interval,
+                ping_interval=self._config.core.ping_interval,
                 ping_timeout=10,
             )
             self._running = True
-            logger.info("SubjectService connected to Gateway at %s", url)
+            logger.info("SubjectService connected to Core at %s", url)
         except Exception as e:
-            logger.error("Failed to connect to Gateway: %s", e)
+            logger.error("Failed to connect to Core: %s", e)
             await self.stop()
             raise
 
@@ -351,15 +340,17 @@ class SubjectService:
 
         logger.info("SubjectService stopped")
 
-    def _build_gateway_url(self) -> str:
-        """构造带 client_type 参数的 Gateway WebSocket URL。
+    def _build_core_url(self) -> str:
+        """构造带 client_type=subject 和 client_id 参数的 Core WebSocket URL。
 
         正确处理已有查询参数的 URL，避免生成双 ? 错误。
+        client_id 用于断线重连时让 Core 驱逐旧 session。
         """
-        base_url = self._config.gateway.url
+        base_url = self._config.core.url
         parts = urlparse(base_url)
         existing_query = parts.query
-        new_param = urlencode({"client_type": "subject"})
+        params = {"client_type": "subject", "client_id": self._client_id}
+        new_param = urlencode(params)
         if existing_query:
             new_query = f"{existing_query}&{new_param}"
         else:
@@ -377,7 +368,7 @@ class SubjectService:
         persistence_type: str = "remote",
         gateway_url: str | None = None,
     ) -> dict[str, Any]:
-        """通过 Gateway 创建 Agent。
+        """通过 Core 创建 Agent。
 
         Args:
             name: Agent 运行时名称
@@ -386,13 +377,13 @@ class SubjectService:
             abilities: Ability 配置列表
             use_remote_executor: 是否使用远程能力执行
             persistence_type: 持久化类型
-            gateway_url: Gateway WebSocket URL（Agent 分布式事件发布用）
+            gateway_url: Core WebSocket URL（Agent 分布式事件发布用）
 
         Returns:
             命令响应
         """
         if not self._running or self._ws is None:
-            raise ConnectionError("Not connected to Gateway")
+            raise ConnectionError("Not connected to Core")
 
         config = AgentConfigPayload(
             name=name,
@@ -417,7 +408,7 @@ class SubjectService:
             "persistence_type": persistence_type,
         }
         request_id = generate_request_id()
-        msg = GatewayMessage(
+        msg = Message(
             type="spawn_agent",
             payload=payload,
             request_id=request_id,
@@ -432,7 +423,7 @@ class SubjectService:
         content: str,
         sender: str = "user",
     ) -> dict[str, Any]:
-        """通过 Gateway 向 Agent 发送消息。
+        """通过 Core 向 Agent 发送消息。
 
         Args:
             target: 目标 Agent 名称
@@ -443,7 +434,7 @@ class SubjectService:
             命令响应
         """
         if not self._running or self._ws is None:
-            raise ConnectionError("Not connected to Gateway")
+            raise ConnectionError("Not connected to Core")
 
         payload = {
             "target": target,
@@ -451,7 +442,7 @@ class SubjectService:
             "sender": sender,
         }
         request_id = generate_request_id()
-        msg = GatewayMessage(
+        msg = Message(
             type="send_message",
             payload=payload,
             request_id=request_id,
@@ -519,7 +510,7 @@ class SubjectService:
         try:
             result = await self._handle_execute_ability(payload)
             if self._running and self._ws is not None:
-                response = GatewayMessage(
+                response = Message(
                     type="ability_result",
                     payload=result,
                     request_id=request_id,
@@ -660,7 +651,7 @@ class SubjectService:
         """处理 manifest 命令。
 
         委托 ManifestStore 和 handle_manifest_command 执行，
-        成功 put/delete 后向 Gateway 发射变更事件。
+        成功 put/delete 后向 Core 发射变更事件。
         """
         from ghrah.subject.manifest_store.service import handle_manifest_command
 
@@ -683,7 +674,7 @@ class SubjectService:
                     event_payload["manifest"] = data["manifest"]
                 if "source" in data:
                     event_payload["source"] = data["source"]
-                event_msg = GatewayMessage(
+                event_msg = Message(
                     type=event_type,
                     payload=event_payload,
                 )
@@ -695,7 +686,7 @@ class SubjectService:
         return result
 
     async def _handle_core_event(self, event_type: str, payload: dict[str, Any]) -> None:
-        """处理从 Gateway 收到的 Core 事件。"""
+        """处理从 Core 收到的 Core 事件。"""
         if event_type == "agent_spawned":
             agent_name = payload.get("name", "")
             if agent_name and self._workspace_mgr is not None:
@@ -766,7 +757,7 @@ class SubjectService:
         """HITL Promise 创建回调：将请求广播给 Observer。
 
         AbilityRunner 创建 HITL Promise 后调用此回调，
-        通过 Gateway WebSocket 将 hitl_request 事件发送给 Observer。
+        通过 Core WebSocket 将 hitl_request 事件发送给 Observer。
         """
         if not self._running or self._ws is None:
             logger.warning("Cannot broadcast HITL request: service not running or not connected")
@@ -778,7 +769,7 @@ class SubjectService:
             ability_name=promise.ability_name,
             tool_args=promise.tool_args,
         )
-        msg = GatewayMessage(
+        msg = Message(
             type=EventType.HITL_REQUEST.value,
             payload=hitl_payload.model_dump(),
         )
@@ -848,13 +839,12 @@ class SubjectService:
             list(permissions.keys()),
         )
         return permissions
-        return None
 
-    async def _send_gateway_message(self, msg: GatewayMessage | dict[str, Any]) -> None:
-        """发送 GatewayMessage 到 Gateway WebSocket。"""
+    async def _send_core_message(self, msg: Message | dict[str, Any]) -> None:
+        """发送 Message 到 Core WebSocket。"""
         if not self._running or self._ws is None:
             return
-        if isinstance(msg, GatewayMessage):
+        if isinstance(msg, Message):
             await self._ws.send(msg.model_dump_json())
         else:
             await self._ws.send(json.dumps(msg, ensure_ascii=False))
@@ -864,13 +854,13 @@ class SubjectService:
     ) -> None:
         """处理 Observer 转发的 Agent 管理命令。
 
-        这些命令来自 Observer（经 Gateway 转发），Subject 需要将它们转发给 Core，
-        并将 Core 的响应返回给 Observer（经 Gateway）。
+        这些命令来自 Observer（经 Core 转发），Subject 需要将它们转发给 Core，
+        并将 Core 的响应返回给 Observer（经 Core）。
 
         完整的请求-响应链：
-        Observer → GW(_handle_subject_forward, 创建 Future) → Subject(本方法)
-        → GW(_handle_spawn_agent 等, 返回 command_result) → Subject 收到 command_result
-        → Subject 将 command_result 回传给 GW → GW(resolve_command_result, 解析 Future)
+        Observer → Core(_handle_subject_forward, 创建 Future) → Subject(本方法)
+        → Core(_handle_spawn_agent 等, 返回 command_result) → Subject 收到 command_result
+        → Subject 将 command_result 回传给 Core → Core(resolve_command_result, 解析 Future)
         → Observer 收到响应
 
         对于某些命令（如 spawn_agent），Subject 还需执行本地操作（如创建工作区），
@@ -886,13 +876,13 @@ class SubjectService:
         if msg_type == "spawn_agent" and payload.get("manifest_ref"):
             payload = self._resolve_spawn_manifest(payload)
 
-        cmd_msg = GatewayMessage(
+        cmd_msg = Message(
             type=msg_type,
             payload=payload,
             request_id=request_id,
             client_type="subject",
         )
-        await self._send_gateway_message(cmd_msg)
+        await self._send_core_message(cmd_msg)
 
         # 如果没有 request_id，无法关联响应，回退到 fire-and-forget 模式
         if request_id is None:
@@ -903,8 +893,8 @@ class SubjectService:
             )
             return
 
-        # 等待 Gateway 的 command_result 响应，然后回传给 Gateway
-        # 使 Gateway 的 _handle_subject_forward Future 正确 resolve
+        # 等待 Core 的 command_result 响应，然后回传给 Core
+        # 使 Core 的 _handle_subject_forward Future 正确 resolve
         try:
             result = await self._wait_for_response(request_id, timeout=30.0)
         except TimeoutError:
@@ -915,7 +905,7 @@ class SubjectService:
                 request_id,
             )
             if self._running and self._ws is not None:
-                error_response = GatewayMessage(
+                error_response = Message(
                     type=SystemType.COMMAND_RESULT.value,
                     payload={
                         "request_id": request_id,
@@ -932,7 +922,7 @@ class SubjectService:
                 request_id,
             )
             if self._running and self._ws is not None:
-                error_response = GatewayMessage(
+                error_response = Message(
                     type=SystemType.COMMAND_RESULT.value,
                     payload={
                         "request_id": request_id,
@@ -944,9 +934,9 @@ class SubjectService:
                 await self._ws.send(error_response.model_dump_json())
             return
 
-        # 将 command_result 回传给 Gateway
+        # 将 command_result 回传给 Core
         if self._running and self._ws is not None:
-            response = GatewayMessage(
+            response = Message(
                 type=SystemType.COMMAND_RESULT.value,
                 payload=result,
                 request_id=request_id,
@@ -1027,7 +1017,7 @@ class SubjectService:
         }
 
     async def _message_loop(self) -> None:
-        """从 Gateway 接收消息并分发。
+        """从 Core 接收消息并分发。
 
         消息类型：
         - command_result: 关联到 pending_requests 中的 Future
@@ -1069,7 +1059,7 @@ class SubjectService:
                 elif msg_type in _PERSIST_COMMANDS:
                     result = await self._handle_command(msg_type, payload)
                     if self._running and self._ws is not None:
-                        response = GatewayMessage(
+                        response = Message(
                             type=SystemType.COMMAND_RESULT.value,
                             payload=result,
                             request_id=request_id,
@@ -1080,7 +1070,7 @@ class SubjectService:
                 elif msg_type in _WORKSPACE_COMMANDS:
                     result = await self._handle_workspace_command(msg_type, payload)
                     if self._running and self._ws is not None:
-                        response = GatewayMessage(
+                        response = Message(
                             type=SystemType.COMMAND_RESULT.value,
                             payload=result,
                             request_id=request_id,
@@ -1091,7 +1081,7 @@ class SubjectService:
                 elif msg_type in _MANIFEST_COMMANDS:
                     result = await self._handle_manifest_command(msg_type, payload)
                     if self._running and self._ws is not None:
-                        response = GatewayMessage(
+                        response = Message(
                             type=SystemType.COMMAND_RESULT.value,
                             payload=result,
                             request_id=request_id,
@@ -1119,7 +1109,7 @@ class SubjectService:
                 # Core 单体模式的 HITL 请求转发给 Observer
                 elif msg_type == EventType.HITL_REQUEST.value:
                     if self._running and self._ws is not None:
-                        fwd_msg = GatewayMessage(
+                        fwd_msg = Message(
                             type=EventType.HITL_REQUEST.value,
                             payload=payload,
                         )
@@ -1128,7 +1118,7 @@ class SubjectService:
                 # 心跳
                 elif msg_type == SystemType.PING.value:
                     if self._running and self._ws is not None:
-                        pong = GatewayMessage(type=SystemType.PONG.value)
+                        pong = Message(type=SystemType.PONG.value)
                         await self._ws.send(pong.model_dump_json())
 
             except Exception:

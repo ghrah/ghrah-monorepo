@@ -6,10 +6,12 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "ghrah",
-    "ghrah-gateway",
+    "ghrah-protocol",
     "aiosqlite>=0.20",
     "agentsconfig",
     "websockets>=12.0",
+    "fastapi>=0.136.1",
+    "uvicorn[standard]>=0.34.0",
 ]
 
 [project.scripts]
@@ -24,7 +26,7 @@ packages = ["src/ghrah"]
 
 [tool.uv.sources]
 ghrah = { workspace = true }
-ghrah-gateway = { workspace = true }
+ghrah-protocol = { workspace = true }
 agentsconfig = { path = "/home/yuki/gitrepos/agentsconfig/" }
 
 [dependency-groups]

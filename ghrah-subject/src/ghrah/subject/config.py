@@ -1,6 +1,6 @@
 """Subject 配置定义。
 
-管理 Subject 的运行时配置，包括工作区路径、数据库路径、权限策略和 Gateway 连接。
+管理 Subject 的运行时配置，包括工作区路径、数据库路径、权限策略和 Core 连接。
 """
 
 from __future__ import annotations
@@ -51,13 +51,13 @@ class HITLPolicyConfig:
 
 
 @dataclass
-class GatewayConnectionConfig:
-    """Gateway 连接配置。
+class CoreConnectionConfig:
+    """Core 连接配置。
 
-    Subject 通过 WebSocket 连接 Gateway，接收命令并推送事件。
+    Subject 通过 WebSocket 连接 Core，接收命令并推送事件。
 
     Attributes:
-        url: Gateway WebSocket URL，如 "ws://localhost:4111/ws"
+        url: Core WebSocket URL，如 "ws://localhost:4111/ws"
         reconnect_interval: 重连间隔（秒）
         max_reconnect_attempts: 最大重连尝试次数，None 表示无限重试
         ping_interval: 心跳间隔（秒）
@@ -82,7 +82,7 @@ class SubjectConfig:
         workspace_root: 工作区根路径（Subject 持有的文件系统根目录）
         db_path: SQLite 数据库文件路径（持久化 ActionChain 和上下文）
         hitl_policy: HITL 权限策略配置
-        gateway: Gateway 连接配置
+        core: Core 连接配置
         log_level: 日志级别
     """
 
@@ -90,7 +90,7 @@ class SubjectConfig:
     db_path: str = os.path.expanduser("~/.ghrah/subject.db")
     manifest_root: str = os.path.expanduser("~/.ghrah/manifests")
     hitl_policy: HITLPolicyConfig = field(default_factory=HITLPolicyConfig)
-    gateway: GatewayConnectionConfig = field(default_factory=GatewayConnectionConfig)
+    core: CoreConnectionConfig = field(default_factory=CoreConnectionConfig)
     log_level: str = "INFO"
 
     @classmethod
@@ -101,7 +101,7 @@ class SubjectConfig:
         例如：GHRAH_SUBJECT_WORKSPACE_ROOT, GHRAH_SUBJECT_DB_PATH
 
         嵌套配置使用双下划线分隔：
-        例如：GHRAH_SUBJECT_GATEWAY_URL, GHRAH_SUBJECT_HITL_POLICY_WORKSPACE_ROOT
+        例如：GHRAH_SUBJECT_CORE_URL, GHRAH_SUBJECT_HITL_POLICY_WORKSPACE_ROOT
         """
         hitl_policy = HITLPolicyConfig(
             auto_approve_abilities=os.environ.get(
@@ -121,28 +121,28 @@ class SubjectConfig:
             workspace_root=os.environ.get("GHRAH_SUBJECT_HITL_WORKSPACE_ROOT"),
         )
 
-        gateway = GatewayConnectionConfig(
-            url=os.environ.get("GHRAH_SUBJECT_GATEWAY_URL", "ws://localhost:4111/ws"),
+        core = CoreConnectionConfig(
+            url=os.environ.get("GHRAH_SUBJECT_CORE_URL", "ws://localhost:4111/ws"),
             reconnect_interval=_safe_float(
-                os.environ.get("GHRAH_SUBJECT_GATEWAY_RECONNECT_INTERVAL", "5.0"),
+                os.environ.get("GHRAH_SUBJECT_CORE_RECONNECT_INTERVAL", "5.0"),
                 5.0,
-                "GHRAH_SUBJECT_GATEWAY_RECONNECT_INTERVAL",
+                "GHRAH_SUBJECT_CORE_RECONNECT_INTERVAL",
             ),
             ping_interval=_safe_float(
-                os.environ.get("GHRAH_SUBJECT_GATEWAY_PING_INTERVAL", "30.0"),
+                os.environ.get("GHRAH_SUBJECT_CORE_PING_INTERVAL", "30.0"),
                 30.0,
-                "GHRAH_SUBJECT_GATEWAY_PING_INTERVAL",
+                "GHRAH_SUBJECT_CORE_PING_INTERVAL",
             ),
             command_timeout=_safe_float(
-                os.environ.get("GHRAH_SUBJECT_GATEWAY_COMMAND_TIMEOUT", "300.0"),
+                os.environ.get("GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT", "300.0"),
                 300.0,
-                "GHRAH_SUBJECT_GATEWAY_COMMAND_TIMEOUT",
+                "GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT",
             ),
-        )
-
-        max_attempts_str = os.environ.get("GHRAH_SUBJECT_GATEWAY_MAX_RECONNECT_ATTEMPTS")
-        gateway.max_reconnect_attempts = _safe_int(
-            max_attempts_str, None, "GHRAH_SUBJECT_GATEWAY_MAX_RECONNECT_ATTEMPTS"
+            max_reconnect_attempts=_safe_int(
+                os.environ.get("GHRAH_SUBJECT_CORE_MAX_RECONNECT_ATTEMPTS"),
+                None,
+                "GHRAH_SUBJECT_CORE_MAX_RECONNECT_ATTEMPTS",
+            ),
         )
 
         return cls(
@@ -156,6 +156,6 @@ class SubjectConfig:
                 "GHRAH_SUBJECT_MANIFEST_ROOT", os.path.expanduser("~/.ghrah/manifests")
             ),
             hitl_policy=hitl_policy,
-            gateway=gateway,
+            core=core,
             log_level=os.environ.get("GHRAH_SUBJECT_LOG_LEVEL", "INFO"),
         )

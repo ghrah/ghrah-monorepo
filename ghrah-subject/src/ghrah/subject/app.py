@@ -36,7 +36,7 @@ def main() -> None:
     logger.info("ghrah-subject starting...")
     logger.info("  workspace_root: %s", config.workspace_root)
     logger.info("  db_path: %s", config.db_path)
-    logger.info("  gateway_url: %s", config.gateway.url)
+    logger.info("  core_url: %s", config.core.url)
 
     asyncio.run(run())
 
