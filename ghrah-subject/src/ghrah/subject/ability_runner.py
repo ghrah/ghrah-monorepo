@@ -28,6 +28,7 @@ from ghrah.abilities import (
     ActionOutcome,
     ActionResult,
 )
+from ghrah.subject._utils import ABILITY_PATH_SPECS
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
 from ghrah.subject.hitl.policy import HITLVerdict
 from ghrah.subject.permission_checker import PermissionChecker, PermissionDecision
@@ -67,21 +68,6 @@ class AbilityRunner:
     5. 本地执行 Ability（Subject 持有工作区和物理状态）
     6. 将 ActionResult 通过 Gateway 返回给 Core
     """
-
-    # 需要路径解析的 Ability 和对应的路径参数名
-    PATH_ABILITIES: dict[str, list[str]] = {
-        "read_file": ["file_path"],
-        "write_file": ["file_path"],
-        "edit_file": ["file_path"],
-        "delete_file": ["file_path"],
-        "list_directory": ["dir_path"],
-        "move_file": ["source_path", "destination_path"],
-    }
-
-    # 需要工作目录路径解析的 Ability（working_dir 参数需要相对→绝对路径转换）
-    WORKING_DIR_ABILITIES: dict[str, list[str]] = {
-        "execute_command": ["working_dir"],
-    }
 
     def __init__(
         self,
@@ -347,8 +333,12 @@ class AbilityRunner:
         Returns:
             路径解析后的 tool_args（浅拷贝）
         """
-        path_keys = self.PATH_ABILITIES.get(ability_name)
-        working_dir_keys = self.WORKING_DIR_ABILITIES.get(ability_name)
+        path_keys = None
+        working_dir_keys = None
+        spec = ABILITY_PATH_SPECS.get(ability_name)
+        if spec is not None:
+            path_keys = spec.path_keys or None
+            working_dir_keys = spec.working_dir_keys or None
 
         if path_keys is None and working_dir_keys is None:
             return tool_args

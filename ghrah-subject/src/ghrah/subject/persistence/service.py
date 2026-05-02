@@ -89,7 +89,7 @@ class SubjectPersistenceService:
             if backend is None:
                 return
             self._backend = None
-        await backend.close()
+            await backend.close()
         logger.info("SubjectPersistenceService stopped")
 
     async def handle_command(
@@ -104,11 +104,6 @@ class SubjectPersistenceService:
         Returns:
             包含 success 字段的响应字典
         """
-        async with self._lock:
-            backend = self._backend
-        if backend is None:
-            return {"success": False, "error": "PersistenceService not started"}
-
         if command not in _PERSIST_COMMANDS:
             return {"success": False, "error": f"Unknown command: {command}"}
 
@@ -116,11 +111,15 @@ class SubjectPersistenceService:
         if handler is None:
             return {"success": False, "error": f"No handler for command: {command}"}
 
-        try:
-            return await handler(backend, payload)
-        except Exception as exc:
-            logger.exception("Error handling command %s", command)
-            return {"success": False, "error": str(exc)}
+        async with self._lock:
+            backend = self._backend
+            if backend is None:
+                return {"success": False, "error": "PersistenceService not started"}
+            try:
+                return await handler(backend, payload)
+            except Exception as exc:
+                logger.exception("Error handling command %s", command)
+                return {"success": False, "error": str(exc)}
 
 
 async def _handle_save_node(

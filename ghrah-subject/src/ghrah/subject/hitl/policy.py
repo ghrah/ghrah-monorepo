@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ghrah.manifest.types import PermissionFlags
-from ghrah.subject._utils import is_subpath
+from ghrah.subject._utils import extract_paths, is_subpath
 
 __all__ = ["HITLVerdict", "HITLPolicy"]
 
@@ -88,7 +88,7 @@ class HITLPolicy:
 
         # 3. 路径检查（对 require_hitl=True 和未知能力均适用）
         if tool_args:
-            paths = self._extract_paths(ability_name, tool_args)
+            paths = extract_paths(ability_name, tool_args)
             if paths:
                 return self._check_paths(ability_name, paths)
 
@@ -120,24 +120,6 @@ class HITLPolicy:
             reason="path_in_allowed_scope",
             metadata={"paths": paths},
         )
-
-    @staticmethod
-    def _extract_paths(
-        ability_name: str, tool_args: dict[str, Any]
-    ) -> list[str]:
-        paths: list[str] = []
-        if ability_name == "move_file":
-            src = tool_args.get("source_path") or tool_args.get("file_path")
-            dst = tool_args.get("destination_path")
-            if src:
-                paths.append(src)
-            if dst:
-                paths.append(dst)
-        else:
-            path = tool_args.get("file_path") or tool_args.get("dir_path") or tool_args.get("working_dir")
-            if path:
-                paths.append(path)
-        return paths
 
     @property
     def auto_approve_abilities(self) -> set[str]:

@@ -275,10 +275,6 @@ class SubjectService:
         self._ability_runner.bind_hitl_broadcast(self._on_hitl_promise_created)
         self._ability_runner.bind_workspace_resolver(self._resolve_workspace_path)
 
-        self._manifest_store = ManifestStore(self._config.manifest_root)
-        self._manifest_store.ensure_dirs()
-        ensure_builtins(self._manifest_store)
-
     async def _connect_core(self) -> None:
         """连接 Core（单次尝试，失败抛出异常）。"""
         url = self._build_core_url()

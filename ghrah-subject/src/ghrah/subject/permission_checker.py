@@ -26,7 +26,7 @@ from ghrah.abilities.builtin.command_safety import (
     CommandSafetyChecker,
 )
 from ghrah.manifest.types import PermissionFlags
-from ghrah.subject._utils import is_subpath
+from ghrah.subject._utils import ABILITY_PATH_SPECS, extract_paths, is_subpath
 
 __all__ = ["PermissionChecker", "PermissionDecision", "PermissionVerdict"]
 
@@ -146,7 +146,7 @@ class PermissionChecker:
 
         # 写入类能力（fs_write 隐含 fs_read_only 的含义，因为 move 也读）
         if manifest_perms.fs_write and tool_args:
-            paths = self._extract_paths(ability_name, tool_args)
+            paths = extract_paths(ability_name, tool_args)
             # 写入路径检查
             write_paths = paths
             if manifest_perms.fs_read_only and ability_name == "move_file":
@@ -172,7 +172,7 @@ class PermissionChecker:
 
         # 只读类能力
         if manifest_perms.fs_read_only and tool_args:
-            paths = self._extract_paths(ability_name, tool_args)
+            paths = extract_paths(ability_name, tool_args)
             return self._check_read_paths_with_deny(ability_name, paths, manifest_perms)
 
         # 其他能力（如 conversation, end_task）：无路径安全关注
@@ -296,26 +296,6 @@ class PermissionChecker:
                 reason=verdict.reason,
                 metadata={"command": command, "ability_name": ability_name},
             )
-
-    @staticmethod
-    def _extract_paths(ability_name: str, tool_args: dict[str, Any]) -> list[str]:
-        paths: list[str] = []
-        if ability_name == "move_file":
-            src = tool_args.get("source_path") or tool_args.get("file_path")
-            dst = tool_args.get("destination_path")
-            if src:
-                paths.append(src)
-            if dst:
-                paths.append(dst)
-        elif ability_name == "execute_command":
-            wd = tool_args.get("working_dir")
-            if wd:
-                paths.append(wd)
-        else:
-            path = tool_args.get("file_path") or tool_args.get("dir_path")
-            if path:
-                paths.append(path)
-        return paths
 
     @property
     def allowed_paths(self) -> list[str] | None:
