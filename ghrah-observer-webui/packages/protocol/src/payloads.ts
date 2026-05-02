@@ -7,6 +7,8 @@ export const AgentConfigPayloadSchema = z.object({
   system_prompt: z.string().optional().default(""),
   max_iterations: z.number().int().optional().default(10),
   gateway_url: z.string().nullable().optional(),
+  // gateway_url: Subject ObserverServer URL (e.g. ws://localhost:4112/ws).
+  // Kept as "gateway_url" for wire protocol compatibility with Python side.
 });
 
 export const AbilityDefinitionPayloadSchema = z.object({

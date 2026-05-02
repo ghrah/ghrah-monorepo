@@ -1,4 +1,4 @@
-import type { CommandResultPayload, GatewayMessage } from "@ghrah/protocol";
+import type { CommandResultPayload, ServerMessage } from "@ghrah/protocol";
 import { CommandType, EventType, SystemType, type WebSocketLike } from "@ghrah/protocol";
 import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +19,7 @@ interface MockWebSocket extends WebSocketLike {
 }
 
 interface ClientInternals {
-  _dispatch: (msgType: string, message: GatewayMessage) => void;
+  _dispatch: (msgType: string, message: ServerMessage) => void;
   _notifyReconnecting: () => void;
   _notifyDisconnected: () => void;
 }
@@ -41,8 +41,8 @@ function createMockWs(): MockWebSocket {
 function makeMsg(
   type: string,
   payload: Record<string, unknown>,
-  extra?: Partial<GatewayMessage>,
-): GatewayMessage {
+  extra?: Partial<ServerMessage>,
+): ServerMessage {
   return { type, payload, ...extra };
 }
 

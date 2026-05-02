@@ -23,18 +23,18 @@ echo "=== Building dependencies ==="
 echo "=== Building VSCode Extension (initial) ==="
 (cd "$ROOT_DIR/vscode-extension" && pnpm build)
 
-echo "=== Starting Gateway ==="
-(cd "$ROOT_DIR/../ghrah-gateway" && uv run ghrah-gateway) &
+echo "=== Starting Core server ==="
+(cd "$ROOT_DIR/../ghrah-core" && uv run python -m ghrah.core.server) &
 PIDS+=($!)
 
-echo "=== Waiting for Gateway to be healthy ==="
+echo "=== Waiting for Core server to be healthy ==="
 for i in $(seq 1 30); do
   if curl -sf http://localhost:4111/health >/dev/null 2>&1; then
-    echo "  Gateway is healthy (attempt $i)"
+    echo "  Core server is healthy (attempt $i)"
     break
   fi
   if [ "$i" -eq 30 ]; then
-    echo "  WARNING: Gateway not healthy after 30s, continuing anyway"
+    echo "  WARNING: Core server not healthy after 30s, continuing anyway"
   fi
   sleep 1
 done

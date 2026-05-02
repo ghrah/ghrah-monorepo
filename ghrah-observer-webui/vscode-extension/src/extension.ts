@@ -17,19 +17,20 @@ export async function activate(context: ExtensionContext) {
   launcher = new Launcher();
 
   const config = workspace.getConfiguration("ghrah");
-  const autoStart = config.get<boolean>("gateway.autoStart", true);
+  const autoStart = config.get<boolean>("core.autoStart", true);
 
   if (autoStart) {
-    const gatewayUrl = config.get<string>("gateway.url", "ws://localhost:4111/ws");
-    const launchMethod = config.get<string>("gateway.launchMethod", "uv");
-    const binaryPath = config.get<string>("gateway.binaryPath", "");
+    const coreUrl = config.get<string>("core.url", "ws://localhost:4111/ws");
+    const launchMethod = config.get<string>("core.launchMethod", "uv");
+    const binaryPath = config.get<string>("core.binaryPath", "");
     const workspaceRoot = config.get<string>("workspace.root", "");
 
-    await launcher.ensureGateway(gatewayUrl, { launchMethod, binaryPath });
+    await launcher.ensureCore(coreUrl, { launchMethod, binaryPath });
 
     const subjectAutoStart = config.get<boolean>("subject.autoStart", true);
     if (subjectAutoStart && workspaceRoot) {
-      await launcher.ensureSubject(gatewayUrl, workspaceRoot);
+      const observerUrl = config.get<string>("observer.url", "ws://localhost:4112/ws");
+      await launcher.ensureSubject(observerUrl, workspaceRoot, coreUrl);
     }
   }
 

@@ -6,7 +6,7 @@ import type {
   AgentSpawnedPayload,
   AgentTerminatedPayload,
   CommandResultPayload,
-  GatewayMessage,
+  ServerMessage,
   HITLRequestPayload,
   ManifestAbilityEventPayload,
   ManifestAgentEventPayload,
@@ -43,14 +43,14 @@ export function connectStores(client: ObserverClient): () => void {
     connection.setConnected();
   });
 
-  client.on(EventType.AGENT_SPAWNED, (msg: GatewayMessage) =>
+  client.on(EventType.AGENT_SPAWNED, (msg: ServerMessage) =>
     agents.onAgentSpawned(msg.payload as AgentSpawnedPayload),
   );
-  client.on(EventType.AGENT_TERMINATED, (msg: GatewayMessage) =>
+  client.on(EventType.AGENT_TERMINATED, (msg: ServerMessage) =>
     agents.onAgentTerminated(msg.payload as AgentTerminatedPayload),
   );
 
-  client.on(EventType.ACTION_CHAIN_UPDATED, (msg: GatewayMessage) => {
+  client.on(EventType.ACTION_CHAIN_UPDATED, (msg: ServerMessage) => {
     const payload = msg.payload as ActionChainUpdatedPayload;
     chains.onActionChainUpdated(payload);
     const node = payload.node as Record<string, unknown> | undefined;
@@ -62,24 +62,24 @@ export function connectStores(client: ObserverClient): () => void {
     }
   });
 
-  client.on(EventType.HITL_REQUEST, (msg: GatewayMessage) => {
+  client.on(EventType.HITL_REQUEST, (msg: ServerMessage) => {
     const payload = msg.payload as HITLRequestPayload;
     hitl.onHitlRequest(payload);
     pendingToolArgs.set(payload.promise_id, payload.tool_args ?? {});
   });
 
-  client.on(EventType.AGENT_RESPONSE, (msg: GatewayMessage) =>
+  client.on(EventType.AGENT_RESPONSE, (msg: ServerMessage) =>
     chat.onAgentResponse(msg.payload as AgentResponsePayload),
   );
 
-  client.on(EventType.ABILITY_RESULT, (msg: GatewayMessage) => {
+  client.on(EventType.ABILITY_RESULT, (msg: ServerMessage) => {
     const payload = msg.payload as AbilityResultPayload;
     const toolArgs = pendingToolArgs.get(payload.request_id);
     pendingToolArgs.delete(payload.request_id);
     changes.onAbilityResult(payload, toolArgs);
   });
 
-  client.on(SystemType.COMMAND_RESULT, (msg: GatewayMessage) => {
+  client.on(SystemType.COMMAND_RESULT, (msg: ServerMessage) => {
     const payload = msg.payload as CommandResultPayload;
     if (!payload.success || !payload.data) return;
     const data = payload.data as Record<string, unknown>;
@@ -91,26 +91,26 @@ export function connectStores(client: ObserverClient): () => void {
     }
   });
 
-  client.on(EventType.AGENT_ERROR, (_msg: GatewayMessage) => {
+  client.on(EventType.AGENT_ERROR, (_msg: ServerMessage) => {
     // Agent error: 后续可扩展 ErrorStore
   });
 
-  client.on(EventType.MANIFEST_ABILITY_CREATED, (msg: GatewayMessage) =>
+  client.on(EventType.MANIFEST_ABILITY_CREATED, (msg: ServerMessage) =>
     manifests.onManifestAbilityCreated(msg.payload as ManifestAbilityEventPayload),
   );
-  client.on(EventType.MANIFEST_ABILITY_UPDATED, (msg: GatewayMessage) =>
+  client.on(EventType.MANIFEST_ABILITY_UPDATED, (msg: ServerMessage) =>
     manifests.onManifestAbilityInvalidated(msg.payload as ManifestAbilityEventPayload),
   );
-  client.on(EventType.MANIFEST_ABILITY_DELETED, (msg: GatewayMessage) =>
+  client.on(EventType.MANIFEST_ABILITY_DELETED, (msg: ServerMessage) =>
     manifests.onManifestAbilityDeleted(msg.payload as ManifestAbilityEventPayload),
   );
-  client.on(EventType.MANIFEST_AGENT_CREATED, (msg: GatewayMessage) =>
+  client.on(EventType.MANIFEST_AGENT_CREATED, (msg: ServerMessage) =>
     manifests.onManifestAgentCreated(msg.payload as ManifestAgentEventPayload),
   );
-  client.on(EventType.MANIFEST_AGENT_UPDATED, (msg: GatewayMessage) =>
+  client.on(EventType.MANIFEST_AGENT_UPDATED, (msg: ServerMessage) =>
     manifests.onManifestAgentInvalidated(msg.payload as ManifestAgentEventPayload),
   );
-  client.on(EventType.MANIFEST_AGENT_DELETED, (msg: GatewayMessage) =>
+  client.on(EventType.MANIFEST_AGENT_DELETED, (msg: ServerMessage) =>
     manifests.onManifestAgentDeleted(msg.payload as ManifestAgentEventPayload),
   );
 

@@ -9,7 +9,7 @@ export {
 } from "./builders.js";
 export {
   ConnectionError,
-  GatewayClient,
+  ServerClient,
   TimeoutError,
   type WebSocketFactory,
   type WebSocketLike,
@@ -17,17 +17,17 @@ export {
 export {
   ClientType,
   CommandType,
+  CORE_COMMANDS,
   EventType,
   MANIFEST_COMMANDS,
   type MessageType,
   PERSIST_COMMANDS,
-  SUBJECT_FORWARD_COMMANDS,
   SystemType,
   WORKSPACE_COMMANDS,
 } from "./enums.js";
 export {
-  type GatewayMessage,
-  GatewayMessageSchema,
+  type ServerMessage,
+  ServerMessageSchema,
   parseMessage,
   serializeMessage,
 } from "./message.js";

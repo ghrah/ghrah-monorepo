@@ -2,10 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   ClientType,
   CommandType,
+  CORE_COMMANDS,
   EventType,
   MANIFEST_COMMANDS,
   PERSIST_COMMANDS,
-  SUBJECT_FORWARD_COMMANDS,
   SystemType,
   WORKSPACE_COMMANDS,
 } from "./enums.js";
@@ -139,8 +139,8 @@ describe("PERSIST_COMMANDS", () => {
   });
 });
 
-describe("SUBJECT_FORWARD_COMMANDS", () => {
-  const PYTHON_SUBJECT_FORWARD = new Set([
+describe("CORE_COMMANDS", () => {
+  const PYTHON_CORE_COMMANDS = new Set([
     "spawn_agent",
     "terminate_agent",
     "send_message",
@@ -156,8 +156,8 @@ describe("SUBJECT_FORWARD_COMMANDS", () => {
     "cluster_status",
   ]);
 
-  it("contains exactly 13 subject-forward command values", () => {
-    expect(SUBJECT_FORWARD_COMMANDS).toEqual(PYTHON_SUBJECT_FORWARD);
+  it("contains exactly 13 core command values", () => {
+    expect(CORE_COMMANDS).toEqual(PYTHON_CORE_COMMANDS);
   });
 });
 

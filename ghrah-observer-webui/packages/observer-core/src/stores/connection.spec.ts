@@ -12,9 +12,9 @@ describe("useConnectionStore", () => {
     expect(store.state).toBe("disconnected");
   });
 
-  it("default gatewayUrl is ws://localhost:4111/ws", () => {
+  it("default serverUrl is ws://localhost:4112/ws", () => {
     const store = useConnectionStore();
-    expect(store.gatewayUrl).toBe("ws://localhost:4111/ws");
+    expect(store.serverUrl).toBe("ws://localhost:4112/ws");
   });
 
   it("setConnected changes state to connected", () => {
@@ -42,10 +42,10 @@ describe("useConnectionStore", () => {
     expect(store.state).toBe("reconnecting");
   });
 
-  it("setGatewayUrl updates the url", () => {
+  it("setServerUrl updates the url", () => {
     const store = useConnectionStore();
-    store.setGatewayUrl("ws://other:9999/ws");
-    expect(store.gatewayUrl).toBe("ws://other:9999/ws");
+    store.setServerUrl("ws://other:9999/ws");
+    expect(store.serverUrl).toBe("ws://other:9999/ws");
   });
 
   it("state transitions work in sequence", () => {

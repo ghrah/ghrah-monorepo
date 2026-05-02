@@ -41,8 +41,8 @@ export function useObserver() {
   const changes = useChangesStore();
   const manifests = useManifestsStore();
 
-  async function connect(gatewayUrl?: string) {
-    const url = gatewayUrl ?? connection.gatewayUrl;
+  async function connect(serverUrl?: string) {
+    const url = serverUrl ?? connection.serverUrl;
 
     if (client.value) {
       unbind?.();
@@ -77,7 +77,7 @@ export function useObserver() {
   }
 
   async function autoConnect() {
-    return connect(connection.gatewayUrl);
+    return connect(connection.serverUrl);
   }
 
   async function sendMessage(content: string) {

@@ -17,7 +17,7 @@ async function handleTerminate() {
   const result = await terminateAgent(agents.selectedAgentName);
   loading.value = false;
   if (result === null) {
-    errorMsg.value = observerError.value ?? "Not connected to gateway";
+    errorMsg.value = observerError.value ?? "Not connected to server";
   } else if (result && !result.success) {
     errorMsg.value = result.error ?? "Failed to terminate agent";
   } else {
@@ -34,7 +34,7 @@ async function handleCreateWorkspace() {
   if (result && !result.success) {
     errorMsg.value = result.error ?? "Failed to create workspace";
   } else if (result === null) {
-    errorMsg.value = observerError.value ?? "Not connected to gateway";
+    errorMsg.value = observerError.value ?? "Not connected to server";
   } else {
     showMenu.value = false;
   }
@@ -47,7 +47,7 @@ async function handleSnapshot() {
   const result = await workspaceSnapshot(agents.selectedAgentName);
   loading.value = false;
   if (result === null) {
-    errorMsg.value = observerError.value ?? "Not connected to gateway";
+    errorMsg.value = observerError.value ?? "Not connected to server";
   } else if (result && !result.success) {
     errorMsg.value = result.error ?? "Failed to create snapshot";
   } else {
@@ -64,7 +64,7 @@ async function handleDiff() {
   if (result && !result.success) {
     errorMsg.value = result.error ?? "Failed to get workspace diff";
   } else if (result === null) {
-    errorMsg.value = observerError.value ?? "Not connected to gateway";
+    errorMsg.value = observerError.value ?? "Not connected to server";
   }
   showMenu.value = false;
 }

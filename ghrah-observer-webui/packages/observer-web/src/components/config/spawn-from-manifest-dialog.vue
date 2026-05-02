@@ -31,7 +31,7 @@ async function handleSubmit() {
   } else if (result) {
     emit("close");
   } else {
-    errorMsg.value = error.value ?? "Not connected to gateway";
+    errorMsg.value = error.value ?? "Not connected to server";
   }
 }
 </script>

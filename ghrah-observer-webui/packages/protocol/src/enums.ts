@@ -98,7 +98,7 @@ export const PERSIST_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.PERSIST_LIST_AGENTS,
 ]);
 
-export const SUBJECT_FORWARD_COMMANDS: ReadonlySet<string> = new Set([
+export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.SPAWN_AGENT,
   CommandType.TERMINATE_AGENT,
   CommandType.SEND_MESSAGE,

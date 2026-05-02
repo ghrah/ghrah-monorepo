@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { GatewayMessageSchema, parseMessage, serializeMessage } from "./message.js";
+import { ServerMessageSchema, parseMessage, serializeMessage } from "./message.js";
 import {
   AbilityDefinitionPayloadSchema,
   AbilityResultPayloadSchema,
@@ -174,25 +174,25 @@ describe("Pydantic-Zod cross-validation", () => {
   }
 });
 
-describe("GatewayMessage cross-validation", () => {
-  it("Zod parses Python minimal GatewayMessage snapshot", () => {
+describe("ServerMessage cross-validation", () => {
+  it("Zod parses Python minimal ServerMessage snapshot", () => {
     const pythonSnapshot = loadSnapshot("GatewayMessage_minimal");
-    const parsed = GatewayMessageSchema.parse(pythonSnapshot);
+    const parsed = ServerMessageSchema.parse(pythonSnapshot);
     expect(parsed.type).toBe("ping");
     expect(parsed.payload).toEqual({});
   });
 
-  it("Zod parses Python full GatewayMessage snapshot", () => {
+  it("Zod parses Python full ServerMessage snapshot", () => {
     const pythonSnapshot = loadSnapshot("GatewayMessage_full");
-    const parsed = GatewayMessageSchema.parse(pythonSnapshot);
+    const parsed = ServerMessageSchema.parse(pythonSnapshot);
     expect(parsed.type).toBe("spawn_agent");
     expect(parsed.request_id).toBe("abc123");
     expect(parsed.timestamp).toBe(12345.678);
   });
 
-  it("serializeMessage round-trips Python GatewayMessage snapshot", () => {
+  it("serializeMessage round-trips Python ServerMessage snapshot", () => {
     const pythonSnapshot = loadSnapshot("GatewayMessage_full");
-    const parsed = GatewayMessageSchema.parse(pythonSnapshot);
+    const parsed = ServerMessageSchema.parse(pythonSnapshot);
     const serialized = serializeMessage(parsed);
     const reparsed = parseMessage(serialized);
 

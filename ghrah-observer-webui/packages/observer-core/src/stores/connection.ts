@@ -5,7 +5,7 @@ export type ConnectionState = "disconnected" | "connecting" | "connected" | "rec
 
 export const useConnectionStore = defineStore("ghrah-connection", () => {
   const state = ref<ConnectionState>("disconnected");
-  const gatewayUrl = ref("ws://localhost:4111/ws");
+  const serverUrl = ref("ws://localhost:4112/ws");
 
   function setConnected() {
     state.value = "connected";
@@ -23,17 +23,17 @@ export const useConnectionStore = defineStore("ghrah-connection", () => {
     state.value = "reconnecting";
   }
 
-  function setGatewayUrl(url: string) {
-    gatewayUrl.value = url;
+  function setServerUrl(url: string) {
+    serverUrl.value = url;
   }
 
   return {
     state,
-    gatewayUrl,
+    serverUrl,
     setConnected,
     setDisconnected,
     setConnecting,
     setReconnecting,
-    setGatewayUrl,
+    setServerUrl,
   };
 });

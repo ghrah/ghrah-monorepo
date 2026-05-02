@@ -1,5 +1,5 @@
 import { ClientType, type CommandType, type EventType, SystemType } from "./enums.js";
-import type { GatewayMessage } from "./message.js";
+import type { ServerMessage } from "./message.js";
 
 export function generateRequestId(): string {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 12);
@@ -9,7 +9,7 @@ export function createCommand(
   commandType: CommandType,
   payload: Record<string, unknown>,
   requestId?: string,
-): GatewayMessage {
+): ServerMessage {
   return {
     type: commandType,
     payload,
@@ -21,7 +21,7 @@ export function createCommand(
 export function createEvent(
   eventType: EventType,
   payload: Record<string, unknown>,
-): GatewayMessage {
+): ServerMessage {
   return {
     type: eventType,
     payload,
@@ -33,7 +33,7 @@ export function createCommandResult(
   success: boolean,
   data?: unknown,
   error?: string,
-): GatewayMessage {
+): ServerMessage {
   return {
     type: SystemType.COMMAND_RESULT,
     payload: {
@@ -51,7 +51,7 @@ export function createError(
   message: string,
   details?: Record<string, unknown>,
   requestId?: string,
-): GatewayMessage {
+): ServerMessage {
   return {
     type: SystemType.ERROR,
     payload: {
@@ -63,10 +63,10 @@ export function createError(
   };
 }
 
-export function createPing(): GatewayMessage {
+export function createPing(): ServerMessage {
   return { type: SystemType.PING, payload: {} };
 }
 
-export function createPong(): GatewayMessage {
+export function createPong(): ServerMessage {
   return { type: SystemType.PONG, payload: {} };
 }

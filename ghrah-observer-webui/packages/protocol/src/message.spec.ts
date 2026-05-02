@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { ClientType, SystemType } from "./enums.js";
-import { GatewayMessageSchema, parseMessage, serializeMessage } from "./message.js";
+import { ServerMessageSchema, parseMessage, serializeMessage } from "./message.js";
 
-describe("GatewayMessageSchema", () => {
+describe("ServerMessageSchema", () => {
   it("parses a minimal message with only type", () => {
-    const result = GatewayMessageSchema.parse({ type: "ping" });
+    const result = ServerMessageSchema.parse({ type: "ping" });
     expect(result.type).toBe("ping");
     expect(result.payload).toEqual({});
     expect(result.request_id).toBeUndefined();
@@ -14,7 +14,7 @@ describe("GatewayMessageSchema", () => {
   });
 
   it("parses a full message with all fields", () => {
-    const result = GatewayMessageSchema.parse({
+    const result = ServerMessageSchema.parse({
       type: "spawn_agent",
       payload: { name: "agent-1" },
       request_id: "abc123",
@@ -30,11 +30,11 @@ describe("GatewayMessageSchema", () => {
   });
 
   it("rejects missing type", () => {
-    expect(() => GatewayMessageSchema.parse({ payload: {} })).toThrow();
+    expect(() => ServerMessageSchema.parse({ payload: {} })).toThrow();
   });
 
   it("accepts null for nullable optional fields", () => {
-    const result = GatewayMessageSchema.parse({
+    const result = ServerMessageSchema.parse({
       type: "ping",
       request_id: null,
       timestamp: null,

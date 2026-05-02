@@ -4,13 +4,13 @@ import {
   ClientType,
   type CommandResultPayload,
   CommandType,
-  GatewayClient,
-  type GatewayMessage,
+  ServerClient,
+  type ServerMessage,
   generateRequestId,
   type SubscribePayload,
 } from "@ghrah/protocol";
 
-export class ObserverClient extends GatewayClient {
+export class ObserverClient extends ServerClient {
   async subscribe(agentNames?: string[] | null, eventTypes?: string[] | null): Promise<void> {
     const payload: SubscribePayload = {};
     if (agentNames != null) payload.agent_names = agentNames;
@@ -18,7 +18,7 @@ export class ObserverClient extends GatewayClient {
 
     this._subscriptions.push(payload);
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.SUBSCRIBE,
       payload: payload as Record<string, unknown>,
       request_id: generateRequestId(),
@@ -40,7 +40,7 @@ export class ObserverClient extends GatewayClient {
         ),
     );
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.UNSUBSCRIBE,
       payload,
       request_id: generateRequestId(),
@@ -58,7 +58,7 @@ export class ObserverClient extends GatewayClient {
     if (abilities != null) payload["abilities"] = abilities;
     if (manifestRef != null) payload["manifest_ref"] = manifestRef;
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.SPAWN_AGENT,
       payload,
       request_id: generateRequestId(),
@@ -68,7 +68,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async terminateAgent(name: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.TERMINATE_AGENT,
       payload: { name },
       request_id: generateRequestId(),
@@ -82,7 +82,7 @@ export class ObserverClient extends GatewayClient {
     content: string,
     sender = "user",
   ): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.SEND_MESSAGE,
       payload: { target, content, sender },
       request_id: generateRequestId(),
@@ -92,7 +92,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async broadcastMessage(content: string, sender = "user"): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.BROADCAST_MESSAGE,
       payload: { content, sender },
       request_id: generateRequestId(),
@@ -102,7 +102,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async listAgents(): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.LIST_AGENTS,
       payload: {},
       request_id: generateRequestId(),
@@ -112,7 +112,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async healthCheck(): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.HEALTH_CHECK,
       payload: {},
       request_id: generateRequestId(),
@@ -125,7 +125,7 @@ export class ObserverClient extends GatewayClient {
     const payload: Record<string, unknown> = { promise_id: promiseId, approved };
     if (reason != null) payload["reason"] = reason;
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.HITL_RESPONSE,
       payload,
       request_id: generateRequestId(),
@@ -135,7 +135,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async getAgentInfo(name: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.GET_AGENT_INFO,
       payload: { name },
       request_id: generateRequestId(),
@@ -145,7 +145,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async initCluster(config?: Record<string, unknown>): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.INIT_CLUSTER,
       payload: { config: config ?? {} },
       request_id: generateRequestId(),
@@ -155,7 +155,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async shutdownCluster(): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.SHUTDOWN_CLUSTER,
       payload: {},
       request_id: generateRequestId(),
@@ -165,7 +165,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async clusterStatus(): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.CLUSTER_STATUS,
       payload: {},
       request_id: generateRequestId(),
@@ -175,7 +175,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async createWorkspace(agentName: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.CREATE_WORKSPACE,
       payload: { agent_name: agentName },
       request_id: generateRequestId(),
@@ -185,7 +185,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async destroyWorkspace(agentName: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.DESTROY_WORKSPACE,
       payload: { agent_name: agentName },
       request_id: generateRequestId(),
@@ -195,7 +195,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async workspaceSnapshot(agentName: string, message = ""): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.WORKSPACE_SNAPSHOT,
       payload: { agent_name: agentName, message },
       request_id: generateRequestId(),
@@ -205,7 +205,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async workspaceRollback(agentName: string, snapshotId: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.WORKSPACE_ROLLBACK,
       payload: { agent_name: agentName, snapshot_id: snapshotId },
       request_id: generateRequestId(),
@@ -221,7 +221,7 @@ export class ObserverClient extends GatewayClient {
     const payload: Record<string, unknown> = { agent_name: agentName };
     if (snapshotId != null) payload["snapshot_id"] = snapshotId;
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.WORKSPACE_DIFF,
       payload,
       request_id: generateRequestId(),
@@ -231,7 +231,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async workspaceStatus(agentName: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.WORKSPACE_STATUS,
       payload: { agent_name: agentName },
       request_id: generateRequestId(),
@@ -247,7 +247,7 @@ export class ObserverClient extends GatewayClient {
     data: Record<string, unknown>,
     namespace = "default",
   ): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.PERSIST_SAVE_NODE,
       payload: { key, data, namespace },
       request_id: generateRequestId(),
@@ -257,7 +257,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async persistLoadNode(key: string, namespace = "default"): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.PERSIST_LOAD_NODE,
       payload: { key, namespace },
       request_id: generateRequestId(),
@@ -267,7 +267,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async persistDeleteChain(key: string, namespace = "default"): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.PERSIST_DELETE_CHAIN,
       payload: { key, namespace },
       request_id: generateRequestId(),
@@ -280,7 +280,7 @@ export class ObserverClient extends GatewayClient {
     const payload: Record<string, unknown> = { namespace };
     if (prefix != null) payload["prefix"] = prefix;
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.PERSIST_LIST_AGENTS,
       payload,
       request_id: generateRequestId(),
@@ -295,7 +295,7 @@ export class ObserverClient extends GatewayClient {
     agentName: string,
     ability: AbilityDefinitionPayload,
   ): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.REGISTER_ABILITY,
       payload: { agent_name: agentName, ability },
       request_id: generateRequestId(),
@@ -309,7 +309,7 @@ export class ObserverClient extends GatewayClient {
     toAgent: string,
     content: string,
   ): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.DELEGATE,
       payload: { from_agent: fromAgent, to_agent: toAgent, content },
       request_id: generateRequestId(),
@@ -324,7 +324,7 @@ export class ObserverClient extends GatewayClient {
     const payload: Record<string, unknown> = {};
     if (namespace != null) payload["namespace"] = namespace;
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.MANIFEST_LIST_ABILITIES,
       payload,
       request_id: generateRequestId(),
@@ -334,7 +334,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async getAbility(fullName: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.MANIFEST_GET_ABILITY,
       payload: { full_name: fullName },
       request_id: generateRequestId(),
@@ -351,7 +351,7 @@ export class ObserverClient extends GatewayClient {
     const payload: Record<string, unknown> = { full_name: fullName, content };
     if (overwrite != null) payload["overwrite"] = overwrite;
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.MANIFEST_PUT_ABILITY,
       payload,
       request_id: generateRequestId(),
@@ -361,7 +361,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async deleteAbility(fullName: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.MANIFEST_DELETE_ABILITY,
       payload: { full_name: fullName },
       request_id: generateRequestId(),
@@ -374,7 +374,7 @@ export class ObserverClient extends GatewayClient {
     const payload: Record<string, unknown> = {};
     if (namespace != null) payload["namespace"] = namespace;
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.MANIFEST_LIST_AGENTS,
       payload,
       request_id: generateRequestId(),
@@ -384,7 +384,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async getAgent(fullName: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.MANIFEST_GET_AGENT,
       payload: { full_name: fullName },
       request_id: generateRequestId(),
@@ -401,7 +401,7 @@ export class ObserverClient extends GatewayClient {
     const payload: Record<string, unknown> = { full_name: fullName, content };
     if (overwrite != null) payload["overwrite"] = overwrite;
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.MANIFEST_PUT_AGENT,
       payload,
       request_id: generateRequestId(),
@@ -411,7 +411,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async deleteAgent(fullName: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.MANIFEST_DELETE_AGENT,
       payload: { full_name: fullName },
       request_id: generateRequestId(),
@@ -427,7 +427,7 @@ export class ObserverClient extends GatewayClient {
     const payload: Record<string, unknown> = { agent_full_name: agentFullName };
     if (runtimeName != null) payload["runtime_name"] = runtimeName;
 
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.MANIFEST_RESOLVE_AGENT,
       payload,
       request_id: generateRequestId(),
@@ -437,7 +437,7 @@ export class ObserverClient extends GatewayClient {
   }
 
   async validateManifest(content: string, manifestType: string): Promise<CommandResultPayload> {
-    const msg: GatewayMessage = {
+    const msg: ServerMessage = {
       type: CommandType.MANIFEST_VALIDATE,
       payload: { content, manifest_type: manifestType },
       request_id: generateRequestId(),

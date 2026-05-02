@@ -37,39 +37,49 @@
     "configuration": {
       "title": "Ghrah",
       "properties": {
-        "ghrah.gateway.url": {
+        "ghrah.core.url": {
           "type": "string",
           "default": "ws://localhost:4111/ws",
-          "description": "Gateway WebSocket URL"
+          "description": "Core WebSocket URL (for health check)"
         },
-        "ghrah.gateway.autoStart": {
+        "ghrah.core.autoStart": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically start Gateway on extension activation"
+          "description": "Automatically start Core process on extension activation"
         },
-        "ghrah.gateway.launchMethod": {
+        "ghrah.core.launchMethod": {
           "type": "string",
           "enum": [
             "uv",
             "binary"
           ],
           "default": "uv",
-          "description": "Method to launch Gateway (uv run or pre-built binary)"
+          "description": "Method to launch Core (uv run or pre-built binary)"
         },
-        "ghrah.gateway.binaryPath": {
+        "ghrah.core.binaryPath": {
           "type": "string",
           "default": "",
-          "description": "Path to pre-built Gateway binary (when launchMethod is 'binary')"
+          "description": "Path to pre-built Core binary (when launchMethod is 'binary')"
+        },
+        "ghrah.observer.url": {
+          "type": "string",
+          "default": "ws://localhost:4112/ws",
+          "description": "Observer Server WebSocket URL"
+        },
+        "ghrah.observer.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect to Observer Server on extension activation"
+        },
+        "ghrah.subject.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start Subject process on extension activation"
         },
         "ghrah.workspace.root": {
           "type": "string",
           "default": "",
           "description": "Workspace root directory for Subject"
-        },
-        "ghrah.subject.autoStart": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically start Subject on extension activation"
         },
         "ghrah.manifest.root": {
           "type": "string",

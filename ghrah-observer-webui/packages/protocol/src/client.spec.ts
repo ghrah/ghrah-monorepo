@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ConnectionError, GatewayClient, TimeoutError, type WebSocketLike } from "./client.js";
+import { ConnectionError, ServerClient, TimeoutError, type WebSocketLike } from "./client.js";
 import { ClientType, CommandType, EventType, SystemType } from "./enums.js";
-import type { GatewayMessage } from "./message.js";
+import type { ServerMessage } from "./message.js";
 
 const WS_OPEN = 1;
 const WS_CLOSED = 3;
@@ -28,8 +28,8 @@ function createMockWs(): MockWebSocket {
   return ws;
 }
 
-describe("GatewayClient", () => {
-  let client: GatewayClient;
+describe("ServerClient", () => {
+  let client: ServerClient;
   let mockWs: MockWebSocket;
 
   beforeEach(() => {
@@ -46,14 +46,14 @@ describe("GatewayClient", () => {
     maxReconnectDelay?: number;
     initialReconnectDelay?: number;
   }) {
-    const c = new GatewayClient("ws://localhost:8080/ws", "observer", {
+    const c = new ServerClient("ws://localhost:8080/ws", "observer", {
       ...opts,
       wsFactory: () => mockWs,
     });
     return c;
   }
 
-  async function connectClient(c: GatewayClient) {
+  async function connectClient(c: ServerClient) {
     const connectPromise = c.connect();
     mockWs.onopen!();
     await connectPromise;
@@ -61,14 +61,14 @@ describe("GatewayClient", () => {
 
   describe("_buildUrl", () => {
     it("includes client_type query param", () => {
-      client = new GatewayClient("ws://localhost:8080/ws", "observer");
+      client = new ServerClient("ws://localhost:8080/ws", "observer");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const url = (client as any)._buildUrl() as string;
       expect(url).toContain("client_type=observer");
     });
 
     it("includes last_seq_id when > 0", () => {
-      client = new GatewayClient("ws://localhost:8080/ws", "observer");
+      client = new ServerClient("ws://localhost:8080/ws", "observer");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (client as any)._lastSeqId = 42;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -77,7 +77,7 @@ describe("GatewayClient", () => {
     });
 
     it("omits last_seq_id when 0", () => {
-      client = new GatewayClient("ws://localhost:8080/ws", "observer");
+      client = new ServerClient("ws://localhost:8080/ws", "observer");
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const url = (client as any)._buildUrl() as string;
       expect(url).not.toContain("last_seq_id");
@@ -144,7 +144,7 @@ describe("GatewayClient", () => {
       client = createClientWithMockWs();
       await connectClient(client);
 
-      const msg: GatewayMessage = {
+      const msg: ServerMessage = {
         type: CommandType.LIST_AGENTS,
         payload: {},
         request_id: "test-req-001",
@@ -176,7 +176,7 @@ describe("GatewayClient", () => {
       client = createClientWithMockWs();
       await connectClient(client);
 
-      const msg: GatewayMessage = {
+      const msg: ServerMessage = {
         type: CommandType.LIST_AGENTS,
         payload: {},
         request_id: "test-timeout",
@@ -206,7 +206,7 @@ describe("GatewayClient", () => {
       });
 
       expect(handler).toHaveBeenCalledOnce();
-      const callArg = handler.mock.calls[0][0] as GatewayMessage;
+      const callArg = handler.mock.calls[0][0] as ServerMessage;
       expect(callArg.type).toBe("agent_spawned");
     });
 

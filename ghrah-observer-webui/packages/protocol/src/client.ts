@@ -1,10 +1,10 @@
 import { generateRequestId } from "./builders.js";
 import { CommandType, EventType, SystemType } from "./enums.js";
-import type { GatewayMessage } from "./message.js";
+import type { ServerMessage } from "./message.js";
 import { parseMessage, serializeMessage } from "./message.js";
 import type { CommandResultPayload, SubscribePayload } from "./payloads.js";
 
-type EventHandler = (message: GatewayMessage) => void;
+type EventHandler = (message: ServerMessage) => void;
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -40,7 +40,7 @@ function defaultWebSocketFactory(url: string): WebSocketLike {
   return new WebSocket(url) as unknown as WebSocketLike;
 }
 
-export class GatewayClient {
+export class ServerClient {
   protected _ws: WebSocketLike | null = null;
   protected _running = false;
   protected _seqId = 0;
@@ -67,7 +67,7 @@ export class GatewayClient {
   private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
-    protected _gatewayUrl: string,
+    protected _serverUrl: string,
     protected _clientType: string = "observer",
     opts?: {
       maxReconnectDelay?: number;
@@ -115,14 +115,14 @@ export class GatewayClient {
     }
   }
 
-  async send(message: GatewayMessage): Promise<void> {
+  async send(message: ServerMessage): Promise<void> {
     if (this._ws === null || this._ws.readyState !== WS_OPEN) {
-      throw new ConnectionError("Not connected to Gateway");
+      throw new ConnectionError("Not connected to server");
     }
     this._ws.send(serializeMessage(message));
   }
 
-  async request(message: GatewayMessage, timeout = 30_000): Promise<CommandResultPayload> {
+  async request(message: ServerMessage, timeout = 30_000): Promise<CommandResultPayload> {
     const requestId = message.request_id ?? generateRequestId();
     message.request_id = requestId;
     this._requestCommandTypes.set(requestId, message.type);
@@ -188,8 +188,8 @@ export class GatewayClient {
   }
 
   protected _buildUrl(): string {
-    const sep = this._gatewayUrl.includes("?") ? "&" : "?";
-    let url = `${this._gatewayUrl}${sep}client_type=${this._clientType}&client_id=${this._clientId}`;
+    const sep = this._serverUrl.includes("?") ? "&" : "?";
+    let url = `${this._serverUrl}${sep}client_type=${this._clientType}&client_id=${this._clientId}`;
     if (this._lastSeqId > 0) {
       url += `&last_seq_id=${this._lastSeqId}`;
     }
@@ -242,7 +242,7 @@ export class GatewayClient {
 
       ws.onerror = () => {
         if (this._ws === null || this._ws.readyState !== WS_OPEN) {
-          reject(new ConnectionError("Failed to connect to Gateway"));
+          reject(new ConnectionError("Failed to connect to server"));
         }
       };
     });
@@ -266,11 +266,11 @@ export class GatewayClient {
 
   protected async _resubscribe(): Promise<void> {
     for (const sub of this._subscriptions) {
-      const msg: GatewayMessage = {
+      const msg: ServerMessage = {
         type: CommandType.SUBSCRIBE,
         payload: sub as Record<string, unknown>,
         request_id: generateRequestId(),
-        client_type: this._clientType as GatewayMessage["client_type"],
+        client_type: this._clientType as ServerMessage["client_type"],
       };
       await this.send(msg);
     }
@@ -326,7 +326,7 @@ export class GatewayClient {
     }
   }
 
-  protected _applyStateFold(message: GatewayMessage): void {
+  protected _applyStateFold(message: ServerMessage): void {
     const msgType = message.type;
     const eventValues = Object.values(EventType) as string[];
     if (!eventValues.includes(msgType)) return;
@@ -343,7 +343,7 @@ export class GatewayClient {
     this._foldedState.set(foldKey, payload);
   }
 
-  protected _dispatch(msgType: string, message: GatewayMessage): void {
+  protected _dispatch(msgType: string, message: ServerMessage): void {
     const handlers = this._eventHandlers.get(msgType) ?? this._systemHandlers.get(msgType);
     if (handlers) {
       for (const handler of handlers) {
@@ -391,7 +391,7 @@ export class GatewayClient {
   private static readonly SYSTEM_TYPES = new Set<string>(Object.values(SystemType));
 
   private _isSystemType(type: string): boolean {
-    return GatewayClient.SYSTEM_TYPES.has(type);
+    return ServerClient.SYSTEM_TYPES.has(type);
   }
 }
 
