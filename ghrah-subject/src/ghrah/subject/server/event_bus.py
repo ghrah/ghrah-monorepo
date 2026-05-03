@@ -113,9 +113,11 @@ class EventBus:
             event_type=event_type,
         )
 
-        logger.debug(
-            f"Event '{event_type}' published to {sent_count} Observer sessions "
-            f"(agent={agent_name})"
+        logger.info(
+            "Event '%s' published to %d Observer sessions (agent=%s)",
+            event_type,
+            sent_count,
+            agent_name,
         )
         return sent_count
 
@@ -155,5 +157,15 @@ class EventBus:
         """转发来自 Core 的事件到 Observer。
 
         用于将从 Core 连接收到的事件（agent_spawned 等）转发给 Observer。
+        将 payload 中 "name" 键映射为 "agent_name" 以确保订阅过滤正常工作。
         """
+        payload = dict(event.payload)
+        if "agent_name" not in payload and "name" in payload:
+            payload["agent_name"] = payload["name"]
+        event = Message(type=event.type, payload=payload)
+        logger.info(
+            "Emitting core event to Observer: type=%s agent=%s",
+            event.type,
+            payload.get("agent_name") or payload.get("name", ""),
+        )
         return await self.publish(event)

@@ -234,6 +234,12 @@ class ObserverRouter:
             result = await self._core_forward_handler(
                 message.type, message.payload, request_id
             )
+            if result is None:
+                return create_command_result(
+                    request_id=request_id,
+                    success=False,
+                    error="Core forward handler returned None",
+                )
             return create_command_result(
                 request_id=request_id,
                 success=result.get("success", True),
@@ -261,6 +267,12 @@ class ObserverRouter:
 
         try:
             result = await self._workspace_handler(message.type, message.payload)
+            if result is None:
+                return create_command_result(
+                    request_id=request_id,
+                    success=False,
+                    error="Workspace handler returned None",
+                )
             return create_command_result(
                 request_id=request_id,
                 success=result.get("success", True),
@@ -288,6 +300,12 @@ class ObserverRouter:
 
         try:
             result = await self._manifest_handler(message.type, message.payload)
+            if result is None:
+                return create_command_result(
+                    request_id=request_id,
+                    success=False,
+                    error="Manifest handler returned None",
+                )
             return create_command_result(
                 request_id=request_id,
                 success=result.get("success", True),
@@ -315,6 +333,12 @@ class ObserverRouter:
 
         try:
             result = await self._persist_handler(message.type, message.payload)
+            if result is None:
+                return create_command_result(
+                    request_id=request_id,
+                    success=False,
+                    error="Persist handler returned None",
+                )
             return create_command_result(
                 request_id=request_id,
                 success=result.get("success", True),
@@ -342,6 +366,12 @@ class ObserverRouter:
 
         try:
             result = await self._ability_handler(message.type, message.payload)
+            if result is None:
+                return create_command_result(
+                    request_id=request_id,
+                    success=False,
+                    error="Ability handler returned None",
+                )
             return create_command_result(
                 request_id=request_id,
                 success=result.get("success", True),

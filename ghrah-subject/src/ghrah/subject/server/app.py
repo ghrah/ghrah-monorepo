@@ -18,6 +18,7 @@ from typing import Any
 
 from fastapi import FastAPI, WebSocket
 
+from ghrah.protocol.types import Message
 from ghrah.subject.server.config import ObserverServerConfig
 from ghrah.subject.server.connection_manager import ConnectionManager
 from ghrah.subject.server.event_bus import EventBus
@@ -36,6 +37,7 @@ def create_app(
     hitl_response_handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None = None,
     persist_handler: CommandHandler | None = None,
     ability_handler: CommandHandler | None = None,
+    core_event_handler: Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]] | None = None,
 ) -> FastAPI:
     """创建 FastAPI 应用实例。
 
@@ -47,6 +49,7 @@ def create_app(
         hitl_response_handler: HITL 响应本地处理器回调
         persist_handler: persist_* 命令的本地处理器回调
         ability_handler: execute_ability 命令的本地处理器回调
+        core_event_handler: Core 事件转发回调（如未提供，自动通过 EventBus 转发）
 
     Returns:
         配置好的 FastAPI 应用实例
@@ -59,6 +62,15 @@ def create_app(
         connection_manager,
         event_store_capacity=config.event_replay_capacity,
     )
+
+    effective_core_event_handler = core_event_handler
+
+    async def _default_core_event_handler(event_type: str, payload: dict[str, Any]) -> None:
+        message = Message(type=event_type, payload=payload)
+        await event_bus.emit_core_event(message)
+
+    if effective_core_event_handler is None:
+        effective_core_event_handler = _default_core_event_handler
     router = ObserverRouter(
         connection_manager,
         event_bus,
@@ -90,6 +102,8 @@ def create_app(
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    app.state.core_event_handler = effective_core_event_handler
 
     @app.websocket(config.ws_path)
     async def websocket_endpoint(websocket: WebSocket):

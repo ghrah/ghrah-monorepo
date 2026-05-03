@@ -65,6 +65,7 @@ _CORE_EVENT_TYPES = frozenset({
     "action_chain_updated",
     "agent_error",
     "health_status",
+    "ability_result",
 })
 
 _PERSIST_COMMANDS = frozenset({
@@ -148,6 +149,9 @@ class SubjectService:
         self._ability_runner: AbilityRunner | None = None
         self._permission_checker: PermissionChecker | None = None
         self._manifest_store: ManifestStore | None = None
+
+        # 外部回调：Core 事件转发到 Observer EventBus
+        self._core_event_handler: Any = None
 
     async def start(self) -> None:
         """启动服务：初始化子系统，连接 Core，进入消息循环。
@@ -682,7 +686,10 @@ class SubjectService:
         return result
 
     async def _handle_core_event(self, event_type: str, payload: dict[str, Any]) -> None:
-        """处理从 Core 收到的 Core 事件。"""
+        """处理从 Core 收到的 Core 事件。
+
+        本地处理后再转发到 Observer EventBus，供 Observer 客户端接收。
+        """
         if event_type == "agent_spawned":
             agent_name = payload.get("name", "")
             if agent_name and self._workspace_mgr is not None:
@@ -725,6 +732,18 @@ class SubjectService:
         elif event_type == "health_status":
             logger.info("Health status: %s", payload.get("status", {}))
 
+        if self._core_event_handler is not None:
+            try:
+                await self._core_event_handler(event_type, payload)
+                logger.info("Core event forwarded to Observer: %s", event_type)
+            except Exception:
+                logger.exception("core_event_handler failed for %s", event_type)
+        else:
+            logger.warning(
+                "Core event not forwarded: no core_event_handler set for %s",
+                event_type,
+            )
+
     async def _handle_hitl_response(self, payload: dict[str, Any]) -> None:
         """处理 Observer 发来的 HITL 审批响应。
 
@@ -750,27 +769,31 @@ class SubjectService:
             logger.warning("HITL response for unknown/expired promise: %s", promise_id)
 
     async def _on_hitl_promise_created(self, promise: HITLPromise) -> None:
-        """HITL Promise 创建回调：将请求广播给 Observer。
+        """HITL Promise 创建回调：将请求推送给 Observer。
 
-        AbilityRunner 创建 HITL Promise 后调用此回调，
-        通过 Core WebSocket 将 hitl_request 事件发送给 Observer。
+        在分布式架构中，HITL 是 Subject 与 Observer 之间的交互，
+        Core 不参与 HITL 流程。HITL 请求直接通过本地 EventBus
+        推送到 Observer 客户端。
         """
-        if not self._running or self._ws is None:
-            logger.warning("Cannot broadcast HITL request: service not running or not connected")
-            return
-
         hitl_payload = HITLRequestPayload(
             promise_id=promise.promise_id,
             agent_name=promise.agent_name,
             ability_name=promise.ability_name,
             tool_args=promise.tool_args,
         )
-        msg = Message(
-            type=EventType.HITL_REQUEST.value,
-            payload=hitl_payload.model_dump(),
-        )
-        await self._ws.send(msg.model_dump_json())
-        logger.info("HITL request broadcasted: promise_id=%s", promise.promise_id)
+        payload = hitl_payload.model_dump()
+
+        if self._core_event_handler is not None:
+            try:
+                await self._core_event_handler(EventType.HITL_REQUEST.value, payload)
+                logger.info("HITL request emitted to Observer: promise_id=%s", promise.promise_id)
+            except Exception:
+                logger.exception("Failed to emit HITL request to Observer")
+        else:
+            logger.warning(
+                "Cannot emit HITL request: no event handler set (promise_id=%s)",
+                promise.promise_id,
+            )
 
     def _resolve_workspace_path(self, agent_name: str) -> str | None:
         """查询 Agent 的工作区绝对路径。
@@ -847,7 +870,7 @@ class SubjectService:
 
     async def _handle_forward_to_core(
         self, msg_type: str, payload: dict[str, Any], request_id: str | None
-    ) -> None:
+    ) -> dict[str, Any]:
         """处理 Observer 转发的 Agent 管理命令。
 
         这些命令来自 Observer（经 Core 转发），Subject 需要将它们转发给 Core，
@@ -866,6 +889,9 @@ class SubjectService:
             msg_type: 命令类型
             payload: 命令载荷
             request_id: 请求 ID，用于关联响应
+
+        Returns:
+            包含 success/data/error 的结果字典
         """
         logger.info("Forwarding command to Core: %s (request_id=%s)", msg_type, request_id)
 
@@ -887,7 +913,7 @@ class SubjectService:
                 "cannot relay response (fire-and-forget)",
                 msg_type,
             )
-            return
+            return {"success": True, "data": None, "error": "fire-and-forget: no request_id"}
 
         # 等待 Core 的 command_result 响应，然后回传给 Core
         # 使 Core 的 _handle_subject_forward Future 正确 resolve
@@ -911,7 +937,7 @@ class SubjectService:
                     request_id=request_id,
                 )
                 await self._ws.send(error_response.model_dump_json())
-            return
+            return {"success": False, "error": f"Forwarded command {msg_type} timed out"}
         except Exception:
             logger.exception(
                 "Error waiting for forwarded command response (request_id=%s)",
@@ -928,7 +954,7 @@ class SubjectService:
                     request_id=request_id,
                 )
                 await self._ws.send(error_response.model_dump_json())
-            return
+            return {"success": False, "error": f"Forwarded command {msg_type} failed"}
 
         # 将 command_result 回传给 Core
         if self._running and self._ws is not None:
@@ -944,6 +970,8 @@ class SubjectService:
                 msg_type,
                 request_id,
             )
+
+        return result
 
     def _resolve_spawn_manifest(self, payload: dict[str, Any]) -> dict[str, Any]:
         """将 manifest_ref 解析为完整的 spawn_agent payload。
@@ -1101,15 +1129,6 @@ class SubjectService:
                 # HITL 审批响应
                 elif msg_type == "hitl_response":
                     await self._handle_hitl_response(payload)
-
-                # Core 单体模式的 HITL 请求转发给 Observer
-                elif msg_type == EventType.HITL_REQUEST.value:
-                    if self._running and self._ws is not None:
-                        fwd_msg = Message(
-                            type=EventType.HITL_REQUEST.value,
-                            payload=payload,
-                        )
-                        await self._ws.send(fwd_msg.model_dump_json())
 
                 # 心跳
                 elif msg_type == SystemType.PING.value:
