@@ -22,5 +22,4 @@ ghrah-subject
 |---------|------|-------|
 | `GHRAH_SUBJECT_WORKSPACE_ROOT` | 工作区根路径 | `~/ghrah-workspace` |
 | `GHRAH_SUBJECT_DB_PATH` | SQLite 数据库路径 | `~/.ghrah/subject.db` |
-| `GHRAH_SUBJECT_GATEWAY_URL` | Gateway WebSocket URL | `ws://localhost:8000/ws` |
 | `GHRAH_SUBJECT_LOG_LEVEL` | 日志级别 | `INFO` |

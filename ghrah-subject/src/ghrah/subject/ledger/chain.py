@@ -1,6 +1,6 @@
 """ActionChain 分类账：追加写入的不可变账本。
 
-接收 Core 的 ACTION_CHAIN_UPDATED 事件（经 Gateway），持久化节点数据到 SQLite，
+接收 Core 的 ACTION_CHAIN_UPDATED 事件（经 Core Server），持久化节点数据到 SQLite，
 维护内存中的 ActionChain 索引用于快速查询，支持跨 Agent DAG 遍历。
 
 关键设计：

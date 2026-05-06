@@ -1,6 +1,6 @@
-"""SubjectPersistenceService：接收 Gateway 的持久化命令，委托给 SqliteBackend 执行。
+"""SubjectPersistenceService：接收 Core Server 的持久化命令，委托给 SqliteBackend 执行。
 
-这是 Core 的 RemoteBackend 的服务端。Core 通过 Gateway 发送 persist_* 命令，
+这是 Core 的 RemoteBackend 的服务端。Core 通过 Subject 连接发送 persist_* 命令，
 Subject 的 SubjectPersistenceService 接收命令，委托给 SqliteBackend 执行实际的 SQLite I/O。
 
 命令协议（与 RemoteBackend 一一对应）：
@@ -51,7 +51,7 @@ _PERSIST_COMMANDS = frozenset({
 
 
 class SubjectPersistenceService:
-    """接收 Gateway 的持久化命令，委托给 SqliteBackend 执行。
+    """接收 Core Server 的持久化命令，委托给 SqliteBackend 执行。
 
     Usage::
 
@@ -95,7 +95,7 @@ class SubjectPersistenceService:
     async def handle_command(
         self, command: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
-        """处理来自 Gateway 的持久化命令。
+        """处理来自 Core Server 的持久化命令。
 
         Args:
             command: 命令名称（persist_*）

@@ -47,7 +47,7 @@ def _config_to_payload_dict(config: Any) -> dict[str, Any]:
         "description": config.description,
         "system_prompt": config.system_prompt,
         "max_iterations": config.max_iterations,
-        "gateway_url": config.gateway_url,
+        "communication_timeout": config.communication_timeout,
         "window": window_dict,
         "context": context_dict,
         "model_overrides": model_overrides_dict,
@@ -143,6 +143,7 @@ def handle_manifest_command(
                         "system_prompt": m.system_prompt,
                         "ability_refs": [ar.ref or ar.type or "" for ar in m.abilities],
                         "max_iterations": m.max_iterations,
+                        "communication_timeout": m.communication_timeout,
                     })
                 except Exception:
                     agents.append({"full_name": name})

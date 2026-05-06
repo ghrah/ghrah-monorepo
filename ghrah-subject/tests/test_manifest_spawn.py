@@ -65,6 +65,7 @@ class TestResolveSpawnManifest:
         assert config["agent_config_name"] == "default"
         assert config["system_prompt"] == "You are a coder."
         assert config["max_iterations"] == 20
+        assert config["communication_timeout"] == 300.0
         assert config["description"] == ""
 
     def test_expands_abilities_from_manifest(self, service: MagicMock) -> None:
@@ -98,18 +99,6 @@ class TestResolveSpawnManifest:
         model_overrides = result["config"]["model_overrides"]
         assert model_overrides is not None
         assert model_overrides["temperature"] == 0.3
-
-    def test_gateway_url_from_config_payload(self, service: MagicMock) -> None:
-        from ghrah.subject.service import SubjectService
-
-        payload = {
-            "manifest_ref": "ghrah.coder",
-            "config": {"name": "my-coder", "gateway_url": "ws://localhost:8000/ws"},
-            "abilities": None,
-        }
-        result = SubjectService._resolve_spawn_manifest(service, payload)
-
-        assert result["config"]["gateway_url"] == "ws://localhost:8000/ws"
 
     def test_manifest_ref_cleared(self, service: MagicMock) -> None:
         from ghrah.subject.service import SubjectService

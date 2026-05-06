@@ -366,7 +366,6 @@ class SubjectService:
         abilities: list[dict[str, Any]] | None = None,
         use_remote_executor: bool = True,
         persistence_type: str = "remote",
-        gateway_url: str | None = None,
     ) -> dict[str, Any]:
         """通过 Core 创建 Agent。
 
@@ -377,7 +376,6 @@ class SubjectService:
             abilities: Ability 配置列表
             use_remote_executor: 是否使用远程能力执行
             persistence_type: 持久化类型
-            gateway_url: Core WebSocket URL（Agent 分布式事件发布用）
 
         Returns:
             命令响应
@@ -389,7 +387,6 @@ class SubjectService:
             name=name,
             agent_config_name=agent_config_name,
             system_prompt=system_prompt,
-            gateway_url=gateway_url,
         )
         ability_defs = None
         if abilities:
@@ -999,9 +996,7 @@ class SubjectService:
             "description": resolved.config.description,
             "system_prompt": resolved.config.system_prompt,
             "max_iterations": resolved.config.max_iterations,
-            "gateway_url": (
-                resolved.config.gateway_url or config_payload.get("gateway_url")
-            ),
+            "communication_timeout": resolved.config.communication_timeout,
             "window": (
                 dataclasses.asdict(resolved.config.window)
                 if resolved.config.window

@@ -1,6 +1,6 @@
 """Subject 端 Ability 执行器。
 
-接收 Core（通过 Gateway）的 EXECUTE_ABILITY 命令，
+接收 Core 的 EXECUTE_ABILITY 命令，
 在本地执行 Ability，执行前通过 HITLNotary 检查权限。
 
 执行流程：
@@ -61,12 +61,12 @@ class AbilityRunner:
     执行前通过 HITLNotary 检查是否需要人工审批。
 
     分布式模式下：
-    1. Core 通过 Gateway 发送 execute_ability 请求
+    1. Core 发送 execute_ability 请求
     2. Subject AbilityRunner 接收请求
     3. 路径解析：将相对路径解析为 Agent 工作区内的绝对路径
     4. 权限检查（PermissionChecker 硬性拒绝 + HITLNotary 审批）
     5. 本地执行 Ability（Subject 持有工作区和物理状态）
-    6. 将 ActionResult 通过 Gateway 返回给 Core
+    6. 将 ActionResult 返回给 Core
     """
 
     def __init__(
@@ -88,7 +88,7 @@ class AbilityRunner:
         """绑定 HITL Promise 创建回调。
 
         当 AbilityRunner 创建 HITL Promise 时，调用此回调将请求广播给 Observer。
-        分布式模式下由 SubjectService 调用此方法注入 Gateway 广播逻辑。
+        分布式模式下由 SubjectService 调用此方法注入 Core Server 广播逻辑。
 
         Args:
             callback: 接收 HITLPromise 的异步回调，用于将 HITL 请求发送给 Observer。
