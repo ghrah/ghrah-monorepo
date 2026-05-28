@@ -107,6 +107,13 @@ class CommandType(StrEnum):
     WORKSPACE_DIFF = "workspace_diff"
     WORKSPACE_STATUS = "workspace_status"
 
+    # ─── Session 管理类（Observer → Subject → Core）───
+    SESSION_CREATE = "session_create"
+    SESSION_SWITCH = "session_switch"
+    SESSION_LIST = "session_list"
+    SESSION_ARCHIVE = "session_archive"
+    SESSION_DELETE = "session_delete"
+
     # ─── Manifest CRUD 类（Observer → Subject）───
     MANIFEST_LIST_ABILITIES = "manifest_list_abilities"
     MANIFEST_GET_ABILITY = "manifest_get_ability"
@@ -150,6 +157,13 @@ class EventType(StrEnum):
     MANIFEST_AGENT_UPDATED = "manifest_agent_updated"
     MANIFEST_AGENT_DELETED = "manifest_agent_deleted"
 
+    # ─── Session 事件（Core → Observer）───
+    SESSION_CREATED = "session_created"
+    SESSION_SWITCHED = "session_switched"
+    SESSION_ARCHIVED = "session_archived"
+    SESSION_DELETED = "session_deleted"
+    SESSION_LIST_RESULT = "session_list_result"
+
 
 class SystemType(StrEnum):
     """系统消息类型。"""
@@ -192,6 +206,19 @@ CORE_COMMANDS: frozenset[str] = frozenset({
     CommandType.INIT_CLUSTER.value,
     CommandType.SHUTDOWN_CLUSTER.value,
     CommandType.CLUSTER_STATUS.value,
+    CommandType.SESSION_CREATE.value,
+    CommandType.SESSION_SWITCH.value,
+    CommandType.SESSION_LIST.value,
+    CommandType.SESSION_ARCHIVE.value,
+    CommandType.SESSION_DELETE.value,
+})
+
+SESSION_COMMANDS: frozenset[str] = frozenset({
+    CommandType.SESSION_CREATE.value,
+    CommandType.SESSION_SWITCH.value,
+    CommandType.SESSION_LIST.value,
+    CommandType.SESSION_ARCHIVE.value,
+    CommandType.SESSION_DELETE.value,
 })
 
 WORKSPACE_COMMANDS: frozenset[str] = frozenset({
@@ -644,6 +671,100 @@ class ManifestResolveAgentResponsePayload(BaseModel):
 
     config: dict[str, Any]
     abilities: list[dict[str, Any]]
+
+
+# ─── Session 命令载荷模型 ───
+
+
+class SessionCreatePayload(BaseModel):
+    """session_create 命令载荷。"""
+
+    agent_name: str
+    session_name: str | None = None
+    from_node_id: str | None = None
+    system_prompt: str | None = None
+
+
+class SessionSwitchPayload(BaseModel):
+    """session_switch 命令载荷。"""
+
+    agent_name: str
+    session_id: str
+
+
+class SessionListPayload(BaseModel):
+    """session_list 命令载荷。"""
+
+    agent_name: str
+
+
+class SessionArchivePayload(BaseModel):
+    """session_archive 命令载荷。"""
+
+    agent_name: str
+    session_id: str
+
+
+class SessionDeletePayload(BaseModel):
+    """session_delete 命令载荷。"""
+
+    agent_name: str
+    session_id: str
+
+
+# ─── Session 事件载荷模型 ───
+
+
+class SessionInfoPayload(BaseModel):
+    """Session 信息载荷，用于 session 事件和查询结果。"""
+
+    session_id: str
+    agent_name: str
+    branch_name: str
+    state: str = "active"
+    head_node_id: str | None = None
+    root_node_id: str | None = None
+    parent_session_id: str | None = None
+    fork_point_node_id: str | None = None
+    created_at: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    message_count: int = 0
+    iteration_count: int = 0
+
+
+class SessionCreatedPayload(BaseModel):
+    """session_created 事件载荷。"""
+
+    agent_name: str
+    session: SessionInfoPayload
+
+
+class SessionSwitchedPayload(BaseModel):
+    """session_switched 事件载荷。"""
+
+    agent_name: str
+    session: SessionInfoPayload
+
+
+class SessionArchivedPayload(BaseModel):
+    """session_archived 事件载荷。"""
+
+    agent_name: str
+    session_id: str
+
+
+class SessionDeletedPayload(BaseModel):
+    """session_deleted 事件载荷。"""
+
+    agent_name: str
+    session_id: str
+
+
+class SessionListResultPayload(BaseModel):
+    """session_list_result 事件载荷。"""
+
+    agent_name: str
+    sessions: list[SessionInfoPayload]
 
 
 # ─── Manifest 事件载荷模型 ───
