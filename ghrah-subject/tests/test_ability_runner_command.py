@@ -171,8 +171,6 @@ class TestAbilityRunnerWorkingDir:
         from ghrah.subject.ability_runner import AbilityRunner
 
         runner = AbilityRunner.__new__(AbilityRunner)
-        runner.PATH_ABILITIES = AbilityRunner.PATH_ABILITIES
-        runner.WORKING_DIR_ABILITIES = AbilityRunner.WORKING_DIR_ABILITIES
         runner._workspace_resolver = lambda name: f"/workspace/{name}"
 
         result = runner._resolve_paths(
@@ -186,8 +184,6 @@ class TestAbilityRunnerWorkingDir:
         from ghrah.subject.ability_runner import AbilityRunner
 
         runner = AbilityRunner.__new__(AbilityRunner)
-        runner.PATH_ABILITIES = AbilityRunner.PATH_ABILITIES
-        runner.WORKING_DIR_ABILITIES = AbilityRunner.WORKING_DIR_ABILITIES
         runner._workspace_resolver = lambda name: f"/workspace/{name}"
 
         result = runner._resolve_paths(
@@ -201,8 +197,6 @@ class TestAbilityRunnerWorkingDir:
         from ghrah.subject.ability_runner import AbilityRunner
 
         runner = AbilityRunner.__new__(AbilityRunner)
-        runner.PATH_ABILITIES = AbilityRunner.PATH_ABILITIES
-        runner.WORKING_DIR_ABILITIES = AbilityRunner.WORKING_DIR_ABILITIES
         runner._workspace_resolver = lambda name: f"/workspace/{name}"
 
         result = runner._resolve_paths(

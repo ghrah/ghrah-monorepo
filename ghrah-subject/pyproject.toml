@@ -5,10 +5,10 @@ description = "ghrah 控制面/执行层 - 持有工作区、执行沙箱命令�
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "ghrah",
+    "ghrah-core",
     "ghrah-protocol",
     "aiosqlite>=0.20",
-    "agentsconfig",
+    "agentconf",
     "websockets>=12.0",
     "fastapi>=0.136.1",
     "uvicorn[standard]>=0.34.0",
@@ -25,9 +25,9 @@ build-backend = "hatchling.build"
 packages = ["src/ghrah"]
 
 [tool.uv.sources]
-ghrah = { workspace = true }
+ghrah-core = { workspace = true }
 ghrah-protocol = { workspace = true }
-agentsconfig = { path = "/home/yuki/gitrepos/agentsconfig/" }
+agentconf = { path = "/home/yuki/gitrepos/agentconf/" }
 
 [dependency-groups]
 dev = [

@@ -1,6 +1,6 @@
 """Subject 端权限检查器。
 
-基于 manifest PermissionFlags 进行权限判断，替代原先硬编码的能力分类集合。
+基于 manifest PermissionFlags 进行权限判断。
 
 权限模型：
 - manifest 权限标志（fs_write, fs_read_only, shell_access, require_hitl）决定能力分类
@@ -21,12 +21,13 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from ghrah.abilities._utils import is_subpath
 from ghrah.abilities.builtin.command_safety import (
     CommandSafetyCategory,
     CommandSafetyChecker,
 )
 from ghrah.manifest.types import PermissionFlags
-from ghrah.subject._utils import ABILITY_PATH_SPECS, extract_paths, is_subpath
+from ghrah.subject._utils import extract_paths
 
 __all__ = ["PermissionChecker", "PermissionDecision", "PermissionVerdict"]
 

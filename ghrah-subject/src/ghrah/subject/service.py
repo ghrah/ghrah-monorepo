@@ -66,6 +66,11 @@ _CORE_EVENT_TYPES = frozenset({
     "agent_error",
     "health_status",
     "ability_result",
+    "session_created",
+    "session_switched",
+    "session_archived",
+    "session_deleted",
+    "session_list_result",
 })
 
 _PERSIST_COMMANDS = frozenset({
@@ -127,7 +132,7 @@ class SubjectService:
     内部接口：
     - _handle_execute_ability(): 处理 Ability 执行命令
     - _handle_command(): 处理 persist_* 命令
-    - _handle_core_event(): 处理 Core 事件
+    - _handle_core_event(): 处理 Core 事件（含 session 事件转发）
     - _handle_hitl_response(): 处理 HITL 审批响应
     - _on_hitl_promise_created(): HITL 请求广播回调
     """
@@ -371,7 +376,7 @@ class SubjectService:
 
         Args:
             name: Agent 运行时名称
-            agent_config_name: agentsconfig 中的配置名称
+            agent_config_name: agentconf 中的配置名称
             system_prompt: 系统提示词
             abilities: Ability 配置列表
             use_remote_executor: 是否使用远程能力执行
@@ -1043,8 +1048,8 @@ class SubjectService:
         - execute_ability: 在后台 Task 执行（可能阻塞等待 HITL）
         - persist_*: 直接调用 persistence
         - workspace_*: 直接调用 WorkspaceManager
-        - subject_forward_commands (spawn_agent, send_message 等): 转发给 Core
-        - core events: 调用 _handle_core_event
+        - subject_forward_commands (spawn_agent, send_message, session_* 等): 转发给 Core
+        - core events (含 session 事件): 调用 _handle_core_event
         - hitl_response: 调用 _handle_hitl_response resolve Promise
         - ping: 响应 pong
         """
