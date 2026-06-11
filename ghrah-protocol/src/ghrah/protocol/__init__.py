@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from ghrah.protocol.types import (
+    CHAIN_HISTORY_COMMANDS,
     CORE_COMMANDS,
     MANIFEST_COMMANDS,
     PERSIST_COMMANDS,
@@ -17,6 +18,7 @@ from ghrah.protocol.types import (
     AgentSpawnedPayload,
     AgentTerminatedPayload,
     BroadcastMessagePayload,
+    ChainHistoryResultPayload,
     ClientType,
     ClusterStatusPayload,
     CommandResultPayload,
@@ -28,6 +30,7 @@ from ghrah.protocol.types import (
     EventType,
     ExecuteAbilityPayload,
     GetAgentInfoPayload,
+    GetChainHistoryPayload,
     HealthCheckPayload,
     HealthStatusPayload,
     HITLRequestPayload,
@@ -100,6 +103,8 @@ __all__ = [
     "AgentSpawnedPayload",
     "AgentTerminatedPayload",
     "BroadcastMessagePayload",
+    "CHAIN_HISTORY_COMMANDS",
+    "ChainHistoryResultPayload",
     "ClientType",
     "ClusterStatusPayload",
     "CommandType",
@@ -112,6 +117,7 @@ __all__ = [
     "EventType",
     "ExecuteAbilityPayload",
     "GetAgentInfoPayload",
+    "GetChainHistoryPayload",
     "HITLRequestPayload",
     "HITLResponsePayload",
     "HealthCheckPayload",

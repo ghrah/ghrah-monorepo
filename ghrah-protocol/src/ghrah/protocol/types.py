@@ -126,6 +126,9 @@ class CommandType(StrEnum):
     MANIFEST_RESOLVE_AGENT = "manifest_resolve_agent"
     MANIFEST_VALIDATE = "manifest_validate"
 
+    # ─── Chain History 类（Observer → Subject）───
+    GET_CHAIN_HISTORY = "get_chain_history"
+
 
 class EventType(StrEnum):
     """事件类型。
@@ -241,6 +244,10 @@ MANIFEST_COMMANDS: frozenset[str] = frozenset({
     CommandType.MANIFEST_DELETE_AGENT.value,
     CommandType.MANIFEST_RESOLVE_AGENT.value,
     CommandType.MANIFEST_VALIDATE.value,
+})
+
+CHAIN_HISTORY_COMMANDS: frozenset[str] = frozenset({
+    CommandType.GET_CHAIN_HISTORY.value,
 })
 
 
@@ -419,6 +426,7 @@ class AgentResponsePayload(BaseModel):
     sender: str
     recipient: str
     content: str
+    content_blocks: list[dict[str, Any]] | None = None
     message_type: str = "result"
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -712,6 +720,23 @@ class SessionDeletePayload(BaseModel):
     session_id: str
 
 
+class GetChainHistoryPayload(BaseModel):
+    """get_chain_history 命令载荷。"""
+
+    agent_name: str
+    branch_name: str = "main"
+    limit: int = -1
+
+
+class ChainHistoryResultPayload(BaseModel):
+    """get_chain_history 命令的响应载荷。"""
+
+    agent_name: str
+    branch_name: str = "main"
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    active_session_id: str = ""
+
+
 # ─── Session 事件载荷模型 ───
 
 
@@ -723,7 +748,7 @@ class SessionInfoPayload(BaseModel):
     branch_name: str
     state: str = "active"
     head_node_id: str | None = None
-    root_node_id: str | None = None
+    # root_node_id: str | None = None
     parent_session_id: str | None = None
     fork_point_node_id: str | None = None
     created_at: str = ""
