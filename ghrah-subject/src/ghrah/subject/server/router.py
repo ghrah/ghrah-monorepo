@@ -10,6 +10,7 @@
     - subscribe/unsubscribe → 本地 ConnectionManager
     - persist_commands → 本地处理器回调（Core → Subject 方向）
     - execute_ability → 本地处理器回调（Core → Subject 方向）
+    - chain_history_commands → 本地处理器回调
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 from ghrah.protocol.types import (
+    CHAIN_HISTORY_COMMANDS,
     CORE_COMMANDS,
     MANIFEST_COMMANDS,
     PERSIST_COMMANDS,
@@ -73,6 +75,7 @@ class ObserverRouter:
         hitl_response_handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None = None,
         persist_handler: CommandHandler | None = None,
         ability_handler: CommandHandler | None = None,
+        chain_history_handler: CommandHandler | None = None,
     ) -> None:
         self._connection_manager = connection_manager
         self._event_bus = event_bus
@@ -82,6 +85,7 @@ class ObserverRouter:
         self._hitl_response_handler = hitl_response_handler
         self._persist_handler = persist_handler
         self._ability_handler = ability_handler
+        self._chain_history_handler = chain_history_handler
 
     async def handle_command(
         self,
@@ -121,6 +125,10 @@ class ObserverRouter:
         # Manifest 命令：本地处理
         if message.type in MANIFEST_COMMANDS:
             return await self._handle_manifest(message, session_id, request_id)
+
+        # Chain History 命令：本地处理
+        if message.type in CHAIN_HISTORY_COMMANDS:
+            return await self._handle_chain_history(message, session_id, request_id)
 
         # 持久化命令：本地处理（Core → Subject 方向，但 Observer 可能请求）
         if message.type in PERSIST_COMMANDS:
@@ -380,6 +388,39 @@ class ObserverRouter:
             )
         except Exception as e:
             logger.error(f"Error handling execute_ability: {e}")
+            return create_command_result(
+                request_id=request_id,
+                success=False,
+                error=str(e),
+            )
+
+    async def _handle_chain_history(
+        self, message: Message, session_id: str, request_id: str
+    ) -> Message:
+        """Chain History 命令：本地处理。"""
+        if self._chain_history_handler is None:
+            return create_command_result(
+                request_id=request_id,
+                success=False,
+                error="Chain history handler not configured",
+            )
+
+        try:
+            result = await self._chain_history_handler(message.type, message.payload)
+            if result is None:
+                return create_command_result(
+                    request_id=request_id,
+                    success=False,
+                    error="Chain history handler returned None",
+                )
+            return create_command_result(
+                request_id=request_id,
+                success=result.get("success", True),
+                data=result.get("data"),
+                error=result.get("error"),
+            )
+        except Exception as e:
+            logger.error(f"Error handling chain history command: {e}")
             return create_command_result(
                 request_id=request_id,
                 success=False,

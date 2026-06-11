@@ -37,6 +37,7 @@ def create_app(
     hitl_response_handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None = None,
     persist_handler: CommandHandler | None = None,
     ability_handler: CommandHandler | None = None,
+    chain_history_handler: CommandHandler | None = None,
     core_event_handler: Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]] | None = None,
 ) -> FastAPI:
     """创建 FastAPI 应用实例。
@@ -49,6 +50,7 @@ def create_app(
         hitl_response_handler: HITL 响应本地处理器回调
         persist_handler: persist_* 命令的本地处理器回调
         ability_handler: execute_ability 命令的本地处理器回调
+        chain_history_handler: get_chain_history 命令的本地处理器回调
         core_event_handler: Core 事件转发回调（如未提供，自动通过 EventBus 转发）
 
     Returns:
@@ -80,6 +82,7 @@ def create_app(
         hitl_response_handler=hitl_response_handler,
         persist_handler=persist_handler,
         ability_handler=ability_handler,
+        chain_history_handler=chain_history_handler,
     )
     ws_server = ObserverServer(config, connection_manager, router, event_bus)
 

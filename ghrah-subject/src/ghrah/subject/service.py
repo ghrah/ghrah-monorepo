@@ -98,6 +98,10 @@ _WORKSPACE_COMMANDS = frozenset({
     "workspace_status",
 })
 
+_CHAIN_HISTORY_COMMANDS = frozenset({
+    "get_chain_history",
+})
+
 _SUBJECT_FORWARD_COMMANDS = CORE_COMMANDS
 
 
@@ -687,11 +691,63 @@ class SubjectService:
 
         return result
 
+    async def _handle_chain_history_command(
+        self, command: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """处理 get_chain_history 命令。"""
+        from ghrah.context.persistence.serialization import serialize_node
+
+        if self._ledger is None:
+            return {"success": False, "error": "ActionChainLedger not started"}
+
+        agent_name = payload.get("agent_name", "")
+        branch_name = payload.get("branch_name", "main")
+        limit = payload.get("limit", -1)
+
+        if not agent_name:
+            return {"success": False, "error": "agent_name is required"}
+
+        try:
+            nodes = self._ledger.get_chain_history(agent_name, branch=branch_name, limit=limit)
+            serialized = [serialize_node(n) for n in nodes]
+            chain = self._ledger.get_chain(agent_name)
+            active_session_id = ""
+            if chain is not None:
+                meta = chain.get_meta(branch_name)
+                if meta is not None:
+                    active_session_id = getattr(meta, "session_id", "")
+            return {
+                "success": True,
+                "data": {
+                    "agent_name": agent_name,
+                    "branch_name": branch_name,
+                    "nodes": serialized,
+                    "active_session_id": active_session_id,
+                },
+            }
+        except Exception as e:
+            logger.exception("Failed to get chain history for %s", agent_name)
+            return {"success": False, "error": str(e)}
+
     async def _handle_core_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """处理从 Core 收到的 Core 事件。
 
-        本地处理后再转发到 Observer EventBus，供 Observer 客户端接收。
+        先转发到 Observer EventBus，再执行本地处理，确保 Observer 及时收到事件。
         """
+        # 先转发事件给 Observer，再做本地处理，避免本地操作延迟事件推送
+        if self._core_event_handler is not None:
+            try:
+                await self._core_event_handler(event_type, payload)
+                logger.info("Core event forwarded to Observer: %s", event_type)
+            except Exception:
+                logger.exception("core_event_handler failed for %s", event_type)
+        else:
+            logger.warning(
+                "Core event not forwarded: no core_event_handler set for %s",
+                event_type,
+            )
+
+        # 本地处理
         if event_type == "agent_spawned":
             agent_name = payload.get("name", "")
             if agent_name and self._workspace_mgr is not None:
@@ -733,18 +789,6 @@ class SubjectService:
 
         elif event_type == "health_status":
             logger.info("Health status: %s", payload.get("status", {}))
-
-        if self._core_event_handler is not None:
-            try:
-                await self._core_event_handler(event_type, payload)
-                logger.info("Core event forwarded to Observer: %s", event_type)
-            except Exception:
-                logger.exception("core_event_handler failed for %s", event_type)
-        else:
-            logger.warning(
-                "Core event not forwarded: no core_event_handler set for %s",
-                event_type,
-            )
 
     async def _handle_hitl_response(self, payload: dict[str, Any]) -> None:
         """处理 Observer 发来的 HITL 审批响应。
@@ -1104,6 +1148,17 @@ class SubjectService:
                 # Manifest CRUD 命令：直接调用
                 elif msg_type in _MANIFEST_COMMANDS:
                     result = await self._handle_manifest_command(msg_type, payload)
+                    if self._running and self._ws is not None:
+                        response = Message(
+                            type=SystemType.COMMAND_RESULT.value,
+                            payload=result,
+                            request_id=request_id,
+                        )
+                        await self._ws.send(response.model_dump_json())
+
+                # Chain History 命令：直接调用
+                elif msg_type in _CHAIN_HISTORY_COMMANDS:
+                    result = await self._handle_chain_history_command(msg_type, payload)
                     if self._running and self._ws is not None:
                         response = Message(
                             type=SystemType.COMMAND_RESULT.value,
