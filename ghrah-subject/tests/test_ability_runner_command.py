@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from ghrah.abilities.builtin.command_safety import (
-    CommandSafetyChecker,
-)
+from ghrah.abilities import CommandSafetyChecker
 from ghrah.manifest.types import PermissionFlags
 
 from ghrah.subject.permission_checker import PermissionChecker, PermissionDecision

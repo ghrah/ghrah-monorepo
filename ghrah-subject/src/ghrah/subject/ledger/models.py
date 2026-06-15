@@ -6,10 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ghrah.context.node import ContextNode
-from ghrah.context.persistence.serialization import (
-    deserialize_node,
-    serialize_node,
-)
+from ghrah.context.persistence import deserialize_node, serialize_node
 
 __all__ = ["LedgerNode", "ChainMeta", "DAGEntry"]
 

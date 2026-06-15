@@ -21,13 +21,9 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from ghrah.abilities._utils import is_subpath
-from ghrah.abilities.builtin.command_safety import (
-    CommandSafetyCategory,
-    CommandSafetyChecker,
-)
+from ghrah.abilities import CommandSafetyCategory, CommandSafetyChecker
+from ghrah.abilities.paths import extract_paths, is_subpath
 from ghrah.manifest.types import PermissionFlags
-from ghrah.subject._utils import extract_paths
 
 __all__ = ["PermissionChecker", "PermissionDecision", "PermissionVerdict"]
 

@@ -32,7 +32,7 @@ def _make_node(
 
 
 def _node_to_payload(node: ContextNode) -> dict[str, Any]:
-    from ghrah.context.persistence.serialization import serialize_node
+    from ghrah.context.persistence import serialize_node
 
     return serialize_node(node)
 

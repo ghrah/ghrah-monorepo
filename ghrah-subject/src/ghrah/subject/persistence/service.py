@@ -27,7 +27,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from ghrah.context.persistence.sqlite_backend import SqliteBackend
+from ghrah.context.persistence import SqliteBackend
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ class SubjectPersistenceService:
 async def _handle_save_node(
     backend: SqliteBackend, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    from ghrah.context.persistence.serialization import deserialize_node
+    from ghrah.context.persistence import deserialize_node
 
     node_data = payload.get("node")
     if node_data is None:
@@ -139,7 +139,7 @@ async def _handle_save_node(
 async def _handle_load_node(
     backend: SqliteBackend, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    from ghrah.context.persistence.serialization import serialize_node
+    from ghrah.context.persistence import serialize_node
 
     node_id = payload.get("node_id")
     if not node_id:
@@ -156,7 +156,7 @@ async def _handle_load_node(
 async def _handle_load_chain(
     backend: SqliteBackend, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    from ghrah.context.persistence.serialization import serialize_node
+    from ghrah.context.persistence import serialize_node
 
     agent_name = payload.get("agent_name")
     if not agent_name:
@@ -206,7 +206,7 @@ async def _handle_load_chain_meta(
 async def _handle_save_messages(
     backend: SqliteBackend, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    from ghrah.context.persistence.serialization import deserialize_messages
+    from ghrah.context.persistence import deserialize_messages
 
     agent_name = payload.get("agent_name")
     if not agent_name:
@@ -224,7 +224,7 @@ async def _handle_save_messages(
 async def _handle_load_messages(
     backend: SqliteBackend, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    from ghrah.context.persistence.serialization import serialize_messages
+    from ghrah.context.persistence import serialize_messages
 
     agent_name = payload.get("agent_name")
     if not agent_name:
@@ -256,7 +256,7 @@ async def _handle_list_agents(
 async def _handle_save_session(
     backend: SqliteBackend, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    from ghrah.context.persistence.serialization import deserialize_session
+    from ghrah.context.persistence import deserialize_session
 
     session_data = payload.get("session")
     if session_data is None:
@@ -270,7 +270,7 @@ async def _handle_save_session(
 async def _handle_load_session(
     backend: SqliteBackend, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    from ghrah.context.persistence.serialization import serialize_session
+    from ghrah.context.persistence import serialize_session
 
     session_id = payload.get("session_id")
     if not session_id:
@@ -287,7 +287,7 @@ async def _handle_load_session(
 async def _handle_list_sessions(
     backend: SqliteBackend, payload: dict[str, Any]
 ) -> dict[str, Any]:
-    from ghrah.context.persistence.serialization import serialize_session
+    from ghrah.context.persistence import serialize_session
 
     agent_name = payload.get("agent_name")
     if not agent_name:

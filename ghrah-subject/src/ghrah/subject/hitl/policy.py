@@ -4,8 +4,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+from ghrah.abilities.paths import extract_paths, is_subpath
 from ghrah.manifest.types import PermissionFlags
-from ghrah.subject._utils import extract_paths, is_subpath
 
 __all__ = ["HITLVerdict", "HITLPolicy"]
 

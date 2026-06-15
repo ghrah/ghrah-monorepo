@@ -695,7 +695,7 @@ class SubjectService:
         self, command: str, payload: dict[str, Any]
     ) -> dict[str, Any]:
         """处理 get_chain_history 命令。"""
-        from ghrah.context.persistence.serialization import serialize_node
+        from ghrah.context.persistence import serialize_node
 
         if self._ledger is None:
             return {"success": False, "error": "ActionChainLedger not started"}

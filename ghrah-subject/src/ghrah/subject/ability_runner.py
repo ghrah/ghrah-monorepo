@@ -28,7 +28,7 @@ from ghrah.abilities import (
     ActionOutcome,
     ActionResult,
 )
-from ghrah.subject._utils import ABILITY_PATH_SPECS
+from ghrah.abilities.paths import ABILITY_PATH_SPECS
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
 from ghrah.subject.hitl.policy import HITLVerdict
 from ghrah.subject.permission_checker import PermissionChecker, PermissionDecision

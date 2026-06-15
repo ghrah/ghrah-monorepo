@@ -21,10 +21,7 @@ from typing import Any
 
 from ghrah.context.chain import ActionChain
 from ghrah.context.node import ContextNode
-from ghrah.context.persistence.serialization import (
-    deserialize_node,
-    serialize_node,
-)
+from ghrah.context.persistence import deserialize_node, serialize_node
 from ghrah.subject.ledger.models import ChainMeta, DAGEntry, LedgerNode
 from ghrah.subject.persistence.service import SubjectPersistenceService
 
