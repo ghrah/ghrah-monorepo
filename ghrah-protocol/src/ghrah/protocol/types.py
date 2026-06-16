@@ -129,6 +129,19 @@ class CommandType(StrEnum):
     # ─── Chain History 类（Observer → Subject）───
     GET_CHAIN_HISTORY = "get_chain_history"
 
+    # ─── Task 管理类（Observer/Core → Subject）───
+    TASK_CREATE = "task_create"
+    TASK_UPDATE = "task_update"
+    TASK_ASSIGN = "task_assign"
+    TASK_START = "task_start"
+    TASK_COMPLETE = "task_complete"
+    TASK_FAIL = "task_fail"
+    TASK_CANCEL = "task_cancel"
+    TASK_BLOCK = "task_block"
+    TASK_LIST = "task_list"
+    TASK_GET = "task_get"
+    TASK_DELETE = "task_delete"
+
 
 class EventType(StrEnum):
     """事件类型。
@@ -166,6 +179,37 @@ class EventType(StrEnum):
     SESSION_ARCHIVED = "session_archived"
     SESSION_DELETED = "session_deleted"
     SESSION_LIST_RESULT = "session_list_result"
+
+    # ─── Task 事件（Subject → Observer/Core）───
+    TASK_CREATED = "task_created"
+    TASK_UPDATED = "task_updated"
+    TASK_ASSIGNED = "task_assigned"
+    TASK_STARTED = "task_started"
+    TASK_COMPLETED = "task_completed"
+    TASK_FAILED = "task_failed"
+    TASK_CANCELED = "task_canceled"
+    TASK_BLOCKED = "task_blocked"
+    TASK_DELETED = "task_deleted"
+
+
+class TaskStatus(StrEnum):
+    """Task lifecycle state."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    BLOCKED = "blocked"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELED = "canceled"
+
+
+class TaskPriority(StrEnum):
+    """Task priority label."""
+
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    URGENT = "urgent"
 
 
 class SystemType(StrEnum):
@@ -248,6 +292,20 @@ MANIFEST_COMMANDS: frozenset[str] = frozenset({
 
 CHAIN_HISTORY_COMMANDS: frozenset[str] = frozenset({
     CommandType.GET_CHAIN_HISTORY.value,
+})
+
+TASK_COMMANDS: frozenset[str] = frozenset({
+    CommandType.TASK_CREATE.value,
+    CommandType.TASK_UPDATE.value,
+    CommandType.TASK_ASSIGN.value,
+    CommandType.TASK_START.value,
+    CommandType.TASK_COMPLETE.value,
+    CommandType.TASK_FAIL.value,
+    CommandType.TASK_CANCEL.value,
+    CommandType.TASK_BLOCK.value,
+    CommandType.TASK_LIST.value,
+    CommandType.TASK_GET.value,
+    CommandType.TASK_DELETE.value,
 })
 
 
@@ -735,6 +793,125 @@ class ChainHistoryResultPayload(BaseModel):
     branch_name: str = "main"
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     active_session_id: str = ""
+
+
+# ─── Task 命令和事件载荷模型 ───
+
+
+class TaskInfoPayload(BaseModel):
+    """Task 信息载荷，用于 task 命令结果和事件。"""
+
+    task_id: str
+    title: str
+    description: str = ""
+    agent_name: str | None = None
+    status: TaskStatus = TaskStatus.PENDING
+    priority: TaskPriority = TaskPriority.NORMAL
+    parent_id: str | None = None
+    dependencies: list[str] = Field(default_factory=list)
+    result: Any = None
+    error: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+    started_at: str | None = None
+    completed_at: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskCreatePayload(BaseModel):
+    """task_create 命令载荷。"""
+
+    title: str
+    description: str = ""
+    agent_name: str | None = None
+    priority: TaskPriority = TaskPriority.NORMAL
+    parent_id: str | None = None
+    dependencies: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskUpdatePayload(BaseModel):
+    """task_update 命令载荷。"""
+
+    task_id: str
+    title: str | None = None
+    description: str | None = None
+    agent_name: str | None = None
+    status: TaskStatus | None = None
+    priority: TaskPriority | None = None
+    parent_id: str | None = None
+    dependencies: list[str] | None = None
+    result: Any = None
+    error: str | None = None
+    metadata: dict[str, Any] | None = None
+    metadata_patch: dict[str, Any] | None = None
+
+
+class TaskIdPayload(BaseModel):
+    """task_* 单任务命令载荷。"""
+
+    task_id: str
+
+
+class TaskAssignPayload(TaskIdPayload):
+    """task_assign 命令载荷。"""
+
+    agent_name: str
+
+
+class TaskCompletePayload(TaskIdPayload):
+    """task_complete 命令载荷。"""
+
+    result: Any = None
+
+
+class TaskFailPayload(TaskIdPayload):
+    """task_fail 命令载荷。"""
+
+    error: str
+
+
+class TaskCancelPayload(TaskIdPayload):
+    """task_cancel 命令载荷。"""
+
+    reason: str | None = None
+
+
+class TaskBlockPayload(TaskIdPayload):
+    """task_block 命令载荷。"""
+
+    reason: str | None = None
+
+
+class TaskListPayload(BaseModel):
+    """task_list 命令载荷。"""
+
+    agent_name: str | None = None
+    status: TaskStatus | list[TaskStatus] | None = None
+    parent_id: str | None = None
+    include_terminal: bool = True
+    limit: int = 100
+
+
+class TaskDeletePayload(TaskIdPayload):
+    """task_delete 命令载荷。"""
+
+    force: bool = False
+
+
+class TaskListResultPayload(BaseModel):
+    """task_list 命令响应载荷。"""
+
+    tasks: list[TaskInfoPayload] = Field(default_factory=list)
+    count: int = 0
+
+
+class TaskEventPayload(BaseModel):
+    """task_* 事件载荷。"""
+
+    task: TaskInfoPayload
+    previous_status: TaskStatus | None = None
+    reason: str | None = None
 
 
 # ─── Session 事件载荷模型 ───
