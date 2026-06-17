@@ -25,20 +25,41 @@ from ghrah.protocol.types import (
     MANIFEST_COMMANDS,
     PERSIST_COMMANDS,
     WORKSPACE_COMMANDS,
+    BaseModel,
     CommandType,
     EventType,
     Message,
+    SubscribePayload,
+    UnsubscribePayload,
     create_command_result,
     create_error,
+    expect_payload,
     generate_request_id,
+    payload_agent_name,
 )
 from ghrah.subject.server.connection_manager import ConnectionManager
 from ghrah.subject.server.event_bus import EventBus
 
 logger = logging.getLogger(__name__)
 
+
+def _payload_to_dict(payload: Any) -> dict[str, Any]:
+    """将 payload（dict 或 BaseModel 实例）归一为 dict，供下游 SubjectService 使用。
+
+    SubjectService 内部仍以 dict 访问（Stage 2 插件化时再迁移为类型化）。
+    """
+    if isinstance(payload, BaseModel):
+        return payload.model_dump()
+    if isinstance(payload, dict):
+        return payload
+    return {}
+
+
 CommandHandler = Callable[[str, dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]
-CoreForwardHandler = Callable[[str, dict[str, Any], str | None], Coroutine[Any, Any, dict[str, Any]]]
+CoreForwardHandler = Callable[
+    [str, dict[str, Any], str | None],
+    Coroutine[Any, Any, dict[str, Any]],
+]
 EventCallback = Callable[[Message], Coroutine[Any, Any, None]]
 
 
@@ -156,10 +177,10 @@ class ObserverRouter:
             logger.warning(f"Unknown event type: {message.type}")
             return
 
+        agent_name = payload_agent_name(message.payload)
         logger.info(
             "handle_event: event_type=%s session_id=%s agent=%s publishing via EventBus",
-            event_type.value, session_id,
-            message.payload.get("agent_name", ""),
+            event_type.value, session_id, agent_name,
         )
         await self._event_bus.publish(message)
 
@@ -168,9 +189,7 @@ class ObserverRouter:
     async def _handle_subscribe(
         self, message: Message, session_id: str, request_id: str
     ) -> Message:
-        from ghrah.protocol.types import SubscribePayload
-
-        payload = SubscribePayload(**message.payload)
+        payload = expect_payload(message, SubscribePayload)
         self._connection_manager.subscribe(
             session_id=session_id,
             agent_names=payload.agent_names,
@@ -186,9 +205,7 @@ class ObserverRouter:
     async def _handle_unsubscribe(
         self, message: Message, session_id: str, request_id: str
     ) -> Message:
-        from ghrah.protocol.types import UnsubscribePayload
-
-        payload = UnsubscribePayload(**message.payload)
+        payload = expect_payload(message, UnsubscribePayload)
         self._connection_manager.unsubscribe(
             session_id=session_id,
             agent_names=payload.agent_names,
@@ -204,7 +221,7 @@ class ObserverRouter:
     async def _handle_hitl_response(
         self, message: Message, session_id: str, request_id: str
     ) -> Message:
-        """处理 HITL 响应：委托给本地回调。"""
+        """处理 HITL 响应：委托给本地回调（payload 归一为 dict）。"""
         if self._hitl_response_handler is None:
             return create_command_result(
                 request_id=request_id,
@@ -213,7 +230,7 @@ class ObserverRouter:
             )
 
         try:
-            await self._hitl_response_handler(message.payload)
+            await self._hitl_response_handler(_payload_to_dict(message.payload))
             return create_command_result(
                 request_id=request_id,
                 success=True,
@@ -230,7 +247,7 @@ class ObserverRouter:
     async def _handle_core_forward(
         self, message: Message, session_id: str, request_id: str
     ) -> Message:
-        """Agent 管理命令：通过回调转发到 Core。"""
+        """Agent 管理命令：通过回调转发到 Core（payload 归一为 dict）。"""
         if self._core_forward_handler is None:
             return create_command_result(
                 request_id=request_id,
@@ -240,7 +257,7 @@ class ObserverRouter:
 
         try:
             result = await self._core_forward_handler(
-                message.type, message.payload, request_id
+                message.type, _payload_to_dict(message.payload), request_id
             )
             if result is None:
                 return create_command_result(
@@ -274,7 +291,7 @@ class ObserverRouter:
             )
 
         try:
-            result = await self._workspace_handler(message.type, message.payload)
+            result = await self._workspace_handler(message.type, _payload_to_dict(message.payload))
             if result is None:
                 return create_command_result(
                     request_id=request_id,
@@ -307,7 +324,7 @@ class ObserverRouter:
             )
 
         try:
-            result = await self._manifest_handler(message.type, message.payload)
+            result = await self._manifest_handler(message.type, _payload_to_dict(message.payload))
             if result is None:
                 return create_command_result(
                     request_id=request_id,
@@ -340,7 +357,7 @@ class ObserverRouter:
             )
 
         try:
-            result = await self._persist_handler(message.type, message.payload)
+            result = await self._persist_handler(message.type, _payload_to_dict(message.payload))
             if result is None:
                 return create_command_result(
                     request_id=request_id,
@@ -373,7 +390,7 @@ class ObserverRouter:
             )
 
         try:
-            result = await self._ability_handler(message.type, message.payload)
+            result = await self._ability_handler(message.type, _payload_to_dict(message.payload))
             if result is None:
                 return create_command_result(
                     request_id=request_id,
@@ -406,7 +423,8 @@ class ObserverRouter:
             )
 
         try:
-            result = await self._chain_history_handler(message.type, message.payload)
+            payload_dict = _payload_to_dict(message.payload)
+            result = await self._chain_history_handler(message.type, payload_dict)
             if result is None:
                 return create_command_result(
                     request_id=request_id,

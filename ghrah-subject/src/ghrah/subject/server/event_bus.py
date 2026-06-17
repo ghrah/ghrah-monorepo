@@ -13,6 +13,7 @@ from typing import Any
 from ghrah.protocol.types import (
     EventType,
     Message,
+    payload_agent_name,
 )
 from ghrah.subject.server.connection_manager import ConnectionManager
 
@@ -100,7 +101,7 @@ class EventBus:
             成功推送的连接数
         """
         event_type = event.type
-        agent_name = event.payload.get("agent_name")
+        agent_name = payload_agent_name(event.payload)
 
         message_dict = event.model_dump_with_timestamp()
 
@@ -142,16 +143,19 @@ class EventBus:
         context: dict[str, Any] | None = None,
     ) -> int:
         """发布 hitl_request 事件到 Observer。"""
-        return await self.emit(
-            EventType.HITL_REQUEST,
-            {
-                "promise_id": promise_id,
-                "agent_name": agent_name,
-                "ability_name": ability_name,
-                "tool_args": tool_args or {},
-                "context": context or {},
-            },
+        from ghrah.protocol.types import HITLRequestPayload
+
+        event = Message(
+            type=EventType.HITL_REQUEST.value,
+            payload=HITLRequestPayload(
+                promise_id=promise_id,
+                agent_name=agent_name,
+                ability_name=ability_name,
+                tool_args=tool_args or {},
+                context=context or {},
+            ),
         )
+        return await self.publish(event)
 
     async def emit_core_event(self, event: Message) -> int:
         """转发来自 Core 的事件到 Observer。
@@ -159,7 +163,15 @@ class EventBus:
         用于将从 Core 连接收到的事件（agent_spawned 等）转发给 Observer。
         将 payload 中 "name" 键映射为 "agent_name" 以确保订阅过滤正常工作。
         """
-        payload = dict(event.payload)
+        from ghrah.protocol.types import BaseModel
+
+        payload = event.payload
+        if isinstance(payload, BaseModel):
+            payload = payload.model_dump()
+        if not isinstance(payload, dict):
+            payload = {}
+        else:
+            payload = dict(payload)
         if "agent_name" not in payload and "name" in payload:
             payload["agent_name"] = payload["name"]
         event = Message(type=event.type, payload=payload)

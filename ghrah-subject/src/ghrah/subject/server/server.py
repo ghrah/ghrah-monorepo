@@ -21,8 +21,10 @@ from ghrah.protocol.types import (
     EventType,
     Message,
     SystemType,
+    create_command_result,
     create_error,
     create_pong,
+    envelope_from_dict,
 )
 from ghrah.subject.server.config import ObserverServerConfig
 from ghrah.subject.server.connection_manager import ConnectionManager
@@ -97,16 +99,13 @@ class ObserverServer:
             )
             logger.info(f"Observer WebSocket session established: {session_id}")
 
-            welcome_msg = Message(
-                type=SystemType.COMMAND_RESULT.value,
-                payload={
-                    "success": True,
-                    "data": {
-                        "session_id": session_id,
-                        "message": "Connected to ghrah-subject observer server",
-                    },
-                },
+            welcome_msg = create_command_result(
                 request_id="connect",
+                success=True,
+                data={
+                    "session_id": session_id,
+                    "message": "Connected to ghrah-subject observer server",
+                },
             ).model_dump_with_timestamp()
             await self._connection_manager.send_to(session_id, welcome_msg)
 
@@ -150,7 +149,7 @@ class ObserverServer:
                 break
 
             try:
-                message = Message(**raw_data)
+                message = envelope_from_dict(raw_data)
             except Exception as e:
                 error_msg = create_error(
                     code="INVALID_MESSAGE",
