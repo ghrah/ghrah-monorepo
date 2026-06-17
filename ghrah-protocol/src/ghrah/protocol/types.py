@@ -12,9 +12,11 @@ from __future__ import annotations
 import time
 import uuid
 from enum import StrEnum
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field
+
+T = TypeVar("T", bound=BaseModel)
 
 # ─── 客户端类型枚举 ───
 
@@ -540,13 +542,26 @@ class HITLRequestPayload(BaseModel):
 class HITLResponsePayload(BaseModel):
     """hitl_response 命令载荷。
 
-    Observer → Subject：HITL 审批响应。
-    Observer 审批 HITL 请求后发送此消息。
+    Observer → Subject（分布式）/ Observer → Core（单体）：HITL 审批响应。
+
+    存在两条数据流，字段集合不同，故全部字段（除 approved）设默认值以兼容：
+    - 分布式（Subject 侧）：promise_id / approved / reason
+      （SubjectService._handle_hitl_response 据此 resolve Promise）
+    - 单体（Core 侧）：agent_name / ability_name / tool_call_id / approved / result
+      （core/router._handle_hitl_response 据此 resolve HITLFutureStore）
     """
 
-    promise_id: str
+    # 分布式路径字段
+    promise_id: str = ""
+    # 单体路径字段
+    agent_name: str = ""
+    ability_name: str = ""
+    tool_call_id: str = ""
+    # 两路径共有
     approved: bool
+    # 分布式：拒绝原因；单体：审批附加结果
     reason: str | None = None
+    result: Any = None
 
 
 class UnregisterAbilityPayload(BaseModel):
@@ -1013,21 +1028,27 @@ class ErrorPayload(BaseModel):
 # ─── 信封模型 ───
 
 
-class Message(BaseModel):
-    """WebSocket 消息信封。
+class Envelope(BaseModel):
+    """WebSocket 消息信封（非泛型，宽类型）。
 
-    所有 WebSocket 消息都使用此信封格式传输。
+    payload 在 wire 层保持 Any（dict | BaseModel 实例 | None）。
+    类型安全通过 PAYLOAD_MAP + envelope_from_dict（入口收窄）
+    + expect_payload（handler 边界断言）实现，不由 Pydantic 泛型承担。
+
+    type 保持 str（不收紧为 MessageType union），以接受未知 type
+    字符串、保持前向兼容；由 known_type() / as_command_type() 判断。
 
     Attributes:
-        type: 消息类型（命令/事件/系统）
-        payload: 消息载荷
+        type: 消息类型字符串（命令/事件/系统）
+        payload: 消息载荷（dict / BaseModel 实例 / None）
         request_id: 请求ID，用于关联命令和响应
         timestamp: 消息时间戳（Unix时间戳）
         client_type: 发送方客户端类型（subject/observer），用于连接管理
+        seq_id: 单调递增序号（广播时填充）
     """
 
     type: str
-    payload: dict[str, Any] = Field(default_factory=dict)
+    payload: Any = Field(default_factory=dict)
     request_id: str | None = None
     timestamp: float | None = None
     client_type: ClientType | None = None
@@ -1040,31 +1061,223 @@ class Message(BaseModel):
             data["timestamp"] = time.time()
         return data
 
+    # ── 类型辅助（不改变 wire，仅消费侧便利）──
+
+    def known_type(self) -> bool:
+        """type 是否在 PAYLOAD_MAP 中（已知命令/事件）。"""
+        return self.type in PAYLOAD_MAP
+
+    def as_command_type(self) -> CommandType | None:
+        """尝试解析为 CommandType（未知返回 None，不抛）。"""
+        try:
+            return CommandType(self.type)
+        except ValueError:
+            return None
+
+    def as_event_type(self) -> EventType | None:
+        """尝试解析为 EventType（未知返回 None，不抛）。"""
+        try:
+            return EventType(self.type)
+        except ValueError:
+            return None
+
+    def as_system_type(self) -> SystemType | None:
+        """尝试解析为 SystemType（未知返回 None，不抛）。"""
+        try:
+            return SystemType(self.type)
+        except ValueError:
+            return None
+
+
+# ─── type → Payload 注册表 ───
+#
+# 仅登记 schema 正确且当前有消费方的 payload。
+# - persist_*（13 个）不登记：PersistSavePayload 等 schema 与实际 wire shape 不符，
+#   留待 Stage 2（Subject 插件化）补齐真实 payload。此处 payload 保持裸 dict 透传。
+# - command_result / error / ping / pong 不登记：welcome 包手写 payload 与
+#   CommandResultPayload schema 不符（见 S1.2.5）。此处 payload 保持裸 dict。
+
+COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
+    CommandType.SPAWN_AGENT: SpawnAgentPayload,
+    CommandType.TERMINATE_AGENT: TerminateAgentPayload,
+    CommandType.SEND_MESSAGE: SendMessagePayload,
+    CommandType.BROADCAST_MESSAGE: BroadcastMessagePayload,
+    CommandType.EXECUTE_ABILITY: ExecuteAbilityPayload,
+    CommandType.REGISTER_ABILITY: RegisterAbilityPayload,
+    CommandType.UNREGISTER_ABILITY: UnregisterAbilityPayload,
+    CommandType.LIST_AGENTS: ListAgentsPayload,
+    CommandType.HEALTH_CHECK: HealthCheckPayload,
+    CommandType.DELEGATE: DelegatePayload,
+    CommandType.SUBSCRIBE: SubscribePayload,
+    CommandType.UNSUBSCRIBE: UnsubscribePayload,
+    CommandType.GET_AGENT_INFO: GetAgentInfoPayload,
+    CommandType.INIT_CLUSTER: InitClusterPayload,
+    CommandType.SHUTDOWN_CLUSTER: ShutdownClusterPayload,
+    CommandType.CLUSTER_STATUS: ClusterStatusPayload,
+    CommandType.HITL_RESPONSE: HITLResponsePayload,
+    # persist_*: payload 为裸 dict（Stage 2 补齐真实 payload 模型）
+    # workspace_* / manifest_* / get_chain_history: payload 模型存在但消费侧
+    #   仍以 dict 委托 SubjectService，本阶段不登记以保持现状（Stage 2 评估）
+    # Task 管理（11 个）
+    CommandType.TASK_CREATE: TaskCreatePayload,
+    CommandType.TASK_UPDATE: TaskUpdatePayload,
+    CommandType.TASK_ASSIGN: TaskAssignPayload,
+    CommandType.TASK_START: TaskIdPayload,
+    CommandType.TASK_COMPLETE: TaskCompletePayload,
+    CommandType.TASK_FAIL: TaskFailPayload,
+    CommandType.TASK_CANCEL: TaskCancelPayload,
+    CommandType.TASK_BLOCK: TaskBlockPayload,
+    CommandType.TASK_LIST: TaskListPayload,
+    CommandType.TASK_GET: TaskIdPayload,
+    CommandType.TASK_DELETE: TaskDeletePayload,
+    # Session 管理（5 个）
+    CommandType.SESSION_CREATE: SessionCreatePayload,
+    CommandType.SESSION_SWITCH: SessionSwitchPayload,
+    CommandType.SESSION_LIST: SessionListPayload,
+    CommandType.SESSION_ARCHIVE: SessionArchivePayload,
+    CommandType.SESSION_DELETE: SessionDeletePayload,
+}
+
+EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
+    EventType.AGENT_SPAWNED: AgentSpawnedPayload,
+    EventType.AGENT_TERMINATED: AgentTerminatedPayload,
+    EventType.AGENT_RESPONSE: AgentResponsePayload,
+    EventType.ACTION_CHAIN_UPDATED: ActionChainUpdatedPayload,
+    EventType.AGENT_ERROR: AgentErrorPayload,
+    EventType.HEALTH_STATUS: HealthStatusPayload,
+    EventType.ABILITY_RESULT: AbilityResultPayload,
+    EventType.HITL_REQUEST: HITLRequestPayload,
+    EventType.WORKSPACE_CREATED: WorkspaceCreatedPayload,
+    EventType.WORKSPACE_DESTROYED: WorkspaceDestroyedPayload,
+    EventType.WORKSPACE_SNAPSHOT_CREATED: WorkspaceSnapshotCreatedPayload,
+    EventType.WORKSPACE_ROLLED_BACK: WorkspaceRolledBackPayload,
+    EventType.SESSION_CREATED: SessionCreatedPayload,
+    EventType.SESSION_SWITCHED: SessionSwitchedPayload,
+    EventType.SESSION_ARCHIVED: SessionArchivedPayload,
+    EventType.SESSION_DELETED: SessionDeletedPayload,
+    EventType.SESSION_LIST_RESULT: SessionListResultPayload,
+    # task_* 事件（9 个）payload 模型 TaskEventPayload 已存在
+    EventType.TASK_CREATED: TaskEventPayload,
+    EventType.TASK_UPDATED: TaskEventPayload,
+    EventType.TASK_ASSIGNED: TaskEventPayload,
+    EventType.TASK_STARTED: TaskEventPayload,
+    EventType.TASK_COMPLETED: TaskEventPayload,
+    EventType.TASK_FAILED: TaskEventPayload,
+    EventType.TASK_CANCELED: TaskEventPayload,
+    EventType.TASK_BLOCKED: TaskEventPayload,
+    EventType.TASK_DELETED: TaskEventPayload,
+    # manifest_* 事件 payload 模型存在
+    EventType.MANIFEST_ABILITY_CREATED: ManifestAbilityEventPayload,
+    EventType.MANIFEST_ABILITY_UPDATED: ManifestAbilityEventPayload,
+    EventType.MANIFEST_ABILITY_DELETED: ManifestAbilityEventPayload,
+    EventType.MANIFEST_AGENT_CREATED: ManifestAgentEventPayload,
+    EventType.MANIFEST_AGENT_UPDATED: ManifestAgentEventPayload,
+    EventType.MANIFEST_AGENT_DELETED: ManifestAgentEventPayload,
+}
+
+PAYLOAD_MAP: dict[str, type[BaseModel]] = {
+    **{k.value: v for k, v in COMMAND_PAYLOAD_MAP.items()},
+    **{k.value: v for k, v in EVENT_PAYLOAD_MAP.items()},
+    # command_result / error / ping / pong 不登记（见模块注释）
+}
+
+
+def envelope_from_dict(data: dict[str, Any]) -> Envelope:
+    """从 dict 反序列化为 Envelope（唯一反序列化入口）。
+
+    wire 信封保持宽（payload: Any）。已知 type → 查 PAYLOAD_MAP 收窄为对应
+    Pydantic 模型实例；未知 type / 无 payload / 未登记 → payload 保持裸 dict
+    （前向兼容，不崩）。
+
+    Args:
+        data: 原始 wire dict（来自 websocket receive_json）
+
+    Returns:
+        Envelope 实例。已知 type 时 payload 为对应 BaseModel 实例，
+        否则 payload 为裸 dict（或原始值）。
+    """
+    msg_type = data.get("type", "")
+    payload_cls = PAYLOAD_MAP.get(msg_type)
+    raw_payload = data.get("payload", {})
+    if payload_cls is not None and isinstance(raw_payload, dict):
+        payload = payload_cls.model_validate(raw_payload)
+    else:
+        payload = raw_payload
+    return Envelope(
+        type=msg_type,
+        payload=payload,
+        request_id=data.get("request_id"),
+        timestamp=data.get("timestamp"),
+        client_type=data.get("client_type"),
+        seq_id=data.get("seq_id"),
+    )
+
+
+def expect_payload(msg: Envelope, cls: type[T]) -> T:
+    """在 handler 边界把 payload 断言为具体类型。
+
+    若 payload 已是该类型（经 envelope_from_dict 收窄）直接返回；
+    若是 dict（未登记 MAP / 旧路径）则 model_validate 收窄；
+    校验失败抛 ValidationError（暴露 wire/schema 不符，比静默 .get() 更好）。
+
+    Args:
+        msg: 收到的消息信封
+        cls: 期望的 payload 类型
+
+    Returns:
+        具体类型的 payload 实例
+
+    Raises:
+        pydantic.ValidationError: payload 与 cls 不符
+    """
+    if isinstance(msg.payload, cls):
+        return msg.payload
+    return cls.model_validate(msg.payload)
+
+
+def payload_agent_name(payload: Any) -> str | None:
+    """提取订阅过滤使用的 agent_name。
+
+    保持旧 wire 行为：订阅过滤只认 payload["agent_name"]。
+    缺失 agent_name 时返回 None，ConnectionManager 将其解释为不过滤
+    agent、广播给所有匹配 event_type 的连接。
+    """
+    if isinstance(payload, BaseModel):
+        val = getattr(payload, "agent_name", None)
+        return val if isinstance(val, str) and val else None
+    if isinstance(payload, dict):
+        val = payload.get("agent_name")
+        return val if isinstance(val, str) and val else None
+    return None
+
+
+# ─── 工厂函数（payload 存模型实例，序列化由 model_dump 统一处理）───
+
 
 def create_command_result(
     request_id: str,
     success: bool,
     data: Any = None,
     error: str | None = None,
-) -> Message:
+) -> Envelope:
     """创建命令结果消息的便捷函数。"""
-    return Message(
+    return Envelope(
         type=SystemType.COMMAND_RESULT.value,
         payload=CommandResultPayload(
             request_id=request_id,
             success=success,
             data=data,
             error=error,
-        ).model_dump(),
+        ),
         request_id=request_id,
     )
 
 
-def create_event(event_type: EventType, payload: BaseModel) -> Message:
+def create_event(event_type: EventType, payload: BaseModel) -> Envelope:
     """创建事件消息的便捷函数。"""
-    return Message(
+    return Envelope(
         type=event_type.value,
-        payload=payload.model_dump(),
+        payload=payload,
     )
 
 
@@ -1073,29 +1286,34 @@ def create_error(
     message: str,
     details: dict[str, Any] | None = None,
     request_id: str | None = None,
-) -> Message:
+) -> Envelope:
     """创建错误消息的便捷函数。"""
-    return Message(
+    return Envelope(
         type=SystemType.ERROR.value,
         payload=ErrorPayload(
             code=code,
             message=message,
             details=details,
-        ).model_dump(),
+        ),
         request_id=request_id,
     )
 
 
-def create_ping() -> Message:
+def create_ping() -> Envelope:
     """创建心跳 ping 消息。"""
-    return Message(type=SystemType.PING.value)
+    return Envelope(type=SystemType.PING.value)
 
 
-def create_pong() -> Message:
+def create_pong() -> Envelope:
     """创建心跳 pong 消息。"""
-    return Message(type=SystemType.PONG.value)
+    return Envelope(type=SystemType.PONG.value)
 
 
 def generate_request_id() -> str:
     """生成唯一的请求ID。"""
     return uuid.uuid4().hex[:12]
+
+
+# Message = Envelope 别名（向后兼容；新代码应直接使用 Envelope）。
+# 因 Envelope 非泛型，别名稳定，不再绑定泛型参数。
+Message = Envelope
