@@ -3,6 +3,5 @@
   "agent_config_name": "default",
   "description": "desc",
   "system_prompt": "prompt",
-  "max_iterations": 5,
-  "gateway_url": "ws://localhost:8080"
+  "max_iterations": 5
 }

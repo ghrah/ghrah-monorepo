@@ -54,6 +54,8 @@ export {
   ClusterStatusPayloadSchema,
   type CommandResultPayload,
   CommandResultPayloadSchema,
+  type ContentBlock,
+  ContentBlockSchema,
   type CreateWorkspacePayload,
   CreateWorkspacePayloadSchema,
   type DelegatePayload,

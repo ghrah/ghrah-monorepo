@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { ContentBlock } from "@ghrah/protocol";
 import { useAgentsStore, useChatStore, useConnectionStore } from "@ghrah/observer-core";
 import { computed, nextTick, ref, watch } from "vue";
 import { useObserver } from "@/composables/useObserver";
@@ -37,6 +38,28 @@ function messageClass(msg: { messageType: string; sender: string }): string {
   if (msg.sender === "user") return "msg-user";
   return "msg-agent";
 }
+
+function blockClass(block: ContentBlock): string {
+  if (block.type === "reasoning") return "block-reasoning";
+  return "";
+}
+
+function blockText(block: ContentBlock): string {
+  switch (block.type) {
+    case "text":
+      return block.text;
+    case "reasoning":
+      return block.reasoning;
+    case "error":
+      return block.message;
+    default:
+      return "";
+  }
+}
+
+function hasStructuredBlocks(msg: { contentBlocks?: ContentBlock[] }): boolean {
+  return !!(msg.contentBlocks && msg.contentBlocks.length > 0);
+}
 </script>
 
 <template>
@@ -66,7 +89,14 @@ function messageClass(msg: { messageType: string; sender: string }): string {
         :class="['message-bubble', messageClass(msg)]"
       >
         <span class="font-semibold text-xs mr-2">{{ msg.sender }}</span>
-        <span :class="['text-sm', msg.messageType === 'thinking' ? 'italic text-gray-500 dark:text-gray-400' : '']">{{ msg.content }}</span>
+        <template v-if="hasStructuredBlocks(msg)">
+          <div
+            v-for="(block, j) in msg.contentBlocks"
+            :key="j"
+            :class="['text-sm', blockClass(block)]"
+          >{{ blockText(block) }}</div>
+        </template>
+        <span v-else :class="['text-sm', msg.messageType === 'thinking' ? 'italic text-gray-500 dark:text-gray-400' : '']">{{ msg.content }}</span>
       </div>
     </div>
 
@@ -127,6 +157,16 @@ function messageClass(msg: { messageType: string; sender: string }): string {
 
 :root.dark .msg-thinking {
   background: #1f2937;
+  color: #9ca3af;
+}
+
+.block-reasoning {
+  font-style: italic;
+  color: #6b7280;
+  padding: 0.125rem 0;
+}
+
+:root.dark .block-reasoning {
   color: #9ca3af;
 }
 </style>

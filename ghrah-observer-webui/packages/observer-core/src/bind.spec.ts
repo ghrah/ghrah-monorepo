@@ -56,7 +56,6 @@ const DEFAULT_CONFIG = {
   system_prompt: "",
   max_iterations: 10,
   agent_config_name: null,
-  gateway_url: null,
 } as const;
 
 describe("connectStores", () => {

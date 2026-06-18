@@ -5,7 +5,7 @@ import { ServerClient } from "./client.js";
 import { CommandType, SystemType } from "./enums.js";
 import type { ServerMessage } from "./message.js";
 
-const SERVER_URL = process.env.SERVER_URL ?? process.env.GATEWAY_URL ?? "ws://localhost:8080/ws";
+const SERVER_URL = process.env.SERVER_URL ?? "ws://localhost:8080/ws";
 const RUN_INTEGRATION = process.env.RUN_INTEGRATION === "1";
 
 describe.skipIf(!RUN_INTEGRATION)("ServerClient Integration", () => {

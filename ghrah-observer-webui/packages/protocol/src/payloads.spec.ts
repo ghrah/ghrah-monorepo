@@ -61,7 +61,6 @@ describe("AgentConfigPayloadSchema", () => {
     expect(result.description).toBe("");
     expect(result.system_prompt).toBe("");
     expect(result.agent_config_name).toBeUndefined();
-    expect(result.gateway_url).toBeUndefined();
   });
 
   it("parses with all fields", () => {
@@ -71,7 +70,6 @@ describe("AgentConfigPayloadSchema", () => {
       description: "desc",
       system_prompt: "prompt",
       max_iterations: 5,
-      gateway_url: "ws://localhost:8080",
     });
     expect(result.max_iterations).toBe(5);
     expect(result.agent_config_name).toBe("default");

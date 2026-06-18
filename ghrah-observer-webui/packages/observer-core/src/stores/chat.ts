@@ -1,4 +1,4 @@
-import type { AgentResponsePayload } from "@ghrah/protocol";
+import type { AgentResponsePayload, ContentBlock } from "@ghrah/protocol";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
@@ -6,6 +6,7 @@ export interface ChatMessage {
   sender: string;
   recipient: string;
   content: string;
+  contentBlocks?: ContentBlock[];
   messageType: string;
   metadata: Record<string, unknown>;
   timestamp?: number;
@@ -24,6 +25,7 @@ export const useChatStore = defineStore("ghrah-chat", () => {
         sender: payload.sender,
         recipient: payload.recipient,
         content: payload.content,
+        contentBlocks: payload.content_blocks ?? undefined,
         messageType: payload.message_type,
         metadata: payload.metadata,
       },

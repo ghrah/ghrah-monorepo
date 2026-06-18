@@ -183,7 +183,7 @@ describe("ServerMessage cross-validation", () => {
   });
 
   it("Zod parses Python full ServerMessage snapshot", () => {
-    const pythonSnapshot = loadSnapshot("GatewayMessage_full");
+    const pythonSnapshot = loadSnapshot("Message_full");
     const parsed = ServerMessageSchema.parse(pythonSnapshot);
     expect(parsed.type).toBe("spawn_agent");
     expect(parsed.request_id).toBe("abc123");
@@ -191,7 +191,7 @@ describe("ServerMessage cross-validation", () => {
   });
 
   it("serializeMessage round-trips Python ServerMessage snapshot", () => {
-    const pythonSnapshot = loadSnapshot("GatewayMessage_full");
+    const pythonSnapshot = loadSnapshot("Message_full");
     const parsed = ServerMessageSchema.parse(pythonSnapshot);
     const serialized = serializeMessage(parsed);
     const reparsed = parseMessage(serialized);
@@ -200,3 +200,4 @@ describe("ServerMessage cross-validation", () => {
     expect(reparsed.request_id).toBe(parsed.request_id);
   });
 });
+       

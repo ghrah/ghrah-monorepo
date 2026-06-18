@@ -6,9 +6,6 @@ export const AgentConfigPayloadSchema = z.object({
   description: z.string().optional().default(""),
   system_prompt: z.string().optional().default(""),
   max_iterations: z.number().int().optional().default(10),
-  gateway_url: z.string().nullable().optional(),
-  // gateway_url: Subject ObserverServer URL (e.g. ws://localhost:4112/ws).
-  // Kept as "gateway_url" for wire protocol compatibility with Python side.
 });
 
 export const AbilityDefinitionPayloadSchema = z.object({
@@ -151,10 +148,63 @@ export const AgentTerminatedPayloadSchema = z.object({
   name: z.string(),
 });
 
+export const ContentBlockSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("text"),
+    text: z.string(),
+  }),
+  z.object({
+    type: z.literal("reasoning"),
+    reasoning: z.string(),
+    incomplete: z.boolean().optional().default(false),
+  }),
+  z.object({
+    type: z.literal("image"),
+    url: z.string().nullable().optional(),
+    base64: z.string().nullable().optional(),
+    mime_type: z.string().nullable().optional(),
+  }),
+  z.object({
+    type: z.literal("audio"),
+    data: z.string(),
+    mime_type: z.string(),
+  }),
+  z.object({
+    type: z.literal("file"),
+    url: z.string().nullable().optional(),
+    base64: z.string().nullable().optional(),
+    mime_type: z.string().nullable().optional(),
+    filename: z.string().nullable().optional(),
+  }),
+  z.object({
+    type: z.literal("tool_call"),
+    id: z.string(),
+    name: z.string(),
+    arguments: z.record(z.unknown()),
+  }),
+  z.object({
+    type: z.literal("tool_result"),
+    tool_call_id: z.string(),
+    name: z.string().nullable().optional(),
+    content: z.string(),
+    success: z.boolean().optional().default(true),
+    error: z.string().nullable().optional(),
+  }),
+  z.object({
+    type: z.literal("error"),
+    error_type: z.string(),
+    message: z.string(),
+    details: z.record(z.unknown()).nullable().optional(),
+  }),
+]);
+
+export type ContentBlock = z.infer<typeof ContentBlockSchema>;
+
 export const AgentResponsePayloadSchema = z.object({
   sender: z.string(),
   recipient: z.string(),
   content: z.string(),
+  content_blocks: z.array(ContentBlockSchema).nullable().optional(),
   message_type: z.string().optional().default("result"),
   metadata: z.record(z.unknown()).optional().default({}),
 });

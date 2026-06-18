@@ -9,7 +9,6 @@ const makeConfig = (name: string): AgentConfigPayload => ({
   description: "",
   system_prompt: "",
   max_iterations: 10,
-  gateway_url: null,
 });
 
 describe("useAgentsStore", () => {
