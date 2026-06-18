@@ -5,7 +5,16 @@ Subject 是 Core 和 Observer 之间的中间层，所有 Core↔Observer 通信
 """
 
 from ghrah.subject.ability_runner import AbilityRunner, AbilityRunnerConfig
-from ghrah.subject.config import SubjectConfig
+from ghrah.subject.config import (
+    CoreConnectionConfig,
+    CoreTransportConfig,
+    HITLPolicyConfig,
+    ManifestConfig,
+    PersistenceConfig,
+    SandboxUnitConfig,
+    SubjectConfig,
+    TransportKindConfig,
+)
 from ghrah.subject.hitl import HITLNotary, HITLPolicy, HITLPromise, HITLVerdict
 from ghrah.subject.ledger import (
     ActionChainLedger,
@@ -39,18 +48,25 @@ __all__ = [
     "AgentWorkspace",
     "ChainMeta",
     "CommandResult",
+    "CoreConnectionConfig",
+    "CoreTransportConfig",
     "DAGEntry",
+    "HITLPolicyConfig",
     "LedgerNode",
+    "ManifestConfig",
     "ManifestStore",
+    "PersistenceConfig",
     "PersistenceError",
     "PermissionChecker",
     "PermissionDecision",
     "PermissionVerdict",
     "SandboxExecutor",
     "SandboxExecutorConfig",
+    "SandboxUnitConfig",
     "SnapshotError",
     "SnapshotInfo",
     "SubjectConfig",
+    "TransportKindConfig",
     "HITLNotary",
     "HITLPolicy",
     "HITLPromise",

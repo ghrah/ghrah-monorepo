@@ -1,0 +1,334 @@
+"""SubjectConfig 配置拆分测试（S2.0）。
+
+覆盖：
+- flat 字段向后兼容（旧构造调用零改动）
+- slice 派生关系（未显式传入时由 flat 字段派生）
+- slice 显式覆盖
+- slice property 非 Optional（mypy 友好）
+- transport kind / enabled_third_party_units 默认值
+- from_env() 扩展（新 env var + 回退行为）
+"""
+
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from ghrah.subject.ability_runner import AbilityRunnerConfig
+from ghrah.subject.config import (
+    CoreConnectionConfig,
+    CoreTransportConfig,
+    HITLPolicyConfig,
+    ManifestConfig,
+    PersistenceConfig,
+    SandboxUnitConfig,
+    SubjectConfig,
+    TransportKindConfig,
+)
+
+
+class TestFlatFieldCompat:
+    """旧 flat 字段保留，旧构造调用零改动。"""
+
+    def test_default_flat_fields_present(self) -> None:
+        config = SubjectConfig()
+        assert config.workspace_root is not None and config.workspace_root != ""
+        assert config.db_path is not None and config.db_path != ""
+        assert config.manifest_root is not None and config.manifest_root != ""
+        assert isinstance(config.hitl_policy, HITLPolicyConfig)
+        assert isinstance(config.core, CoreTransportConfig)
+        assert config.log_level == "INFO"
+
+    def test_core_connection_config_is_alias_of_core_transport_config(self) -> None:
+        # 别名兼容：CoreConnectionConfig 即 CoreTransportConfig
+        assert CoreConnectionConfig is CoreTransportConfig
+
+    def test_core_connection_config_constructible(self) -> None:
+        # 旧外部代码 CoreConnectionConfig(url=..., command_timeout=...) 仍可用
+        cc = CoreConnectionConfig(url="ws://example:1234/ws", command_timeout=42)
+        assert cc.url == "ws://example:1234/ws"
+        assert cc.command_timeout == 42
+
+    def test_legacy_construction_unchanged(self) -> None:
+        # 模拟 scripts/start_all.py:185 的构造调用（零改动）
+        config = SubjectConfig(
+            workspace_root="/tmp/ws",
+            db_path="/tmp/subject.db",
+            hitl_policy=HITLPolicyConfig(
+                auto_approve_abilities=["conversation", "read_file"],
+                require_approval_by_default=True,
+            ),
+            core=CoreConnectionConfig(
+                url="ws://core:4111/ws",
+                command_timeout=300,
+            ),
+        )
+        assert config.workspace_root == "/tmp/ws"
+        assert config.db_path == "/tmp/subject.db"
+        assert config.core.url == "ws://core:4111/ws"
+        assert config.core.command_timeout == 300
+        assert config.hitl_policy.auto_approve_abilities == ["conversation", "read_file"]
+
+
+class TestSliceDerivation:
+    """未显式传入 slice 时，由 flat 字段派生。"""
+
+    def test_persistence_slice_derived(self) -> None:
+        config = SubjectConfig(db_path="/tmp/test.db")
+        assert config.persistence.db_path == "/tmp/test.db"
+
+    def test_sandbox_slice_derived_from_workspace_root(self) -> None:
+        config = SubjectConfig(workspace_root="/tmp/ws")
+        assert config.sandbox.workspace_root == "/tmp/ws"
+
+    def test_sandbox_default_timeout_derives_from_core(self) -> None:
+        # 默认派生：sandbox.default_timeout == core.command_timeout
+        config = SubjectConfig()
+        assert config.sandbox.default_timeout == config.core.command_timeout
+
+    def test_sandbox_default_timeout_derives_from_custom_core(self) -> None:
+        config = SubjectConfig(core=CoreTransportConfig(command_timeout=99.0))
+        assert config.sandbox.default_timeout == 99.0
+
+    def test_manifest_slice_derived(self) -> None:
+        config = SubjectConfig(manifest_root="/tmp/manifests")
+        assert config.manifest.manifest_root == "/tmp/manifests"
+
+    def test_hitl_slice_derived_from_hitl_policy(self) -> None:
+        policy = HITLPolicyConfig(auto_approve_abilities=["x"])
+        config = SubjectConfig(hitl_policy=policy)
+        # hitl slice 从 hitl_policy flat 字段派生（同一对象）
+        assert config.hitl is policy
+
+    def test_ability_runner_slice_derived_from_core(self) -> None:
+        config = SubjectConfig(core=CoreTransportConfig(command_timeout=120.0))
+        assert config.ability_runner.hitl_timeout == 120.0
+
+
+class TestSliceExplicitOverride:
+    """slice 可显式传入，覆盖 flat 派生。"""
+
+    def test_persistence_slice_explicit(self) -> None:
+        config = SubjectConfig(
+            db_path="/tmp/flat.db",
+            persistence_slice=PersistenceConfig(db_path="/tmp/slice.db"),
+        )
+        assert config.persistence.db_path == "/tmp/slice.db"
+
+    def test_sandbox_slice_explicit(self) -> None:
+        config = SubjectConfig(
+            workspace_root="/tmp/flat-ws",
+            sandbox_slice=SandboxUnitConfig(
+                workspace_root="/tmp/slice-ws",
+                default_timeout=42.0,
+            ),
+        )
+        assert config.sandbox.workspace_root == "/tmp/slice-ws"
+        assert config.sandbox.default_timeout == 42.0
+
+    def test_manifest_slice_explicit(self) -> None:
+        config = SubjectConfig(
+            manifest_root="/tmp/flat-man",
+            manifest_slice=ManifestConfig(manifest_root="/tmp/slice-man"),
+        )
+        assert config.manifest.manifest_root == "/tmp/slice-man"
+
+    def test_hitl_slice_explicit(self) -> None:
+        slice_policy = HITLPolicyConfig(auto_approve_abilities=["slice-ability"])
+        flat_policy = HITLPolicyConfig(auto_approve_abilities=["flat-ability"])
+        config = SubjectConfig(
+            hitl_policy=flat_policy,
+            hitl_slice=slice_policy,
+        )
+        # 显式传入的 slice 优先
+        assert config.hitl is slice_policy
+        # flat 字段不变
+        assert config.hitl_policy is flat_policy
+
+    def test_ability_runner_slice_explicit(self) -> None:
+        config = SubjectConfig(
+            core=CoreTransportConfig(command_timeout=10.0),
+            ability_runner_slice=AbilityRunnerConfig(hitl_timeout=77.0),
+        )
+        assert config.ability_runner.hitl_timeout == 77.0
+
+
+class TestSliceNonOptional:
+    """slice property 非 Optional（mypy strict 友好）。"""
+
+    def test_persistence_property_non_optional(self) -> None:
+        config = SubjectConfig()
+        assert type(config.persistence) is PersistenceConfig
+
+    def test_sandbox_property_non_optional(self) -> None:
+        config = SubjectConfig()
+        assert type(config.sandbox) is SandboxUnitConfig
+
+    def test_manifest_property_non_optional(self) -> None:
+        config = SubjectConfig()
+        assert type(config.manifest) is ManifestConfig
+
+    def test_hitl_property_non_optional(self) -> None:
+        config = SubjectConfig()
+        assert type(config.hitl) is HITLPolicyConfig
+
+    def test_ability_runner_property_non_optional(self) -> None:
+        config = SubjectConfig()
+        assert type(config.ability_runner) is AbilityRunnerConfig
+
+
+class TestTransportKind:
+    """transport kind 配置（§7.7）。"""
+
+    def test_default_transport(self) -> None:
+        config = SubjectConfig()
+        assert config.transport.core == "websocket"
+        assert config.transport.observer == "websocket"
+
+    def test_transport_explicit(self) -> None:
+        config = SubjectConfig(
+            transport=TransportKindConfig(core="grpc", observer="http"),
+        )
+        assert config.transport.core == "grpc"
+        assert config.transport.observer == "http"
+
+
+class TestEnabledThirdPartyUnits:
+    """enabled_third_party_units allowlist（§7.6）。"""
+
+    def test_default_empty_allowlist(self) -> None:
+        config = SubjectConfig()
+        assert config.enabled_third_party_units == []
+
+    def test_explicit_allowlist(self) -> None:
+        config = SubjectConfig(enabled_third_party_units=["foo", "bar"])
+        assert config.enabled_third_party_units == ["foo", "bar"]
+
+
+class TestFromEnv:
+    """from_env() 环境变量加载 + 回退行为。"""
+
+    def test_from_env_default(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # 清除所有相关 env，验证默认值
+        env_keys = [
+            "GHRAH_SUBJECT_WORKSPACE_ROOT",
+            "GHRAH_SUBJECT_DB_PATH",
+            "GHRAH_SUBJECT_MANIFEST_ROOT",
+            "GHRAH_SUBJECT_LOG_LEVEL",
+            "GHRAH_SUBJECT_CORE_URL",
+            "GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT",
+            "GHRAH_SUBJECT_SANDBOX_DEFAULT_TIMEOUT",
+            "GHRAH_SUBJECT_ABILITY_HITL_TIMEOUT",
+            "GHRAH_SUBJECT_TRANSPORT_CORE_KIND",
+            "GHRAH_SUBJECT_TRANSPORT_OBSERVER_KIND",
+            "GHRAH_SUBJECT_ENABLED_UNITS",
+        ]
+        for key in env_keys:
+            monkeypatch.delenv(key, raising=False)
+
+        caplog.set_level(logging.WARNING, logger="ghrah.subject.config")
+
+        config = SubjectConfig.from_env()
+        assert config.log_level == "INFO"
+        assert config.core.url == "ws://localhost:4111/ws"
+        assert config.transport.core == "websocket"
+        assert config.transport.observer == "websocket"
+        assert config.enabled_third_party_units == []
+        assert "GHRAH_SUBJECT_SANDBOX_DEFAULT_TIMEOUT" not in caplog.text
+
+    def test_from_env_flat_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_WORKSPACE_ROOT", "/tmp/env-ws")
+        monkeypatch.setenv("GHRAH_SUBJECT_DB_PATH", "/tmp/env.db")
+        monkeypatch.setenv("GHRAH_SUBJECT_MANIFEST_ROOT", "/tmp/env-man")
+        monkeypatch.setenv("GHRAH_SUBJECT_LOG_LEVEL", "DEBUG")
+
+        config = SubjectConfig.from_env()
+        assert config.workspace_root == "/tmp/env-ws"
+        assert config.db_path == "/tmp/env.db"
+        assert config.manifest_root == "/tmp/env-man"
+        assert config.log_level == "DEBUG"
+
+    def test_from_env_sandbox_timeout_fallback_to_core(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 不设 SANDBOX_DEFAULT_TIMEOUT，应回退到 core.command_timeout
+        monkeypatch.setenv("GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT", "123.0")
+        monkeypatch.delenv("GHRAH_SUBJECT_SANDBOX_DEFAULT_TIMEOUT", raising=False)
+
+        config = SubjectConfig.from_env()
+        assert config.sandbox.default_timeout == 123.0
+
+    def test_from_env_sandbox_timeout_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT", "123.0")
+        monkeypatch.setenv("GHRAH_SUBJECT_SANDBOX_DEFAULT_TIMEOUT", "456.0")
+
+        config = SubjectConfig.from_env()
+        assert config.sandbox.default_timeout == 456.0
+
+    def test_from_env_ability_timeout_fallback_to_core(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT", "200.0")
+        monkeypatch.delenv("GHRAH_SUBJECT_ABILITY_HITL_TIMEOUT", raising=False)
+
+        config = SubjectConfig.from_env()
+        assert config.ability_runner.hitl_timeout == 200.0
+
+    def test_from_env_ability_timeout_override(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT", "200.0")
+        monkeypatch.setenv("GHRAH_SUBJECT_ABILITY_HITL_TIMEOUT", "500.0")
+
+        config = SubjectConfig.from_env()
+        assert config.ability_runner.hitl_timeout == 500.0
+
+    def test_from_env_transport_kind(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_TRANSPORT_CORE_KIND", "grpc")
+        monkeypatch.setenv("GHRAH_SUBJECT_TRANSPORT_OBSERVER_KIND", "http")
+
+        config = SubjectConfig.from_env()
+        assert config.transport.core == "grpc"
+        assert config.transport.observer == "http"
+
+    def test_from_env_enabled_units_csv(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_ENABLED_UNITS", "foo, bar ,baz")
+
+        config = SubjectConfig.from_env()
+        assert config.enabled_third_party_units == ["foo", "bar", "baz"]
+
+    def test_from_env_enabled_units_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("GHRAH_SUBJECT_ENABLED_UNITS", raising=False)
+
+        config = SubjectConfig.from_env()
+        assert config.enabled_third_party_units == []
+
+    def test_from_env_hitl_alias_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # 回归保护：GHRAH_SUBJECT_HITL_* 行为不变
+        monkeypatch.setenv("GHRAH_SUBJECT_HITL_AUTO_APPROVE_ABILITIES", "a,b")
+        monkeypatch.setenv("GHRAH_SUBJECT_HITL_REQUIRE_APPROVAL", "false")
+        monkeypatch.setenv("GHRAH_SUBJECT_HITL_ALLOWED_PATHS", "/p1;/p2")
+        monkeypatch.setenv("GHRAH_SUBJECT_HITL_WORKSPACE_ROOT", "/hitl-ws")
+
+        config = SubjectConfig.from_env()
+        assert config.hitl_policy.auto_approve_abilities == ["a", "b"]
+        assert config.hitl_policy.require_approval_by_default is False
+        assert config.hitl_policy.allowed_paths == ["/p1", "/p2"]
+        assert config.hitl_policy.workspace_root == "/hitl-ws"
+        # hitl slice 与 flat 字段一致（from_env 未显式传 hitl_slice，由 flat 派生）
+        assert config.hitl is config.hitl_policy
+
+    def test_from_env_sandbox_workspace_derived(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_WORKSPACE_ROOT", "/tmp/env-ws2")
+
+        config = SubjectConfig.from_env()
+        assert config.sandbox.workspace_root == "/tmp/env-ws2"
