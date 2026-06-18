@@ -56,6 +56,7 @@ from ghrah.subject.sandbox.workspace import WorkspaceManager
 from ghrah.subject.units._helpers import (
     manifest_command_to_event,
     manifest_result_to_event_payload,
+    materialize_permission_params,
 )
 from ghrah.subject.units.ability_runner import AbilityRunnerUnit
 from ghrah.subject.units.hitl_notary import HITLNotaryUnit
@@ -1082,12 +1083,23 @@ class SubjectService:
         }
 
         expanded_abilities: list[dict[str, Any]] = []
+        workspace_root = None
+        workspace_resolver = getattr(self, "_resolve_workspace_path", None)
+        if callable(workspace_resolver):
+            resolved_workspace = workspace_resolver(resolved.config.name)
+            if isinstance(resolved_workspace, str):
+                workspace_root = resolved_workspace
+
         for a in resolved.abilities:
             impl = a.implementation
             if impl.type == "builtin" and impl.handler:
                 expanded_abilities.append({
                     "ability_type": impl.handler,
-                    "params": {},
+                    "params": materialize_permission_params(
+                        impl.handler,
+                        a.permissions,
+                        workspace_root,
+                    ),
                 })
             else:
                 logger.warning(

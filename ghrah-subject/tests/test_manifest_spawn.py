@@ -85,6 +85,10 @@ class TestResolveSpawnManifest:
         assert "write_file" in ability_types
         assert "conversation" in ability_types
         assert "end_task" in ability_types
+        write_file = next(a for a in abilities if a["ability_type"] == "write_file")
+        conversation = next(a for a in abilities if a["ability_type"] == "conversation")
+        assert write_file["params"] == {"require_hitl": True}
+        assert conversation["params"] == {}
 
     def test_model_overrides_present(self, service: MagicMock) -> None:
         from ghrah.subject.service import SubjectService
