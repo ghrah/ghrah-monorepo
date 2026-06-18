@@ -10,6 +10,7 @@ from ghrah.subject.units._commands import (
     PERSIST_COMMANDS,
     WORKSPACE_COMMANDS,
 )
+from ghrah.subject.units.ability_runner import AbilityRunnerUnit
 from ghrah.subject.units.hitl_notary import HITLNotaryUnit
 from ghrah.subject.units.hitl_policy import HITLPolicyUnit
 from ghrah.subject.units.ledger import LedgerUnit
@@ -33,6 +34,7 @@ def test_register_builtin_units_coexistence_registers_pr3a_pr3b_units() -> None:
     assert isinstance(engine.get_unit("hitl_policy"), HITLPolicyUnit)
     assert isinstance(engine.get_unit("permissions"), PermissionsUnit)
     assert isinstance(engine.get_unit("hitl_notary"), HITLNotaryUnit)
+    assert isinstance(engine.get_unit("ability_runner"), AbilityRunnerUnit)
     assert engine.get_unit("websocket_core_transport") is None
 
 
@@ -52,17 +54,21 @@ def test_builtin_routes_use_protocol_command_sets_without_overlap() -> None:
     ledger = engine.get_unit("ledger")
     workspace = engine.get_unit("workspace")
     hitl_notary = engine.get_unit("hitl_notary")
+    ability_runner = engine.get_unit("ability_runner")
 
     assert persistence is not None
     assert manifest_store is not None
     assert ledger is not None
     assert workspace is not None
     assert hitl_notary is not None
+    assert ability_runner is not None
     assert persistence.meta.routes.commands == PERSIST_COMMANDS
     assert manifest_store.meta.routes.commands == MANIFEST_COMMANDS
     assert ledger.meta.routes.commands == CHAIN_HISTORY_COMMANDS
     assert workspace.meta.routes.commands == WORKSPACE_COMMANDS
     assert hitl_notary.meta.routes.commands == frozenset({"hitl_response"})
+    # D10：ability_runner 只声明 long_running_commands，commands 为空
+    assert ability_runner.meta.routes.long_running_commands == frozenset({"execute_ability"})
 
-    for unit in (persistence, manifest_store, ledger, workspace, hitl_notary):
+    for unit in (persistence, manifest_store, ledger, workspace, hitl_notary, ability_runner):
         assert unit.meta.routes.commands.isdisjoint(unit.meta.routes.long_running_commands)

@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -29,11 +30,13 @@ from ghrah.abilities import (
     ActionResult,
 )
 from ghrah.abilities.paths import ABILITY_PATH_SPECS
+from ghrah.subject.event_bus import SUBJECT_HITL_REQUEST_CREATED, SubjectEventBus
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
 from ghrah.subject.hitl.policy import HITLVerdict
 from ghrah.subject.permission_checker import PermissionChecker, PermissionDecision
 
 if TYPE_CHECKING:
+    from ghrah.subject.runtime.service_keys import WorkspaceService
     from ghrah.subject.sandbox.executor import SandboxExecutor
 
 logger = logging.getLogger(__name__)
@@ -75,6 +78,9 @@ class AbilityRunner:
         permission_checker: PermissionChecker | None = None,
         config: AbilityRunnerConfig | None = None,
         sandbox_executor: SandboxExecutor | None = None,
+        *,
+        workspace: WorkspaceService | None = None,
+        event_bus: SubjectEventBus | None = None,
     ) -> None:
         self._hitl_notary = hitl_notary
         self._permission_checker = permission_checker or PermissionChecker()
@@ -83,29 +89,55 @@ class AbilityRunner:
         self._on_hitl_promise_created: Callable[[HITLPromise], Awaitable[None]] | None = None
         # 工作区路径解析器：agent_name → workspace 绝对路径
         self._workspace_resolver: Callable[[str], str | None] | None = None
+        # ⭐ D4 阶段 1：constructor injection 新路径（与 bind_* 共存）。
+        # 当对应的 bind_* 回调未绑定（None）时，改走新路径。
+        self._workspace = workspace
+        self._event_bus = event_bus
 
     def bind_hitl_broadcast(self, callback: Callable[[HITLPromise], Awaitable[None]]) -> None:
-        """绑定 HITL Promise 创建回调。
+        """绑定 HITL Promise 创建回调（deprecated，保留至 S2.4）。
 
         当 AbilityRunner 创建 HITL Promise 时，调用此回调将请求广播给 Observer。
         分布式模式下由 SubjectService 调用此方法注入 Core Server 广播逻辑。
 
+        D4：共存期 SubjectService 借用 AbilityRunner 实例后仍调用此方法，让
+        现有 Observer HITL 推送路径继续工作。若已绑定 legacy callback，则
+        ``_need_hitl`` 优先走 legacy，不触发 ``event_bus`` 新路径。
+
         Args:
             callback: 接收 HITLPromise 的异步回调，用于将 HITL 请求发送给 Observer。
         """
+        warnings.warn(
+            "AbilityRunner.bind_hitl_broadcast is deprecated; "
+            "use the event_bus constructor parameter instead. "
+            "Removed in S2.4.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._on_hitl_promise_created = callback
 
     def bind_workspace_resolver(self, resolver: Callable[[str], str | None]) -> None:
-        """绑定工作区路径解析器。
+        """绑定工作区路径解析器（deprecated，保留至 S2.4）。
 
         当 AbilityRunner 执行 Ability 时，调用此解析器将 agent_name 映射到
         工作区绝对路径，用于将 Agent 提供的相对路径解析为工作区内绝对路径。
 
         分布式模式下由 SubjectService 调用此方法注入 WorkspaceManager 路径查询。
 
+        D4：共存期 SubjectService 借用 AbilityRunner 实例后仍调用此方法。
+        若已绑定 legacy resolver，则 ``_resolve_ws`` 优先走 legacy，
+        不触发 ``workspace`` typed service 新路径。
+
         Args:
             resolver: 接收 agent_name，返回工作区绝对路径（str）或 None。
         """
+        warnings.warn(
+            "AbilityRunner.bind_workspace_resolver is deprecated; "
+            "use the workspace constructor parameter instead. "
+            "Removed in S2.4.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._workspace_resolver = resolver
 
     async def execute_ability(
@@ -343,9 +375,7 @@ class AbilityRunner:
         if path_keys is None and working_dir_keys is None:
             return tool_args
 
-        workspace_path = (
-            self._workspace_resolver(agent_name) if self._workspace_resolver else None
-        )
+        workspace_path = self._resolve_ws(agent_name)
         if not workspace_path:
             logger.debug(
                 "No workspace for agent=%s, using raw paths for ability=%s",
@@ -392,8 +422,8 @@ class AbilityRunner:
         """创建 HITL Promise 并等待审批结果。
 
         如果配置了超时，等待超时后自动拒绝。
-        创建 Promise 后调用绑定回调（如 SubjectService 的 Gateway 广播），
-        将 HITL 请求发送给 Observer。
+        创建 Promise 后通过绑定回调（如 SubjectService 的 Gateway 广播）或
+        ``event_bus`` 新路径，将 HITL 请求发送给 Observer。
         """
         promise = self._hitl_notary.create_promise(agent_name, ability_name, tool_args)
         logger.info(
@@ -403,8 +433,7 @@ class AbilityRunner:
             ability_name,
         )
 
-        if self._on_hitl_promise_created is not None:
-            await self._on_hitl_promise_created(promise)
+        await self._broadcast_hitl_promise(promise)
 
         try:
             if self._config.hitl_timeout is not None:
@@ -433,3 +462,55 @@ class AbilityRunner:
             return HITLVerdict(approved=False, reason="hitl_cancelled")
 
         return verdict
+
+    async def _broadcast_hitl_promise(self, promise: HITLPromise) -> None:
+        """将创建的 HITL Promise 推送到审批侧（D4 双路径）。
+
+        - 若 legacy ``bind_hitl_broadcast`` 回调已绑定：优先走 legacy
+          （共存期 SubjectService 注入，保持现有 Observer 推送路径）。
+        - 否则若 ``event_bus`` 已注入：经内部 ``SubjectEventBus`` 发出
+          ``SUBJECT_HITL_REQUEST_CREATED`` 事件（Unit 新路径，活路径 S2.3）。
+        - 二者皆无：仅记日志（无法推送，HITL 会因超时/取消而失败）。
+        """
+        if self._on_hitl_promise_created is not None:
+            await self._on_hitl_promise_created(promise)
+            return
+        if self._event_bus is not None:
+            await self._event_bus.emit(
+                SUBJECT_HITL_REQUEST_CREATED,
+                _promise_to_payload(promise),
+            )
+            return
+        logger.warning(
+            "HITL promise has no broadcast path: id=%s agent=%s ability=%s",
+            promise.promise_id,
+            promise.agent_name,
+            promise.ability_name,
+        )
+
+    def _resolve_ws(self, agent_name: str) -> str | None:
+        """解析 agent_name 到工作区绝对路径（D4 双路径）。
+
+        - 若 legacy ``bind_workspace_resolver`` 已绑定：优先走 legacy。
+        - 否则若 ``workspace`` typed service 已注入：调用其 ``resolve_agent_path``。
+        - 二者皆无：返回 None（相对路径不解析）。
+        """
+        if self._workspace_resolver is not None:
+            return self._workspace_resolver(agent_name)
+        if self._workspace is not None:
+            return self._workspace.resolve_agent_path(agent_name)
+        return None
+
+
+def _promise_to_payload(promise: HITLPromise) -> dict[str, Any]:
+    """将 HITLPromise 转为 ``SUBJECT_HITL_REQUEST_CREATED`` 事件 payload。
+
+    payload 字段与 ``HITLRequestPayload`` wire 契约一致
+    （promise_id / agent_name / ability_name / tool_args）。
+    """
+    return {
+        "promise_id": promise.promise_id,
+        "agent_name": promise.agent_name,
+        "ability_name": promise.ability_name,
+        "tool_args": dict(promise.tool_args),
+    }

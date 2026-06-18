@@ -24,6 +24,7 @@ def register_builtin_units(
     if profile not in {"coexistence", "full"}:
         raise ValueError(f"Unknown built-in Subject unit profile: {profile}")
 
+    from ghrah.subject.units.ability_runner import AbilityRunnerUnit
     from ghrah.subject.units.hitl_notary import HITLNotaryUnit
     from ghrah.subject.units.hitl_policy import HITLPolicyUnit
     from ghrah.subject.units.ledger import LedgerUnit
@@ -42,5 +43,6 @@ def register_builtin_units(
         HITLPolicyUnit(engine.config),
         PermissionsUnit(engine.config),
         HITLNotaryUnit(engine.config),
+        AbilityRunnerUnit(engine.config),
     ):
         engine.register_unit(unit)

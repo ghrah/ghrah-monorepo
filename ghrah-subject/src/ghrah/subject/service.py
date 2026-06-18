@@ -41,7 +41,7 @@ from ghrah.protocol.types import (
     SystemType,
     generate_request_id,
 )
-from ghrah.subject.ability_runner import AbilityRunner, AbilityRunnerConfig
+from ghrah.subject.ability_runner import AbilityRunner
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
 from ghrah.subject.hitl.policy import HITLVerdict
@@ -57,6 +57,7 @@ from ghrah.subject.units._helpers import (
     manifest_command_to_event,
     manifest_result_to_event_payload,
 )
+from ghrah.subject.units.ability_runner import AbilityRunnerUnit
 from ghrah.subject.units.hitl_notary import HITLNotaryUnit
 from ghrah.subject.units.hitl_policy import HITLPolicyUnit
 from ghrah.subject.units.ledger import LedgerUnit
@@ -159,6 +160,7 @@ class SubjectService:
         self._manifest_store: ManifestStore | None = None
         self._manifest_store_unit: ManifestStoreUnit | None = None
         self._hitl_notary_unit: HITLNotaryUnit | None = None
+        self._ability_runner_unit: AbilityRunnerUnit | None = None
 
         # 外部回调：Core 事件转发到 Observer EventBus
         self._core_event_handler: Any = None
@@ -276,14 +278,13 @@ class SubjectService:
             raise RuntimeError("Built-in permissions unit is not registered.")
         self._permission_checker = permissions_unit.service
 
-        ability_config = AbilityRunnerConfig(
-            hitl_timeout=self._config.core.command_timeout,
-        )
-        self._ability_runner = AbilityRunner(
-            hitl_notary=self._hitl_notary,
-            permission_checker=self._permission_checker,
-            config=ability_config,
-        )
+        ability_runner_unit = self._engine.get_unit("ability_runner")
+        if not isinstance(ability_runner_unit, AbilityRunnerUnit):
+            raise RuntimeError("Built-in ability_runner unit is not registered.")
+        self._ability_runner_unit = ability_runner_unit
+        self._ability_runner = ability_runner_unit.service
+        # D4：共存期 SubjectService 借用 AbilityRunner 实例后仍绑定 legacy callbacks，
+        # 让现有 Observer HITL 推送/工作区解析路径继续工作（bind_* 优先于新路径）。
         self._ability_runner.bind_hitl_broadcast(self._on_hitl_promise_created)
         self._ability_runner.bind_workspace_resolver(self._resolve_workspace_path)
 
@@ -343,10 +344,12 @@ class SubjectService:
         self._ledger = None
         self._workspace_mgr = None
         self._hitl_notary = None
+        self._ability_runner = None
         self._permission_checker = None
         self._manifest_store = None
         self._manifest_store_unit = None
         self._hitl_notary_unit = None
+        self._ability_runner_unit = None
 
         logger.info("SubjectService stopped")
 
