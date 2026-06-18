@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 
-from ghrah.abilities.paths import extract_paths, is_subpath
-from ghrah.manifest.types import PermissionFlags
+from ghrah.abilities.paths import extract_paths, is_subpath  # type: ignore[import-untyped]
+from ghrah.manifest.types import PermissionFlags  # type: ignore[import-untyped]
 
 __all__ = ["HITLVerdict", "HITLPolicy"]
+
+
+class _ManifestPermissionIndex(Protocol):
+    def get_permissions(self) -> dict[str, PermissionFlags]:
+        """Return the current manifest permission index."""
 
 
 @dataclass
@@ -25,7 +30,8 @@ class HITLPolicy:
     - require_hitl=True → 需要 HITL 审批或路径检查通过后放行
 
     运行时覆盖层：
-    - auto_approve_abilities：管理员可强制放行任何能力（包括 manifest 标记 require_hitl=True 的能力）
+    - auto_approve_abilities：管理员可强制放行任何能力
+      （包括 manifest 标记 require_hitl=True 的能力）
     - require_approval_by_default：对未在 manifest 中注册的能力的兜底策略
 
     决策流程（按优先级）：
@@ -44,12 +50,14 @@ class HITLPolicy:
         allowed_paths: list[str] | None = None,
         workspace_root: str | None = None,
         manifest_permissions: dict[str, PermissionFlags] | None = None,
+        manifest_permission_index: _ManifestPermissionIndex | None = None,
     ) -> None:
         self._auto_approve_abilities: set[str] = set(auto_approve_abilities or [])
         self._require_approval_by_default = require_approval_by_default
         self._allowed_paths = self._normalize_paths(allowed_paths) if allowed_paths else None
         self._workspace_root = os.path.abspath(workspace_root) if workspace_root else None
         self._manifest_permissions: dict[str, PermissionFlags] = manifest_permissions or {}
+        self._manifest_permission_index = manifest_permission_index
 
     @staticmethod
     def _normalize_paths(paths: list[str]) -> list[str]:
@@ -59,13 +67,13 @@ class HITLPolicy:
         abs_path = os.path.abspath(path)
         if self._allowed_paths is None:
             return False
-        return any(is_subpath(abs_path, allowed) for allowed in self._allowed_paths)
+        return any(bool(is_subpath(abs_path, allowed)) for allowed in self._allowed_paths)
 
     def _is_in_workspace(self, path: str) -> bool:
         if self._workspace_root is None:
             return False
         abs_path = os.path.abspath(path)
-        return is_subpath(abs_path, self._workspace_root)
+        return bool(is_subpath(abs_path, self._workspace_root))
 
     def _is_path_allowed(self, path: str) -> bool:
         return self._is_in_allowed_paths(path) or self._is_in_workspace(path)
@@ -80,7 +88,7 @@ class HITLPolicy:
             return HITLVerdict(approved=True, reason="auto_approved")
 
         # 2. Manifest 权限声明：require_hitl 标记
-        manifest_perms = self._manifest_permissions.get(ability_name)
+        manifest_perms = self._get_manifest_permissions().get(ability_name)
         if manifest_perms is not None:
             if not manifest_perms.require_hitl:
                 return HITLVerdict(approved=True, reason="manifest_auto_approved")
@@ -135,4 +143,9 @@ class HITLPolicy:
 
     @property
     def manifest_permissions(self) -> dict[str, PermissionFlags]:
+        return self._get_manifest_permissions()
+
+    def _get_manifest_permissions(self) -> dict[str, PermissionFlags]:
+        if self._manifest_permission_index is not None:
+            return self._manifest_permission_index.get_permissions()
         return self._manifest_permissions

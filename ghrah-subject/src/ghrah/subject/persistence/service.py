@@ -28,26 +28,13 @@ from pathlib import Path
 from typing import Any
 
 from ghrah.context.persistence import SqliteBackend
+from ghrah.protocol.types import (  # type: ignore[import-untyped]
+    PERSIST_COMMANDS as _PERSIST_COMMANDS,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["SubjectPersistenceService"]
-
-_PERSIST_COMMANDS = frozenset({
-    "persist_save_node",
-    "persist_load_node",
-    "persist_load_chain",
-    "persist_save_chain_meta",
-    "persist_load_chain_meta",
-    "persist_save_messages",
-    "persist_load_messages",
-    "persist_delete_chain",
-    "persist_list_agents",
-    "persist_save_session",
-    "persist_load_session",
-    "persist_list_sessions",
-    "persist_delete_sessions",
-})
 
 
 class SubjectPersistenceService:

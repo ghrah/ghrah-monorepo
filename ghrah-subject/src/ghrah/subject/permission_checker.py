@@ -19,13 +19,21 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 
-from ghrah.abilities import CommandSafetyCategory, CommandSafetyChecker
-from ghrah.abilities.paths import extract_paths, is_subpath
-from ghrah.manifest.types import PermissionFlags
+from ghrah.abilities import (  # type: ignore[import-untyped]
+    CommandSafetyCategory,
+    CommandSafetyChecker,
+)
+from ghrah.abilities.paths import extract_paths, is_subpath  # type: ignore[import-untyped]
+from ghrah.manifest.types import PermissionFlags  # type: ignore[import-untyped]
 
 __all__ = ["PermissionChecker", "PermissionDecision", "PermissionVerdict"]
+
+
+class _ManifestPermissionIndex(Protocol):
+    def get_permissions(self) -> dict[str, PermissionFlags]:
+        """Return the current manifest permission index."""
 
 
 class PermissionDecision(StrEnum):
@@ -64,12 +72,14 @@ class PermissionChecker:
         require_approval: bool = True,
         command_checker: CommandSafetyChecker | None = None,
         manifest_permissions: dict[str, PermissionFlags] | None = None,
+        manifest_permission_index: _ManifestPermissionIndex | None = None,
     ) -> None:
         self._allowed_paths = self._normalize_paths(allowed_paths) if allowed_paths else None
         self._workspace_root = os.path.abspath(workspace_root) if workspace_root else None
         self._require_approval = require_approval
         self._command_checker = command_checker or CommandSafetyChecker()
         self._manifest_permissions: dict[str, PermissionFlags] = manifest_permissions or {}
+        self._manifest_permission_index = manifest_permission_index
 
     @staticmethod
     def _normalize_paths(paths: list[str]) -> list[str]:
@@ -79,13 +89,13 @@ class PermissionChecker:
         if self._allowed_paths is None:
             return False
         abs_path = os.path.abspath(path)
-        return any(is_subpath(abs_path, allowed) for allowed in self._allowed_paths)
+        return any(bool(is_subpath(abs_path, allowed)) for allowed in self._allowed_paths)
 
     def _is_in_workspace(self, path: str) -> bool:
         if self._workspace_root is None:
             return False
         abs_path = os.path.abspath(path)
-        return is_subpath(abs_path, self._workspace_root)
+        return bool(is_subpath(abs_path, self._workspace_root))
 
     def _is_path_allowed(self, path: str) -> bool:
         return self._is_in_allowed_paths(path) or self._is_in_workspace(path)
@@ -128,7 +138,7 @@ class PermissionChecker:
         manifest 的 denied_paths 在路径检查前优先判断（硬性拒绝）。
         manifest 的 denied_commands 在命令检查前优先判断（硬性拒绝）。
         """
-        manifest_perms = self._manifest_permissions.get(ability_name)
+        manifest_perms = self._get_manifest_permissions().get(ability_name)
 
         # 未在 manifest 中注册的能力：无路径安全关注
         if manifest_perms is None:
@@ -152,7 +162,10 @@ class PermissionChecker:
                 write_paths = [dst] if dst else []
                 read_paths = [src] if src else []
                 for rp in read_paths:
-                    if manifest_perms.denied_paths and self._path_in_deny_list(rp, manifest_perms.denied_paths):
+                    if manifest_perms.denied_paths and self._path_in_deny_list(
+                        rp,
+                        manifest_perms.denied_paths,
+                    ):
                         return PermissionVerdict(
                             decision=PermissionDecision.DENY,
                             reason=f"Path denied by manifest: {rp}",
@@ -190,7 +203,10 @@ class PermissionChecker:
         self, ability_name: str, paths: list[str], manifest_perms: PermissionFlags
     ) -> PermissionVerdict:
         for path in paths:
-            if manifest_perms.denied_paths and self._path_in_deny_list(path, manifest_perms.denied_paths):
+            if manifest_perms.denied_paths and self._path_in_deny_list(
+                path,
+                manifest_perms.denied_paths,
+            ):
                 return PermissionVerdict(
                     decision=PermissionDecision.DENY,
                     reason=f"Path denied by manifest: {path}",
@@ -219,7 +235,10 @@ class PermissionChecker:
         self, ability_name: str, paths: list[str], manifest_perms: PermissionFlags
     ) -> PermissionVerdict:
         for path in paths:
-            if manifest_perms.denied_paths and self._path_in_deny_list(path, manifest_perms.denied_paths):
+            if manifest_perms.denied_paths and self._path_in_deny_list(
+                path,
+                manifest_perms.denied_paths,
+            ):
                 return PermissionVerdict(
                     decision=PermissionDecision.DENY,
                     reason=f"Path denied by manifest: {path}",
@@ -256,7 +275,11 @@ class PermissionChecker:
         # manifest denied_commands 优先判断
         if manifest_perms.denied_commands:
             for denied_cmd in manifest_perms.denied_commands:
-                if command.strip() == denied_cmd.strip() or command.strip().startswith(denied_cmd.strip() + " "):
+                command_text = command.strip()
+                denied_text = denied_cmd.strip()
+                if command_text == denied_text or command_text.startswith(
+                    denied_text + " "
+                ):
                     return PermissionVerdict(
                         decision=PermissionDecision.DENY,
                         reason=f"Command denied by manifest: {denied_cmd}",
@@ -281,7 +304,7 @@ class PermissionChecker:
                 reason="command_safe",
                 metadata={"command": command, "ability_name": ability_name},
             )
-        elif verdict.category == CommandSafetyCategory.DANGEROUS:
+        if verdict.category == CommandSafetyCategory.DANGEROUS:
             return PermissionVerdict(
                 decision=PermissionDecision.DENY,
                 reason=verdict.reason,
@@ -293,6 +316,11 @@ class PermissionChecker:
                 reason=verdict.reason,
                 metadata={"command": command, "ability_name": ability_name},
             )
+
+    def _get_manifest_permissions(self) -> dict[str, PermissionFlags]:
+        if self._manifest_permission_index is not None:
+            return self._manifest_permission_index.get_permissions()
+        return self._manifest_permissions
 
     @property
     def allowed_paths(self) -> list[str] | None:

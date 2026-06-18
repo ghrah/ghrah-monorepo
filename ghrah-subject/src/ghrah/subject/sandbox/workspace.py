@@ -195,21 +195,23 @@ class WorkspaceManager:
         self,
         root_path: str,
         sandbox: SandboxExecutor | None = None,
+        owns_sandbox: bool = True,
     ) -> None:
         self._root_path = os.path.abspath(root_path)
         self.sandbox = sandbox
+        self._owns_sandbox = owns_sandbox
         self._workspaces: dict[str, AgentWorkspace] = {}
 
     async def start(self) -> None:
         """初始化 WorkspaceManager。"""
         os.makedirs(self._root_path, exist_ok=True)
-        if self.sandbox:
+        if self.sandbox and self._owns_sandbox:
             await self.sandbox.start()
 
     async def stop(self) -> None:
         """清理。"""
         self._workspaces.clear()
-        if self.sandbox:
+        if self.sandbox and self._owns_sandbox:
             await self.sandbox.stop()
 
     @property

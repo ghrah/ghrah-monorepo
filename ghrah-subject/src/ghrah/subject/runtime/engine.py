@@ -102,15 +102,13 @@ class SubjectEngine:
         self._units[unit_name] = unit
         self._states[unit_name] = UnitState.REGISTERED
 
-    def register_builtin_units(self) -> None:
-        """Placeholder for S2.2 built-in unit registration."""
+    def register_builtin_units(self, *, profile: str = "coexistence") -> None:
+        """Register built-in units for the requested runtime profile."""
 
-        logger.info(
-            "Subject built-in unit registration deferred to S2.2 "
-            "(core_transport=%s, observer_transport=%s).",
-            self._config.transport.core,
-            self._config.transport.observer,
-        )
+        from ghrah.subject.units import register_builtin_units
+
+        register_builtin_units(self, profile=profile)
+        logger.info("Registered Subject built-in units (profile=%s).", profile)
 
     def discover(self, group: str = "ghrah.subject.units") -> None:
         """Discover third-party unit candidates without enabling them."""

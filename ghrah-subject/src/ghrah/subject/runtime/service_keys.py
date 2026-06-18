@@ -12,7 +12,10 @@ from typing import Any, Generic, Protocol, TypeVar
 
 from ghrah.manifest.types import PermissionFlags  # type: ignore[import-untyped]
 from ghrah.subject.hitl.notary import HITLNotary
+from ghrah.subject.hitl.policy import HITLPolicy
+from ghrah.subject.ledger.chain import ActionChainLedger
 from ghrah.subject.manifest_store.store import ManifestStore
+from ghrah.subject.persistence.service import SubjectPersistenceService
 from ghrah.subject.runtime.capability import CapabilityRegistry
 from ghrah.subject.sandbox.executor import SandboxExecutor
 from ghrah.subject.transport.core import CoreTransport
@@ -25,13 +28,16 @@ __all__ = [
     "COMMAND_RUNNER",
     "CORE_TRANSPORT",
     "EVENT_BRIDGE",
+    "HITL_POLICY",
     "HITL_NOTARY",
+    "LEDGER",
     "MANIFEST_PERMISSION_INDEX",
     "MANIFEST_STORE",
     "MCP_CLIENT_REGISTRY",
     "OBSERVER_ENDPOINT",
     "OBSERVER_EVENT_BUS",
     "PERMISSION_SERVICE",
+    "PERSISTENCE",
     "SANDBOX_EXECUTOR",
     "SESSION_REGISTRY",
     "WORKSPACE_SERVICE",
@@ -128,12 +134,18 @@ class _ReservedService(Protocol):
 
 WORKSPACE_SERVICE = SubjectServiceKey[WorkspaceService]("workspace_service")
 COMMAND_RUNNER = SubjectServiceKey[CommandRunner]("command_runner")
+PERSISTENCE = SubjectServiceKey[SubjectPersistenceService](
+    "persistence",
+    SubjectPersistenceService,
+)
+LEDGER = SubjectServiceKey[ActionChainLedger]("ledger", ActionChainLedger)
 SANDBOX_EXECUTOR = SubjectServiceKey[SandboxExecutor]("sandbox_executor", SandboxExecutor)
 MANIFEST_STORE = SubjectServiceKey[ManifestStore]("manifest_store", ManifestStore)
 MANIFEST_PERMISSION_INDEX = SubjectServiceKey[ManifestPermissionIndex](
     "manifest_permission_index"
 )
 PERMISSION_SERVICE = SubjectServiceKey[PermissionService]("permission_service")
+HITL_POLICY = SubjectServiceKey[HITLPolicy]("hitl_policy", HITLPolicy)
 HITL_NOTARY = SubjectServiceKey[HITLNotary]("hitl_notary", HITLNotary)
 CORE_TRANSPORT = SubjectServiceKey[CoreTransport]("core_transport")
 OBSERVER_ENDPOINT = SubjectServiceKey[ObserverEndpoint]("observer_endpoint")

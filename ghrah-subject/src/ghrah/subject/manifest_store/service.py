@@ -11,24 +11,14 @@ from ghrah.manifest.errors import (
     ManifestValidationError,
 )
 from ghrah.manifest.resolver import ManifestResolver
+from ghrah.protocol.types import (  # type: ignore[import-untyped]
+    MANIFEST_COMMANDS as _MANIFEST_COMMANDS,
+)
 from ghrah.subject.manifest_store.store import ManifestStore
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["handle_manifest_command"]
-
-_MANIFEST_COMMANDS = frozenset({
-    "manifest_list_abilities",
-    "manifest_get_ability",
-    "manifest_put_ability",
-    "manifest_delete_ability",
-    "manifest_list_agents",
-    "manifest_get_agent",
-    "manifest_put_agent",
-    "manifest_delete_agent",
-    "manifest_resolve_agent",
-    "manifest_validate",
-})
+__all__ = ["_MANIFEST_COMMANDS", "handle_manifest_command"]
 
 
 def _config_to_payload_dict(config: Any) -> dict[str, Any]:

@@ -31,3 +31,6 @@ def test_global_service_key_names_are_unique() -> None:
     assert "workspace_service" in names
     assert "capability_registry" in names
     assert "core_transport" in names
+    assert "persistence" in names
+    assert "ledger" in names
+    assert "hitl_policy" in names

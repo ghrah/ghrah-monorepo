@@ -46,13 +46,20 @@ from ghrah.subject.config import SubjectConfig
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
 from ghrah.subject.hitl.policy import HITLPolicy, HITLVerdict
 from ghrah.subject.ledger.chain import ActionChainLedger
-from ghrah.subject.manifest_store.builtins import ensure_builtins
 from ghrah.subject.manifest_store.service import _MANIFEST_COMMANDS
 from ghrah.subject.manifest_store.store import ManifestStore
 from ghrah.subject.permission_checker import PermissionChecker
 from ghrah.subject.persistence.service import SubjectPersistenceService
-from ghrah.subject.sandbox.executor import SandboxExecutor, SandboxExecutorConfig
+from ghrah.subject.runtime.engine import SubjectEngine
+from ghrah.subject.sandbox.executor import SandboxExecutor
 from ghrah.subject.sandbox.workspace import WorkspaceManager
+from ghrah.subject.units._helpers import (
+    manifest_command_to_event,
+    manifest_result_to_event_payload,
+)
+from ghrah.subject.units.manifest_store import ManifestStoreUnit
+from ghrah.subject.units.persistence import PersistenceUnit
+from ghrah.subject.units.sandbox import SandboxUnit
 
 logger = logging.getLogger(__name__)
 
@@ -105,22 +112,6 @@ _CHAIN_HISTORY_COMMANDS = frozenset({
 _SUBJECT_FORWARD_COMMANDS = CORE_COMMANDS
 
 
-def _manifest_event_type(command: str, payload: dict[str, Any]) -> str | None:
-    """根据命令和 payload 推断 manifest 变更事件类型。"""
-    overwrite = payload.get("overwrite", False)
-    event_map: dict[str, str] = {
-        "manifest_put_ability": (
-            "manifest_ability_updated" if overwrite else "manifest_ability_created"
-        ),
-        "manifest_delete_ability": "manifest_ability_deleted",
-        "manifest_put_agent": (
-            "manifest_agent_updated" if overwrite else "manifest_agent_created"
-        ),
-        "manifest_delete_agent": "manifest_agent_deleted",
-    }
-    return event_map.get(command)
-
-
 class SubjectService:
     """Subject 运行时编排服务。
 
@@ -143,6 +134,8 @@ class SubjectService:
 
     def __init__(self, config: SubjectConfig) -> None:
         self._config = config
+        self._engine = SubjectEngine(config)
+        self._engine.register_builtin_units(profile="coexistence")
         self._ws: Any = None
         self._running = False
         self._recv_task: asyncio.Task[None] | None = None
@@ -152,12 +145,14 @@ class SubjectService:
 
         # 子系统（在 start() 中初始化）
         self._persistence: SubjectPersistenceService | None = None
+        self._sandbox: SandboxExecutor | None = None
         self._ledger: ActionChainLedger | None = None
         self._workspace_mgr: WorkspaceManager | None = None
         self._hitl_notary: HITLNotary | None = None
         self._ability_runner: AbilityRunner | None = None
         self._permission_checker: PermissionChecker | None = None
         self._manifest_store: ManifestStore | None = None
+        self._manifest_store_unit: ManifestStoreUnit | None = None
 
         # 外部回调：Core 事件转发到 Observer EventBus
         self._core_event_handler: Any = None
@@ -233,31 +228,36 @@ class SubjectService:
         """初始化所有子系统。"""
         logger.info("SubjectService starting...")
 
-        self._persistence = SubjectPersistenceService(db_path=self._config.db_path)
-        await self._persistence.start()
+        await self._engine.start()
+
+        persistence_unit = self._engine.get_unit("persistence")
+        if not isinstance(persistence_unit, PersistenceUnit):
+            raise RuntimeError("Built-in persistence unit is not registered.")
+        self._persistence = persistence_unit.service
+
+        sandbox_unit = self._engine.get_unit("sandbox")
+        if not isinstance(sandbox_unit, SandboxUnit):
+            raise RuntimeError("Built-in sandbox unit is not registered.")
+        self._sandbox = sandbox_unit.service
+
+        manifest_store_unit = self._engine.get_unit("manifest_store")
+        if not isinstance(manifest_store_unit, ManifestStoreUnit):
+            raise RuntimeError("Built-in manifest_store unit is not registered.")
+        self._manifest_store_unit = manifest_store_unit
+        self._manifest_store = manifest_store_unit.service
 
         self._ledger = ActionChainLedger(self._persistence)
         await self._ledger.start()
 
-        sandbox_config = SandboxExecutorConfig(
-            default_timeout=self._config.core.command_timeout,
-        )
-        sandbox = SandboxExecutor(
-            workspace_root=self._config.workspace_root,
-            config=sandbox_config,
-        )
-
         self._workspace_mgr = WorkspaceManager(
             root_path=self._config.workspace_root,
-            sandbox=sandbox,
+            sandbox=self._sandbox,
+            owns_sandbox=False,
         )
         await self._workspace_mgr.start()
 
-        self._manifest_store = ManifestStore(self._config.manifest_root)
-        self._manifest_store.ensure_dirs()
-        ensure_builtins(self._manifest_store)
-
         manifest_permissions = self._load_manifest_permissions()
+        manifest_permission_index = self._manifest_store_unit.permission_index
 
         hitl_policy = HITLPolicy(
             auto_approve_abilities=self._config.hitl_policy.auto_approve_abilities,
@@ -266,6 +266,7 @@ class SubjectService:
             or self._config.workspace_root,
             allowed_paths=self._config.hitl_policy.allowed_paths or None,
             manifest_permissions=manifest_permissions,
+            manifest_permission_index=manifest_permission_index,
         )
         self._hitl_notary = HITLNotary(hitl_policy)
 
@@ -275,6 +276,7 @@ class SubjectService:
             or self._config.workspace_root,
             require_approval=self._config.hitl_policy.require_approval_by_default,
             manifest_permissions=manifest_permissions,
+            manifest_permission_index=manifest_permission_index,
         )
 
         ability_config = AbilityRunnerConfig(
@@ -340,12 +342,17 @@ class SubjectService:
 
         if self._ledger is not None:
             await self._ledger.stop()
-
-        if self._persistence is not None:
-            await self._persistence.stop()
+            self._ledger = None
 
         if self._workspace_mgr is not None:
             await self._workspace_mgr.stop()
+            self._workspace_mgr = None
+
+        await self._engine.stop()
+        self._persistence = None
+        self._sandbox = None
+        self._manifest_store = None
+        self._manifest_store_unit = None
 
         logger.info("SubjectService stopped")
 
@@ -666,23 +673,16 @@ class SubjectService:
 
         result = handle_manifest_command(command, payload, self._manifest_store)
 
+        if result.get("success"):
+            event_type = manifest_command_to_event(command, payload)
+            if event_type is not None and self._manifest_store_unit is not None:
+                self._manifest_store_unit.refresh_permission_index()
         if result.get("success") and self._ws is not None:
-            event_type = _manifest_event_type(command, payload)
+            event_type = manifest_command_to_event(command, payload)
             if event_type is not None:
-                full_name = result.get("data", {}).get("full_name", "")
-                namespace = full_name.rsplit(".", 1)[0] if "." in full_name else ""
-                event_payload: dict[str, Any] = {
-                    "full_name": full_name,
-                    "namespace": namespace,
-                }
-                data = result.get("data", {})
-                if "manifest" in data:
-                    event_payload["manifest"] = data["manifest"]
-                if "source" in data:
-                    event_payload["source"] = data["source"]
                 event_msg = Message(
                     type=event_type,
-                    payload=event_payload,
+                    payload=manifest_result_to_event_payload(result),
                 )
                 try:
                     await self._ws.send(event_msg.model_dump_json())

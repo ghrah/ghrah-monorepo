@@ -11,6 +11,14 @@ def _make_permissions(**overrides: bool) -> PermissionFlags:
     return PermissionFlags(**overrides)
 
 
+class _MutablePermissionIndex:
+    def __init__(self) -> None:
+        self.permissions: dict[str, PermissionFlags] = {}
+
+    def get_permissions(self) -> dict[str, PermissionFlags]:
+        return dict(self.permissions)
+
+
 class TestHITLPolicyAutoApprove:
     def test_auto_approve_ability(self) -> None:
         policy = HITLPolicy(auto_approve_abilities=["read_file", "list_dir"])
@@ -32,6 +40,21 @@ class TestHITLPolicyAutoApprove:
 
 
 class TestHITLPolicyManifestPermissions:
+    def test_manifest_permission_index_is_read_dynamically(self) -> None:
+        index = _MutablePermissionIndex()
+        policy = HITLPolicy(
+            require_approval_by_default=True,
+            manifest_permission_index=index,
+        )
+
+        assert policy.check_ability("custom_tool").approved is False
+
+        index.permissions["custom_tool"] = PermissionFlags(require_hitl=False)
+        verdict = policy.check_ability("custom_tool")
+
+        assert verdict.approved is True
+        assert verdict.reason == "manifest_auto_approved"
+
     def test_manifest_require_hitl_false_auto_approved(self) -> None:
         manifest_perms = {
             "conversation": PermissionFlags(),

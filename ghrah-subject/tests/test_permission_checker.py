@@ -10,6 +10,14 @@ from ghrah.subject.permission_checker import (
 )
 
 
+class _MutablePermissionIndex:
+    def __init__(self) -> None:
+        self.permissions: dict[str, PermissionFlags] = {}
+
+    def get_permissions(self) -> dict[str, PermissionFlags]:
+        return dict(self.permissions)
+
+
 class TestPermissionCheckerReadPaths:
     def test_no_restrictions_allows_all_reads(self) -> None:
         checker = PermissionChecker(allowed_paths=None, workspace_root=None)
@@ -93,6 +101,28 @@ class TestPermissionCheckerWritePaths:
 
 
 class TestPermissionCheckerManifestAbilities:
+    def test_manifest_permission_index_is_read_dynamically(self) -> None:
+        index = _MutablePermissionIndex()
+        checker = PermissionChecker(manifest_permission_index=index)
+
+        verdict = checker.check_ability(
+            "execute_command",
+            {"command": "rm -rf /tmp/project"},
+        )
+        assert verdict.decision == PermissionDecision.ALLOW
+
+        index.permissions["execute_command"] = PermissionFlags(
+            shell_access=True,
+            denied_commands=["rm"],
+        )
+        verdict = checker.check_ability(
+            "execute_command",
+            {"command": "rm -rf /tmp/project"},
+        )
+
+        assert verdict.decision == PermissionDecision.DENY
+        assert verdict.reason == "Command denied by manifest: rm"
+
     def test_conversation_no_path_concern(self) -> None:
         manifest_perms = {
             "conversation": PermissionFlags(),
