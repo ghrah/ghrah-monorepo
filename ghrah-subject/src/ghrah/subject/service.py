@@ -44,7 +44,7 @@ from ghrah.protocol.types import (
 from ghrah.subject.ability_runner import AbilityRunner, AbilityRunnerConfig
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
-from ghrah.subject.hitl.policy import HITLPolicy, HITLVerdict
+from ghrah.subject.hitl.policy import HITLVerdict
 from ghrah.subject.ledger.chain import ActionChainLedger
 from ghrah.subject.manifest_store.service import _MANIFEST_COMMANDS
 from ghrah.subject.manifest_store.store import ManifestStore
@@ -57,9 +57,14 @@ from ghrah.subject.units._helpers import (
     manifest_command_to_event,
     manifest_result_to_event_payload,
 )
+from ghrah.subject.units.hitl_notary import HITLNotaryUnit
+from ghrah.subject.units.hitl_policy import HITLPolicyUnit
+from ghrah.subject.units.ledger import LedgerUnit
 from ghrah.subject.units.manifest_store import ManifestStoreUnit
+from ghrah.subject.units.permissions import PermissionsUnit
 from ghrah.subject.units.persistence import PersistenceUnit
 from ghrah.subject.units.sandbox import SandboxUnit
+from ghrah.subject.units.workspace import WorkspaceUnit
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +158,7 @@ class SubjectService:
         self._permission_checker: PermissionChecker | None = None
         self._manifest_store: ManifestStore | None = None
         self._manifest_store_unit: ManifestStoreUnit | None = None
+        self._hitl_notary_unit: HITLNotaryUnit | None = None
 
         # 外部回调：Core 事件转发到 Observer EventBus
         self._core_event_handler: Any = None
@@ -246,38 +252,29 @@ class SubjectService:
         self._manifest_store_unit = manifest_store_unit
         self._manifest_store = manifest_store_unit.service
 
-        self._ledger = ActionChainLedger(self._persistence)
-        await self._ledger.start()
+        ledger_unit = self._engine.get_unit("ledger")
+        if not isinstance(ledger_unit, LedgerUnit):
+            raise RuntimeError("Built-in ledger unit is not registered.")
+        self._ledger = ledger_unit.service
 
-        self._workspace_mgr = WorkspaceManager(
-            root_path=self._config.workspace_root,
-            sandbox=self._sandbox,
-            owns_sandbox=False,
-        )
-        await self._workspace_mgr.start()
+        workspace_unit = self._engine.get_unit("workspace")
+        if not isinstance(workspace_unit, WorkspaceUnit):
+            raise RuntimeError("Built-in workspace unit is not registered.")
+        self._workspace_mgr = workspace_unit.manager
 
-        manifest_permissions = self._load_manifest_permissions()
-        manifest_permission_index = self._manifest_store_unit.permission_index
+        if not isinstance(self._engine.get_unit("hitl_policy"), HITLPolicyUnit):
+            raise RuntimeError("Built-in hitl_policy unit is not registered.")
 
-        hitl_policy = HITLPolicy(
-            auto_approve_abilities=self._config.hitl_policy.auto_approve_abilities,
-            require_approval_by_default=self._config.hitl_policy.require_approval_by_default,
-            workspace_root=self._config.hitl_policy.workspace_root
-            or self._config.workspace_root,
-            allowed_paths=self._config.hitl_policy.allowed_paths or None,
-            manifest_permissions=manifest_permissions,
-            manifest_permission_index=manifest_permission_index,
-        )
-        self._hitl_notary = HITLNotary(hitl_policy)
+        hitl_notary_unit = self._engine.get_unit("hitl_notary")
+        if not isinstance(hitl_notary_unit, HITLNotaryUnit):
+            raise RuntimeError("Built-in hitl_notary unit is not registered.")
+        self._hitl_notary_unit = hitl_notary_unit
+        self._hitl_notary = hitl_notary_unit.service
 
-        self._permission_checker = PermissionChecker(
-            allowed_paths=self._config.hitl_policy.allowed_paths or None,
-            workspace_root=self._config.hitl_policy.workspace_root
-            or self._config.workspace_root,
-            require_approval=self._config.hitl_policy.require_approval_by_default,
-            manifest_permissions=manifest_permissions,
-            manifest_permission_index=manifest_permission_index,
-        )
+        permissions_unit = self._engine.get_unit("permissions")
+        if not isinstance(permissions_unit, PermissionsUnit):
+            raise RuntimeError("Built-in permissions unit is not registered.")
+        self._permission_checker = permissions_unit.service
 
         ability_config = AbilityRunnerConfig(
             hitl_timeout=self._config.core.command_timeout,
@@ -340,19 +337,16 @@ class SubjectService:
             await self._ws.close()
             self._ws = None
 
-        if self._ledger is not None:
-            await self._ledger.stop()
-            self._ledger = None
-
-        if self._workspace_mgr is not None:
-            await self._workspace_mgr.stop()
-            self._workspace_mgr = None
-
         await self._engine.stop()
         self._persistence = None
         self._sandbox = None
+        self._ledger = None
+        self._workspace_mgr = None
+        self._hitl_notary = None
+        self._permission_checker = None
         self._manifest_store = None
         self._manifest_store_unit = None
+        self._hitl_notary_unit = None
 
         logger.info("SubjectService stopped")
 
@@ -710,12 +704,10 @@ class SubjectService:
         try:
             nodes = self._ledger.get_chain_history(agent_name, branch=branch_name, limit=limit)
             serialized = [serialize_node(n) for n in nodes]
-            chain = self._ledger.get_chain(agent_name)
             active_session_id = ""
-            if chain is not None:
-                meta = chain.get_meta(branch_name)
-                if meta is not None:
-                    active_session_id = getattr(meta, "session_id", "")
+            meta = self._ledger.get_chain_meta(agent_name)
+            if meta is not None:
+                active_session_id = meta.active_session_id
             return {
                 "success": True,
                 "data": {
@@ -790,13 +782,29 @@ class SubjectService:
         elif event_type == "health_status":
             logger.info("Health status: %s", payload.get("status", {}))
 
-    async def _handle_hitl_response(self, payload: dict[str, Any]) -> None:
+    async def _handle_hitl_response(self, payload: dict[str, Any]) -> dict[str, Any]:
         """处理 Observer 发来的 HITL 审批响应。
 
         解析审批结果，通过 HITLNotary.resolve_promise 触发
         AbilityRunner 的 await 继续执行。
         """
-        assert self._hitl_notary is not None
+        if self._hitl_notary_unit is not None:
+            result = self._hitl_notary_unit.handle_response(payload)
+            if result.get("success"):
+                logger.info(
+                    "HITL response processed: promise_id=%s approved=%s",
+                    payload.get("promise_id", ""),
+                    payload.get("approved", False),
+                )
+            else:
+                logger.warning(
+                    "HITL response for unknown/expired promise: %s",
+                    payload.get("promise_id", ""),
+                )
+            return result
+
+        if self._hitl_notary is None:
+            return {"success": False, "error": "HITLNotary not initialized"}
 
         promise_id = payload.get("promise_id", "")
         approved = payload.get("approved", False)
@@ -811,8 +819,15 @@ class SubjectService:
                 promise_id,
                 approved,
             )
-        else:
-            logger.warning("HITL response for unknown/expired promise: %s", promise_id)
+            return {
+                "success": True,
+                "data": {"processed": True, "promise_id": promise_id},
+            }
+        logger.warning("HITL response for unknown/expired promise: %s", promise_id)
+        return {
+            "success": False,
+            "error": f"HITL promise not found or expired: {promise_id}",
+        }
 
     async def _on_hitl_promise_created(self, promise: HITLPromise) -> None:
         """HITL Promise 创建回调：将请求推送给 Observer。

@@ -34,7 +34,11 @@ def create_app(
     core_forward_handler: CoreForwardHandler | None = None,
     workspace_handler: CommandHandler | None = None,
     manifest_handler: CommandHandler | None = None,
-    hitl_response_handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None = None,
+    hitl_response_handler: Callable[
+        [dict[str, Any]],
+        Coroutine[Any, Any, dict[str, Any] | None],
+    ]
+    | None = None,
     persist_handler: CommandHandler | None = None,
     ability_handler: CommandHandler | None = None,
     chain_history_handler: CommandHandler | None = None,

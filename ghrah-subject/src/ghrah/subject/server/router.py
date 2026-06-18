@@ -78,7 +78,7 @@ class ObserverRouter:
         - manifest_handler: manifest_* 命令的本地处理器
           签名: (command: str, payload: dict) -> dict
         - hitl_response_handler: hitl_response 的本地处理器
-          签名: (payload: dict) -> None
+          签名: (payload: dict) -> dict | None
         - persist_handler: persist_* 命令的本地处理器
           签名: (command: str, payload: dict) -> dict
         - ability_handler: execute_ability 的本地处理器
@@ -93,7 +93,11 @@ class ObserverRouter:
         core_forward_handler: CoreForwardHandler | None = None,
         workspace_handler: CommandHandler | None = None,
         manifest_handler: CommandHandler | None = None,
-        hitl_response_handler: Callable[[dict[str, Any]], Coroutine[Any, Any, None]] | None = None,
+        hitl_response_handler: Callable[
+            [dict[str, Any]],
+            Coroutine[Any, Any, dict[str, Any] | None],
+        ]
+        | None = None,
         persist_handler: CommandHandler | None = None,
         ability_handler: CommandHandler | None = None,
         chain_history_handler: CommandHandler | None = None,
@@ -230,7 +234,14 @@ class ObserverRouter:
             )
 
         try:
-            await self._hitl_response_handler(_payload_to_dict(message.payload))
+            result = await self._hitl_response_handler(_payload_to_dict(message.payload))
+            if isinstance(result, dict):
+                return create_command_result(
+                    request_id=request_id,
+                    success=bool(result.get("success", False)),
+                    data=result.get("data"),
+                    error=result.get("error"),
+                )
             return create_command_result(
                 request_id=request_id,
                 success=True,

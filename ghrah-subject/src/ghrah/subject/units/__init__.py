@@ -24,13 +24,23 @@ def register_builtin_units(
     if profile not in {"coexistence", "full"}:
         raise ValueError(f"Unknown built-in Subject unit profile: {profile}")
 
+    from ghrah.subject.units.hitl_notary import HITLNotaryUnit
+    from ghrah.subject.units.hitl_policy import HITLPolicyUnit
+    from ghrah.subject.units.ledger import LedgerUnit
     from ghrah.subject.units.manifest_store import ManifestStoreUnit
+    from ghrah.subject.units.permissions import PermissionsUnit
     from ghrah.subject.units.persistence import PersistenceUnit
     from ghrah.subject.units.sandbox import SandboxUnit
+    from ghrah.subject.units.workspace import WorkspaceUnit
 
     for unit in (
         PersistenceUnit(engine.config),
         SandboxUnit(engine.config),
         ManifestStoreUnit(engine.config),
+        LedgerUnit(engine.config),
+        WorkspaceUnit(engine.config),
+        HITLPolicyUnit(engine.config),
+        PermissionsUnit(engine.config),
+        HITLNotaryUnit(engine.config),
     ):
         engine.register_unit(unit)
