@@ -58,7 +58,6 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
     ) -> None:
         self._config = config
         self._observer_config = observer_config
-        self._ctx: SubjectContext | None = None
         self._connection_manager: ConnectionManager | None = None
         self._observer_event_bus: EventBus | None = None
         self._observer_event_bus_adapter: _ObserverEventBusAdapter | None = None
@@ -99,7 +98,6 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
         return self._router
 
     async def init(self, ctx: SubjectContext) -> None:
-        self._ctx = ctx
         config = self._observer_config or ObserverServerConfig(log_level=ctx.config.log_level)
         connection_manager = ConnectionManager()
         observer_event_bus = EventBus(
@@ -109,13 +107,7 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
         router = ObserverRouter(
             connection_manager,
             observer_event_bus,
-            core_forward_handler=self._dispatch_core_forward,
-            workspace_handler=self._dispatch_command,
-            manifest_handler=self._dispatch_command,
-            hitl_response_handler=self._dispatch_hitl_response,
-            persist_handler=self._dispatch_command,
-            ability_handler=self._dispatch_command,
-            chain_history_handler=self._dispatch_command,
+            engine=ctx.engine,
         )
         server = ObserverServer(config, connection_manager, router, observer_event_bus)
 
@@ -155,37 +147,6 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
     async def broadcast(self, message: dict[str, Any]) -> int:
         return await self.connection_manager.broadcast(message)
 
-    async def _dispatch_core_forward(
-        self,
-        command: str,
-        payload: dict[str, Any],
-        request_id: str | None,
-    ) -> dict[str, Any]:
-        return await self._require_context().engine.dispatch_observer_command(
-            command,
-            payload,
-            request_id=request_id,
-        )
-
-    async def _dispatch_command(
-        self,
-        command: str,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        return await self._require_context().engine.dispatch_observer_command(
-            command,
-            payload,
-        )
-
-    async def _dispatch_hitl_response(
-        self,
-        payload: dict[str, Any],
-    ) -> dict[str, Any]:
-        return await self._require_context().engine.dispatch_observer_command(
-            "hitl_response",
-            payload,
-        )
-
     async def _forward_core_event(self, subject_event_type: str, payload: Any) -> None:
         del subject_event_type
         if not isinstance(payload, Mapping):
@@ -210,11 +171,6 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
                 payload=_payload_as_dict(payload),
             )
         )
-
-    def _require_context(self) -> SubjectContext:
-        if self._ctx is None:
-            raise RuntimeError("WebSocketObserverEndpointUnit has not been initialized.")
-        return self._ctx
 
 
 def _create_observer_app(

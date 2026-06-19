@@ -52,6 +52,17 @@ def register_builtin_units(
     ]
 
     if profile == "full":
+        cfg = engine.config
+        if cfg.transport.core != "websocket":
+            raise ValueError(
+                f"Unsupported core transport kind: {cfg.transport.core!r} "
+                "(Stage 2 only implements 'websocket'; ipc/grpc reserved)."
+            )
+        if cfg.transport.observer != "websocket":
+            raise ValueError(
+                f"Unsupported observer transport kind: {cfg.transport.observer!r} "
+                "(Stage 2 only implements 'websocket'; ipc/grpc/http reserved)."
+            )
         units.extend([
             WebSocketCoreTransportUnit(engine.config),
             WebSocketObserverEndpointUnit(engine.config),

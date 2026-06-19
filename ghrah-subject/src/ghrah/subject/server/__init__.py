@@ -7,21 +7,20 @@
     - ObserverServerConfig: 服务器配置
     - ConnectionManager: Observer 连接管理
     - EventBus: 事件发布与重放
-    - ObserverRouter: 命令路由（通过回调与 SubjectService 解耦）
+    - ObserverRouter: 命令路由（S2.3 后统一委派 SubjectEngine，subscribe/unsubscribe 本地处理）
     - ObserverServer: WebSocket 连接处理器
-    - create_app: FastAPI 应用工厂
+    - create_app: FastAPI 应用工厂（薄 facade，从 engine 取回 Unit 持有的 app）
 """
 
 from ghrah.subject.server.app import create_app
 from ghrah.subject.server.config import ObserverServerConfig
 from ghrah.subject.server.connection_manager import ConnectionManager
 from ghrah.subject.server.event_bus import EventBus, EventStore
-from ghrah.subject.server.router import CoreForwardHandler, ObserverRouter
+from ghrah.subject.server.router import ObserverRouter
 from ghrah.subject.server.server import ObserverServer
 
 __all__ = [
     "ConnectionManager",
-    "CoreForwardHandler",
     "EventBus",
     "EventStore",
     "ObserverRouter",

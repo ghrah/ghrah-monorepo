@@ -2,29 +2,18 @@
 
 解析 Observer WebSocket 消息类型，路由到对应的处理器。
 
-路由规则：
-    - agent_management_commands (spawn_agent, etc.) → 转发到 Core（通过回调）
-    - workspace_commands → 本地处理器回调
-    - manifest_commands → 本地处理器回调
-    - hitl_response → 本地处理器回调
-    - subscribe/unsubscribe → 本地 ConnectionManager
-    - persist_commands → 本地处理器回调（Core → Subject 方向）
-    - execute_ability → 本地处理器回调（Core → Subject 方向）
-    - chain_history_commands → 本地处理器回调
+路由规则（S2.3 后，amendment A3/A6 + D3）：
+    - subscribe/unsubscribe → 本地 ConnectionManager（不进 engine）
+    - 其余所有 Observer 命令 → 统一委派 engine.dispatch_observer_command
+    - event → 本地 EventBus 发布（handle_event）
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ghrah.protocol.types import (
-    CHAIN_HISTORY_COMMANDS,
-    CORE_COMMANDS,
-    MANIFEST_COMMANDS,
-    PERSIST_COMMANDS,
-    WORKSPACE_COMMANDS,
     BaseModel,
     CommandType,
     EventType,
@@ -32,7 +21,6 @@ from ghrah.protocol.types import (
     SubscribePayload,
     UnsubscribePayload,
     create_command_result,
-    create_error,
     expect_payload,
     generate_request_id,
     payload_agent_name,
@@ -40,14 +28,14 @@ from ghrah.protocol.types import (
 from ghrah.subject.server.connection_manager import ConnectionManager
 from ghrah.subject.server.event_bus import EventBus
 
+if TYPE_CHECKING:
+    from ghrah.subject.runtime.engine import SubjectEngine
+
 logger = logging.getLogger(__name__)
 
 
 def _payload_to_dict(payload: Any) -> dict[str, Any]:
-    """将 payload（dict 或 BaseModel 实例）归一为 dict，供下游 SubjectService 使用。
-
-    SubjectService 内部仍以 dict 访问（Stage 2 插件化时再迁移为类型化）。
-    """
+    """将 payload（dict 或 BaseModel 实例）归一为 dict，供 engine 分发使用。"""
     if isinstance(payload, BaseModel):
         return payload.model_dump()
     if isinstance(payload, dict):
@@ -55,34 +43,13 @@ def _payload_to_dict(payload: Any) -> dict[str, Any]:
     return {}
 
 
-CommandHandler = Callable[[str, dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]
-CoreForwardHandler = Callable[
-    [str, dict[str, Any], str | None],
-    Coroutine[Any, Any, dict[str, Any]],
-]
-EventCallback = Callable[[Message], Coroutine[Any, Any, None]]
-
-
 class ObserverRouter:
     """Observer 消息路由器。
 
-    将 Observer 发来的命令消息路由到对应的处理器。
-    通过回调机制与 SubjectService 解耦，SubjectService 在集成时
-    注册各类型命令的处理器。
-
-    回调类型：
-        - core_forward_handler: Agent 管理命令转发到 Core 的回调
-          签名: (msg_type: str, payload: dict, request_id: str | None) -> dict
-        - workspace_handler: workspace_* 命令的本地处理器
-          签名: (command: str, payload: dict) -> dict
-        - manifest_handler: manifest_* 命令的本地处理器
-          签名: (command: str, payload: dict) -> dict
-        - hitl_response_handler: hitl_response 的本地处理器
-          签名: (payload: dict) -> dict | None
-        - persist_handler: persist_* 命令的本地处理器
-          签名: (command: str, payload: dict) -> dict
-        - ability_handler: execute_ability 的本地处理器
-          签名: (payload: dict) -> dict
+    subscribe/unsubscribe 在本地经 ConnectionManager 处理（连接订阅
+    状态属于 Observer server 所有权，不进入 Subject runtime）。其余
+    所有 Observer 命令统一经 ``engine.dispatch_observer_command`` 路由到
+    注册了对应 RouteSpec 的 Subject unit。
     """
 
     def __init__(
@@ -90,27 +57,11 @@ class ObserverRouter:
         connection_manager: ConnectionManager,
         event_bus: EventBus,
         *,
-        core_forward_handler: CoreForwardHandler | None = None,
-        workspace_handler: CommandHandler | None = None,
-        manifest_handler: CommandHandler | None = None,
-        hitl_response_handler: Callable[
-            [dict[str, Any]],
-            Coroutine[Any, Any, dict[str, Any] | None],
-        ]
-        | None = None,
-        persist_handler: CommandHandler | None = None,
-        ability_handler: CommandHandler | None = None,
-        chain_history_handler: CommandHandler | None = None,
+        engine: SubjectEngine,
     ) -> None:
         self._connection_manager = connection_manager
         self._event_bus = event_bus
-        self._core_forward_handler = core_forward_handler
-        self._workspace_handler = workspace_handler
-        self._manifest_handler = manifest_handler
-        self._hitl_response_handler = hitl_response_handler
-        self._persist_handler = persist_handler
-        self._ability_handler = ability_handler
-        self._chain_history_handler = chain_history_handler
+        self._engine = engine
 
     async def handle_command(
         self,
@@ -128,45 +79,25 @@ class ObserverRouter:
         """
         request_id = message.request_id or generate_request_id()
 
-        # HITL 响应：本地处理
-        if message.type == CommandType.HITL_RESPONSE.value:
-            return await self._handle_hitl_response(message, session_id, request_id)
-
-        # 订阅/取消订阅：本地处理
+        # 订阅/取消订阅：本地处理（ConnectionManager 所有权，不进 engine）
         if message.type == CommandType.SUBSCRIBE.value:
             return await self._handle_subscribe(message, session_id, request_id)
 
         if message.type == CommandType.UNSUBSCRIBE.value:
             return await self._handle_unsubscribe(message, session_id, request_id)
 
-        # Agent 管理命令：转发到 Core
-        if message.type in CORE_COMMANDS:
-            return await self._handle_core_forward(message, session_id, request_id)
-
-        # Workspace 命令：本地处理
-        if message.type in WORKSPACE_COMMANDS:
-            return await self._handle_workspace(message, session_id, request_id)
-
-        # Manifest 命令：本地处理
-        if message.type in MANIFEST_COMMANDS:
-            return await self._handle_manifest(message, session_id, request_id)
-
-        # Chain History 命令：本地处理
-        if message.type in CHAIN_HISTORY_COMMANDS:
-            return await self._handle_chain_history(message, session_id, request_id)
-
-        # 持久化命令：本地处理（Core → Subject 方向，但 Observer 可能请求）
-        if message.type in PERSIST_COMMANDS:
-            return await self._handle_persist(message, session_id, request_id)
-
-        # Execute ability：本地处理
-        if message.type == CommandType.EXECUTE_ABILITY.value:
-            return await self._handle_ability(message, session_id, request_id)
-
-        return create_error(
-            code="UNKNOWN_COMMAND",
-            message=f"Unknown command type: {message.type}",
+        # 其余所有 Observer 命令统一走 engine
+        result = await self._engine.dispatch_observer_command(
+            message.type,
+            _payload_to_dict(message.payload),
             request_id=request_id,
+            session_id=session_id,
+        )
+        return create_command_result(
+            request_id=request_id,
+            success=bool(result.get("success", False)),
+            data=result.get("data"),
+            error=result.get("error"),
         )
 
     async def handle_event(
@@ -221,237 +152,3 @@ class ObserverRouter:
             success=True,
             data=sub_info,
         )
-
-    async def _handle_hitl_response(
-        self, message: Message, session_id: str, request_id: str
-    ) -> Message:
-        """处理 HITL 响应：委托给本地回调（payload 归一为 dict）。"""
-        if self._hitl_response_handler is None:
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error="HITL response handler not configured",
-            )
-
-        try:
-            result = await self._hitl_response_handler(_payload_to_dict(message.payload))
-            if isinstance(result, dict):
-                return create_command_result(
-                    request_id=request_id,
-                    success=bool(result.get("success", False)),
-                    data=result.get("data"),
-                    error=result.get("error"),
-                )
-            return create_command_result(
-                request_id=request_id,
-                success=True,
-                data={"processed": True},
-            )
-        except Exception as e:
-            logger.error(f"Error handling hitl_response: {e}")
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error=str(e),
-            )
-
-    async def _handle_core_forward(
-        self, message: Message, session_id: str, request_id: str
-    ) -> Message:
-        """Agent 管理命令：通过回调转发到 Core（payload 归一为 dict）。"""
-        if self._core_forward_handler is None:
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error="Core forward handler not configured",
-            )
-
-        try:
-            result = await self._core_forward_handler(
-                message.type, _payload_to_dict(message.payload), request_id
-            )
-            if result is None:
-                return create_command_result(
-                    request_id=request_id,
-                    success=False,
-                    error="Core forward handler returned None",
-                )
-            return create_command_result(
-                request_id=request_id,
-                success=result.get("success", True),
-                data=result.get("data"),
-                error=result.get("error"),
-            )
-        except Exception as e:
-            logger.error(f"Error forwarding command to Core: {e}")
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error=str(e),
-            )
-
-    async def _handle_workspace(
-        self, message: Message, session_id: str, request_id: str
-    ) -> Message:
-        """Workspace 命令：本地处理。"""
-        if self._workspace_handler is None:
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error="Workspace handler not configured",
-            )
-
-        try:
-            result = await self._workspace_handler(message.type, _payload_to_dict(message.payload))
-            if result is None:
-                return create_command_result(
-                    request_id=request_id,
-                    success=False,
-                    error="Workspace handler returned None",
-                )
-            return create_command_result(
-                request_id=request_id,
-                success=result.get("success", True),
-                data=result.get("data"),
-                error=result.get("error"),
-            )
-        except Exception as e:
-            logger.error(f"Error handling workspace command: {e}")
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error=str(e),
-            )
-
-    async def _handle_manifest(
-        self, message: Message, session_id: str, request_id: str
-    ) -> Message:
-        """Manifest 命令：本地处理。"""
-        if self._manifest_handler is None:
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error="Manifest handler not configured",
-            )
-
-        try:
-            result = await self._manifest_handler(message.type, _payload_to_dict(message.payload))
-            if result is None:
-                return create_command_result(
-                    request_id=request_id,
-                    success=False,
-                    error="Manifest handler returned None",
-                )
-            return create_command_result(
-                request_id=request_id,
-                success=result.get("success", True),
-                data=result.get("data"),
-                error=result.get("error"),
-            )
-        except Exception as e:
-            logger.error(f"Error handling manifest command: {e}")
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error=str(e),
-            )
-
-    async def _handle_persist(
-        self, message: Message, session_id: str, request_id: str
-    ) -> Message:
-        """持久化命令：本地处理。"""
-        if self._persist_handler is None:
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error="Persist handler not configured",
-            )
-
-        try:
-            result = await self._persist_handler(message.type, _payload_to_dict(message.payload))
-            if result is None:
-                return create_command_result(
-                    request_id=request_id,
-                    success=False,
-                    error="Persist handler returned None",
-                )
-            return create_command_result(
-                request_id=request_id,
-                success=result.get("success", True),
-                data=result.get("data"),
-                error=result.get("error"),
-            )
-        except Exception as e:
-            logger.error(f"Error handling persist command: {e}")
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error=str(e),
-            )
-
-    async def _handle_ability(
-        self, message: Message, session_id: str, request_id: str
-    ) -> Message:
-        """execute_ability 命令：本地处理。"""
-        if self._ability_handler is None:
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error="Ability handler not configured",
-            )
-
-        try:
-            result = await self._ability_handler(message.type, _payload_to_dict(message.payload))
-            if result is None:
-                return create_command_result(
-                    request_id=request_id,
-                    success=False,
-                    error="Ability handler returned None",
-                )
-            return create_command_result(
-                request_id=request_id,
-                success=result.get("success", True),
-                data=result.get("data"),
-                error=result.get("error"),
-            )
-        except Exception as e:
-            logger.error(f"Error handling execute_ability: {e}")
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error=str(e),
-            )
-
-    async def _handle_chain_history(
-        self, message: Message, session_id: str, request_id: str
-    ) -> Message:
-        """Chain History 命令：本地处理。"""
-        if self._chain_history_handler is None:
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error="Chain history handler not configured",
-            )
-
-        try:
-            payload_dict = _payload_to_dict(message.payload)
-            result = await self._chain_history_handler(message.type, payload_dict)
-            if result is None:
-                return create_command_result(
-                    request_id=request_id,
-                    success=False,
-                    error="Chain history handler returned None",
-                )
-            return create_command_result(
-                request_id=request_id,
-                success=result.get("success", True),
-                data=result.get("data"),
-                error=result.get("error"),
-            )
-        except Exception as e:
-            logger.error(f"Error handling chain history command: {e}")
-            return create_command_result(
-                request_id=request_id,
-                success=False,
-                error=str(e),
-            )

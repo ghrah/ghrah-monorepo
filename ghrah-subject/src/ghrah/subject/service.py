@@ -35,8 +35,6 @@ from ghrah.protocol.types import (
     CORE_COMMANDS,
     AbilityDefinitionPayload,
     AgentConfigPayload,
-    EventType,
-    HITLRequestPayload,
     Message,
     SystemType,
     generate_request_id,
@@ -162,9 +160,6 @@ class SubjectService:
         self._manifest_store_unit: ManifestStoreUnit | None = None
         self._hitl_notary_unit: HITLNotaryUnit | None = None
         self._ability_runner_unit: AbilityRunnerUnit | None = None
-
-        # 外部回调：Core 事件转发到 Observer EventBus
-        self._core_event_handler: Any = None
 
     async def start(self) -> None:
         """启动服务：初始化子系统，连接 Core，进入消息循环。
@@ -728,21 +723,12 @@ class SubjectService:
     async def _handle_core_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """处理从 Core 收到的 Core 事件。
 
-        先转发到 Observer EventBus，再执行本地处理，确保 Observer 及时收到事件。
+        S2.3 后，核心事件转发到 Observer EventBus 的职责已由
+        ``WebSocketObserverEndpointUnit._forward_core_event``（订阅
+        ``SUBJECT_CORE_EVENT_RECEIVED``）承担，本方法仅做本地处理。
+        共存期（profile="coexistence"）下 SubjectService 不启动该 Unit，
+        故核心事件不再转发到 Observer（已知降级，见 S2.3 计划 §6.3）。
         """
-        # 先转发事件给 Observer，再做本地处理，避免本地操作延迟事件推送
-        if self._core_event_handler is not None:
-            try:
-                await self._core_event_handler(event_type, payload)
-                logger.info("Core event forwarded to Observer: %s", event_type)
-            except Exception:
-                logger.exception("core_event_handler failed for %s", event_type)
-        else:
-            logger.warning(
-                "Core event not forwarded: no core_event_handler set for %s",
-                event_type,
-            )
-
         # 本地处理
         if event_type == "agent_spawned":
             agent_name = payload.get("name", "")
@@ -834,31 +820,19 @@ class SubjectService:
         }
 
     async def _on_hitl_promise_created(self, promise: HITLPromise) -> None:
-        """HITL Promise 创建回调：将请求推送给 Observer。
+        """HITL Promise 创建回调。
 
         在分布式架构中，HITL 是 Subject 与 Observer 之间的交互，
-        Core 不参与 HITL 流程。HITL 请求直接通过本地 EventBus
-        推送到 Observer 客户端。
-        """
-        hitl_payload = HITLRequestPayload(
-            promise_id=promise.promise_id,
-            agent_name=promise.agent_name,
-            ability_name=promise.ability_name,
-            tool_args=promise.tool_args,
-        )
-        payload = hitl_payload.model_dump()
+        Core 不参与 HITL 流程。
 
-        if self._core_event_handler is not None:
-            try:
-                await self._core_event_handler(EventType.HITL_REQUEST.value, payload)
-                logger.info("HITL request emitted to Observer: promise_id=%s", promise.promise_id)
-            except Exception:
-                logger.exception("Failed to emit HITL request to Observer")
-        else:
-            logger.warning(
-                "Cannot emit HITL request: no event handler set (promise_id=%s)",
-                promise.promise_id,
-            )
+        S2.3 后，HITL 请求转发到 Observer 的职责已由
+        ``WebSocketObserverEndpointUnit._forward_hitl_request``（订阅
+        ``SUBJECT_HITL_REQUEST_CREATED``）承担。本方法仅保留 payload 构造
+        以维持现有 AbilityRunner 回调契约；共存期（profile="coexistence"）
+        下 SubjectService 不启动该 Unit，故 HITL 请求不再转发到 Observer
+        （已知降级，见 S2.3 计划 §6.3）。
+        """
+        del promise
 
     def _resolve_workspace_path(self, agent_name: str) -> str | None:
         """查询 Agent 的工作区绝对路径。
