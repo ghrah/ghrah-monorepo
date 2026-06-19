@@ -514,7 +514,8 @@ class HealthStatusPayload(BaseModel):
 class AbilityResultPayload(BaseModel):
     """ability_result 事件载荷。
 
-    Subject → Core：Ability 执行结果。
+    Core → Subject → Observer：Core 已确认收到的 Ability 执行结果事件。
+    执行结果来源于 Subject 返回的 execute_ability command_result。
     """
 
     request_id: str
