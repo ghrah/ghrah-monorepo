@@ -17,6 +17,12 @@ dependencies = [
 [project.scripts]
 ghrah-subject = "ghrah.subject.app:main"
 
+[project.entry-points."ghrah.subject.units"]
+# ⚠️ 内置 Unit 用 register_builtin_units() 显式注册（调试友好），此处留空。
+# 第三方 Unit 通过此 group 注册为**候选**：engine.discover() 发现，
+# 但需 config.enabled_third_party_units allowlist 显式启用才会加载。
+# 发现≠启用，Subject 是高权限 effect host，第三方默认不启用。
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

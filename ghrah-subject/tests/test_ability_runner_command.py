@@ -164,12 +164,33 @@ class TestPermissionCheckerWithoutManifest:
 # ── AbilityRunner execute_command working_dir 解析测试 ──
 
 
+class _FakeWorkspace:
+    """Minimal WorkspaceService for path-resolution unit tests."""
+
+    def __init__(self, root: str = "/workspace") -> None:
+        self._root = root
+
+    @property
+    def root_path(self) -> str:
+        return self._root
+
+    async def create_workspace(self, agent_name: str) -> None:  # pragma: no cover
+        return None
+
+    def resolve_agent_path(self, agent_name: str) -> str | None:
+        return f"{self._root}/{agent_name}"
+
+
 class TestAbilityRunnerWorkingDir:
     def test_working_dir_resolved_for_execute_command(self) -> None:
         from ghrah.subject.ability_runner import AbilityRunner
+        from ghrah.subject.hitl.notary import HITLNotary
+        from ghrah.subject.hitl.policy import HITLPolicy
 
-        runner = AbilityRunner.__new__(AbilityRunner)
-        runner._workspace_resolver = lambda name: f"/workspace/{name}"
+        runner = AbilityRunner(
+            hitl_notary=HITLNotary(HITLPolicy()),
+            workspace=_FakeWorkspace("/workspace"),
+        )
 
         result = runner._resolve_paths(
             "execute_command",
@@ -180,9 +201,13 @@ class TestAbilityRunnerWorkingDir:
 
     def test_working_dir_absolute_not_resolved(self) -> None:
         from ghrah.subject.ability_runner import AbilityRunner
+        from ghrah.subject.hitl.notary import HITLNotary
+        from ghrah.subject.hitl.policy import HITLPolicy
 
-        runner = AbilityRunner.__new__(AbilityRunner)
-        runner._workspace_resolver = lambda name: f"/workspace/{name}"
+        runner = AbilityRunner(
+            hitl_notary=HITLNotary(HITLPolicy()),
+            workspace=_FakeWorkspace("/workspace"),
+        )
 
         result = runner._resolve_paths(
             "execute_command",
@@ -193,9 +218,13 @@ class TestAbilityRunnerWorkingDir:
 
     def test_working_dir_not_resolved_for_other_abilities(self) -> None:
         from ghrah.subject.ability_runner import AbilityRunner
+        from ghrah.subject.hitl.notary import HITLNotary
+        from ghrah.subject.hitl.policy import HITLPolicy
 
-        runner = AbilityRunner.__new__(AbilityRunner)
-        runner._workspace_resolver = lambda name: f"/workspace/{name}"
+        runner = AbilityRunner(
+            hitl_notary=HITLNotary(HITLPolicy()),
+            workspace=_FakeWorkspace("/workspace"),
+        )
 
         result = runner._resolve_paths(
             "read_file",

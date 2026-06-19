@@ -1,10 +1,16 @@
-"""ghrah-subject: 控制面/执行层
+"""ghrah-subject: 控制面/执行层。
 
-Subject 是 Core 和 Observer 之间的中间层，所有 Core↔Observer 通信都经过 Subject。
-在分布式模式下，Subject 端执行 Ability 并处理 HITL 裁决。
+Subject 是 Core 和 Observer 之间的中间层（Agent Effect Host）。
+运行时由 SubjectEngine 装配
+（register_builtin_units -> discover -> enable_from_config -> validate
+-> start -> run_forever -> stop）。
 """
 
+# —— runtime 契约
+# —— 各子系统类（保留导出供单测）——
 from ghrah.subject.ability_runner import AbilityRunner, AbilityRunnerConfig
+
+# —— SubjectConfig（含 enabled_third_party_units allowlist）——
 from ghrah.subject.config import (
     CoreConnectionConfig,
     CoreTransportConfig,
@@ -29,6 +35,11 @@ from ghrah.subject.permission_checker import (
     PermissionDecision,
     PermissionVerdict,
 )
+from ghrah.subject.runtime.capability import CapabilityProvider, CapabilityRegistry
+from ghrah.subject.runtime.context import SubjectContext
+from ghrah.subject.runtime.engine import SubjectEngine
+from ghrah.subject.runtime.service_keys import SubjectServiceKey
+from ghrah.subject.runtime.services import SubjectServices
 from ghrah.subject.sandbox import (
     AgentWorkspace,
     CommandResult,
@@ -39,39 +50,50 @@ from ghrah.subject.sandbox import (
     WorkspaceManager,
     WorkspaceStatus,
 )
-from ghrah.subject.service import SubjectService
+from ghrah.subject.unit.base import RouteSpec, SubjectUnit, UnitMeta
 
 __all__ = [
+    # runtime 契约
+    "SubjectEngine",
+    "SubjectUnit",
+    "UnitMeta",
+    "RouteSpec",
+    "SubjectContext",
+    "SubjectServices",
+    "SubjectServiceKey",
+    "CapabilityProvider",
+    "CapabilityRegistry",
+    # config
+    "SubjectConfig",
+    "CoreConnectionConfig",
+    "CoreTransportConfig",
+    "HITLPolicyConfig",
+    "ManifestConfig",
+    "PersistenceConfig",
+    "SandboxUnitConfig",
+    "TransportKindConfig",
+    # 子系统（单测用）
     "AbilityRunner",
     "AbilityRunnerConfig",
     "ActionChainLedger",
     "AgentWorkspace",
     "ChainMeta",
     "CommandResult",
-    "CoreConnectionConfig",
-    "CoreTransportConfig",
     "DAGEntry",
-    "HITLPolicyConfig",
+    "HITLNotary",
+    "HITLPolicy",
+    "HITLPromise",
+    "HITLVerdict",
     "LedgerNode",
-    "ManifestConfig",
     "ManifestStore",
-    "PersistenceConfig",
     "PersistenceError",
     "PermissionChecker",
     "PermissionDecision",
     "PermissionVerdict",
     "SandboxExecutor",
     "SandboxExecutorConfig",
-    "SandboxUnitConfig",
     "SnapshotError",
     "SnapshotInfo",
-    "SubjectConfig",
-    "TransportKindConfig",
-    "HITLNotary",
-    "HITLPolicy",
-    "HITLPromise",
-    "HITLVerdict",
-    "SubjectService",
     "WorkspaceManager",
     "WorkspaceStatus",
 ]

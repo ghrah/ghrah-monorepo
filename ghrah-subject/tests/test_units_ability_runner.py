@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -117,9 +116,11 @@ async def test_ability_runner_unit_init_injects_workspace_event_bus_and_sandbox(
         assert unit.service._event_bus is engine.event_bus
         assert unit.service._sandbox_executor is engine.services.require(SANDBOX_EXECUTOR)
 
-        # 共存期未绑定 legacy callbacks（Unit 路径走新路径）
-        assert unit.service._on_hitl_promise_created is None
-        assert unit.service._workspace_resolver is None
+        # S2.4：legacy bind_* 回调已移除，不再有 _on_hitl_promise_created/_workspace_resolver
+        assert not hasattr(unit.service, "_on_hitl_promise_created")
+        assert not hasattr(unit.service, "_workspace_resolver")
+        assert not hasattr(unit.service, "bind_hitl_broadcast")
+        assert not hasattr(unit.service, "bind_workspace_resolver")
     finally:
         await engine.stop()
 
@@ -304,69 +305,6 @@ async def test_hitl_request_emitted_via_event_bus_on_new_path(tmp_path: Path) ->
         )
         result = await task
         assert result["success"] is False
-    finally:
-        await engine.stop()
-
-
-# ── D4: legacy bind_* takes priority over new path ──────────────────────────
-
-
-async def test_legacy_bind_hitl_broadcast_takes_priority_over_event_bus(
-    tmp_path: Path,
-) -> None:
-    """legacy callback 已绑定时优先走 legacy，不触发 event_bus（共存期语义）。"""
-
-    config = _config(tmp_path)
-    engine = SubjectEngine(config)
-    engine.register_builtin_units(profile="coexistence")
-
-    await engine.start()
-    try:
-        unit = engine.get_unit("ability_runner")
-        assert isinstance(unit, AbilityRunnerUnit)
-
-        legacy_calls: list[Any] = []
-        bus_calls: list[Any] = []
-
-        async def _legacy_cb(promise: Any) -> None:
-            legacy_calls.append(promise)
-
-        async def _bus_capture(_et: str, payload: Any) -> None:
-            bus_calls.append(payload)
-
-        engine.event_bus.subscribe(SUBJECT_HITL_REQUEST_CREATED, _bus_capture)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            unit.service.bind_hitl_broadcast(_legacy_cb)
-
-        task = asyncio.create_task(
-            unit.handle_command(
-                "execute_ability",
-                {
-                    "agent_name": "agent-legacy",
-                    "ability_name": "unit_auto_ability",
-                    "tool_args": {},
-                },
-                CommandContext.core(None),
-            )
-        )
-        for _ in range(100):
-            await asyncio.sleep(0.01)
-            if legacy_calls:
-                break
-
-        assert len(legacy_calls) == 1
-        assert bus_calls == []  # event_bus 新路径未触发
-
-        # cleanup
-        notary = engine.get_unit("hitl_notary")
-        assert notary is not None
-        notary.service.resolve_promise(
-            legacy_calls[0].promise_id,
-            HITLVerdict(approved=False, reason="test"),
-        )
-        await task
     finally:
         await engine.stop()
 
