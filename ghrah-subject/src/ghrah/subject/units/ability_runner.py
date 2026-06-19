@@ -78,7 +78,8 @@ class AbilityRunnerUnit(SubjectUnit):
             raise TypeError("PERMISSION_SERVICE must be PermissionChecker.")
 
         runner_config = AbilityRunnerConfig(
-            hitl_timeout=self._config.core.command_timeout,
+            hitl_timeout=self._config.ability_runner.hitl_timeout,
+            default_ability_timeout=self._config.ability_runner.default_ability_timeout,
         )
         self._runner = AbilityRunner(
             hitl_notary=notary,

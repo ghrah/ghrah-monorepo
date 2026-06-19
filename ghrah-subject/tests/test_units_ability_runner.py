@@ -9,7 +9,8 @@ from ghrah.abilities import AbilityRegistry, ActionOutcome, ActionResult
 from ghrah.abilities.base import Ability
 from ghrah.abilities.context import AbilityExecutionContext
 
-from ghrah.subject.config import SubjectConfig
+from ghrah.subject.ability_runner import AbilityRunnerConfig
+from ghrah.subject.config import CoreTransportConfig, SubjectConfig
 from ghrah.subject.event_bus import SUBJECT_HITL_REQUEST_CREATED
 from ghrah.subject.hitl.policy import HITLVerdict
 from ghrah.subject.runtime.engine import SubjectEngine
@@ -121,6 +122,33 @@ async def test_ability_runner_unit_init_injects_workspace_event_bus_and_sandbox(
         assert not hasattr(unit.service, "_workspace_resolver")
         assert not hasattr(unit.service, "bind_hitl_broadcast")
         assert not hasattr(unit.service, "bind_workspace_resolver")
+    finally:
+        await engine.stop()
+
+
+async def test_ability_runner_unit_uses_ability_runner_config_slice(
+    tmp_path: Path,
+) -> None:
+    config = SubjectConfig(
+        workspace_root=str(tmp_path / "workspace"),
+        db_path=str(tmp_path / "subject.db"),
+        manifest_root=str(tmp_path / "manifests"),
+        core=CoreTransportConfig(command_timeout=111.0),
+        ability_runner_slice=AbilityRunnerConfig(
+            hitl_timeout=22.0,
+            default_ability_timeout=33.0,
+        ),
+    )
+    engine = SubjectEngine(config)
+    engine.register_builtin_units(profile="coexistence")
+
+    await engine.start()
+    try:
+        unit = engine.get_unit("ability_runner")
+        assert isinstance(unit, AbilityRunnerUnit)
+
+        assert unit.service._config.hitl_timeout == 22.0
+        assert unit.service._config.default_ability_timeout == 33.0
     finally:
         await engine.stop()
 
