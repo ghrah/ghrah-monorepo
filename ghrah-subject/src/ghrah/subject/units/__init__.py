@@ -33,6 +33,7 @@ def register_builtin_units(
     from ghrah.subject.units.permissions import PermissionsUnit
     from ghrah.subject.units.persistence import PersistenceUnit
     from ghrah.subject.units.sandbox import SandboxUnit
+    from ghrah.subject.units.task import TaskUnit
     from ghrah.subject.units.websocket_core_transport import WebSocketCoreTransportUnit
     from ghrah.subject.units.websocket_observer_endpoint import (
         WebSocketObserverEndpointUnit,
@@ -49,6 +50,7 @@ def register_builtin_units(
         PermissionsUnit(engine.config),
         HITLNotaryUnit(engine.config),
         AbilityRunnerUnit(engine.config),
+        TaskUnit(engine.config),
     ]
 
     if profile == "full":

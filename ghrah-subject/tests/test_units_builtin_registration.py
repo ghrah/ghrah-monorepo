@@ -9,6 +9,7 @@ from ghrah.subject.units._commands import (
     CORE_COMMANDS,
     MANIFEST_COMMANDS,
     PERSIST_COMMANDS,
+    TASK_COMMANDS,
     WORKSPACE_COMMANDS,
 )
 from ghrah.subject.units.ability_runner import AbilityRunnerUnit
@@ -20,6 +21,7 @@ from ghrah.subject.units.manifest_store import ManifestStoreUnit
 from ghrah.subject.units.permissions import PermissionsUnit
 from ghrah.subject.units.persistence import PersistenceUnit
 from ghrah.subject.units.sandbox import SandboxUnit
+from ghrah.subject.units.task import TaskUnit
 from ghrah.subject.units.websocket_core_transport import WebSocketCoreTransportUnit
 from ghrah.subject.units.websocket_observer_endpoint import WebSocketObserverEndpointUnit
 from ghrah.subject.units.workspace import WorkspaceUnit
@@ -39,6 +41,7 @@ def test_register_builtin_units_coexistence_registers_pr3a_pr3b_units() -> None:
     assert isinstance(engine.get_unit("permissions"), PermissionsUnit)
     assert isinstance(engine.get_unit("hitl_notary"), HITLNotaryUnit)
     assert isinstance(engine.get_unit("ability_runner"), AbilityRunnerUnit)
+    assert isinstance(engine.get_unit("task"), TaskUnit)
     assert engine.get_unit("websocket_core_transport") is None
     assert engine.get_unit("websocket_observer_endpoint") is None
     assert engine.get_unit("forward") is None
@@ -87,6 +90,7 @@ def test_builtin_routes_use_protocol_command_sets_without_overlap() -> None:
     workspace = engine.get_unit("workspace")
     hitl_notary = engine.get_unit("hitl_notary")
     ability_runner = engine.get_unit("ability_runner")
+    task = engine.get_unit("task")
 
     assert persistence is not None
     assert manifest_store is not None
@@ -94,13 +98,15 @@ def test_builtin_routes_use_protocol_command_sets_without_overlap() -> None:
     assert workspace is not None
     assert hitl_notary is not None
     assert ability_runner is not None
+    assert task is not None
     assert persistence.meta.routes.commands == PERSIST_COMMANDS
     assert manifest_store.meta.routes.commands == MANIFEST_COMMANDS
     assert ledger.meta.routes.commands == CHAIN_HISTORY_COMMANDS
     assert workspace.meta.routes.commands == WORKSPACE_COMMANDS
     assert hitl_notary.meta.routes.commands == frozenset({"hitl_response"})
+    assert task.meta.routes.commands == TASK_COMMANDS
     # D10：ability_runner 只声明 long_running_commands，commands 为空
     assert ability_runner.meta.routes.long_running_commands == frozenset({"execute_ability"})
 
-    for unit in (persistence, manifest_store, ledger, workspace, hitl_notary, ability_runner):
+    for unit in (persistence, manifest_store, ledger, workspace, hitl_notary, ability_runner, task):
         assert unit.meta.routes.commands.isdisjoint(unit.meta.routes.long_running_commands)

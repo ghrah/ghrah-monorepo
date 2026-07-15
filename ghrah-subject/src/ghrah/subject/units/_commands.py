@@ -11,6 +11,7 @@ from ghrah.protocol.types import (  # type: ignore[import-untyped]
     CORE_COMMANDS,
     MANIFEST_COMMANDS,
     PERSIST_COMMANDS,
+    TASK_COMMANDS,
     WORKSPACE_COMMANDS,
 )
 
@@ -19,5 +20,6 @@ __all__ = [
     "CORE_COMMANDS",
     "MANIFEST_COMMANDS",
     "PERSIST_COMMANDS",
+    "TASK_COMMANDS",
     "WORKSPACE_COMMANDS",
 ]

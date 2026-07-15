@@ -40,6 +40,7 @@ __all__ = [
     "PERSISTENCE",
     "SANDBOX_EXECUTOR",
     "SESSION_REGISTRY",
+    "TASK_MANAGER",
     "WORKSPACE_SERVICE",
     "AbilityExecutor",
     "CommandRunner",
@@ -47,6 +48,7 @@ __all__ = [
     "ObserverEventBus",
     "PermissionService",
     "SubjectServiceKey",
+    "TaskManagerService",
     "WorkspaceService",
 ]
 
@@ -118,6 +120,20 @@ class AbilityExecutor(Protocol):
         """Execute an ability for an agent."""
 
 
+class TaskManagerService(Protocol):
+    """Task command orchestration contract exposed to runtime dispatch.
+
+    Surfaces a single ``handle_command`` entry point so that other units
+    (e.g. Stage 4 DelegationAbility) can invoke task management without a
+    compile-time dependency on the concrete :class:`TaskManager`.
+    """
+
+    async def handle_command(
+        self, command: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Dispatch a task command. Returns a dispatcher-shape result dict."""
+
+
 class ObserverEventBus(Protocol):
     """Observer-facing event bridge contract."""
 
@@ -155,6 +171,7 @@ CAPABILITY_REGISTRY = SubjectServiceKey[CapabilityRegistry](
     CapabilityRegistry,
 )
 ABILITY_EXECUTOR = SubjectServiceKey[AbilityExecutor]("ability_executor")
+TASK_MANAGER = SubjectServiceKey[TaskManagerService]("task_manager")
 
 # Reserved for Stage 3+ integrations. The keys are intentionally real so
 # dependency declarations can be written before the concrete services exist.
