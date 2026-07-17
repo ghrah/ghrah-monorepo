@@ -4,7 +4,6 @@ import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useActionChainsStore } from "./action-chains.js";
 
-// 通过 schema 构造合法 wire 节点（填默认值），避免手写字面量缺字段导致 type 错误。
 function makeNode(overrides: Partial<ActionNode> = {}): ActionNode {
   return ActionNodeSchema.parse(overrides);
 }
@@ -19,7 +18,7 @@ describe("useActionChainsStore", () => {
     expect(store.chains.size).toBe(0);
   });
 
-  it("onActionChainUpdated adds node to agent chain", () => {
+  it("onActionChainUpdated adds typed node to agent chain", () => {
     const store = useActionChainsStore();
     const payload: ActionChainUpdatedPayload = {
       agent_name: "agent-1",
@@ -37,7 +36,8 @@ describe("useActionChainsStore", () => {
     store.onActionChainUpdated(payload);
     const chain = store.getChain("agent-1");
     expect(chain).toHaveLength(1);
-    expect(chain[0].ability_name).toBe("read_file");
+    expect(chain[0].id).toBe("node-1");
+    expect(chain[0].ability_names).toEqual(["read_file"]);
   });
 
   it("onActionChainUpdated appends nodes to existing chain", () => {
@@ -52,8 +52,8 @@ describe("useActionChainsStore", () => {
     });
     const chain = store.getChain("agent-1");
     expect(chain).toHaveLength(2);
-    expect(chain[0].ability_name).toBe("read_file");
-    expect(chain[1].ability_name).toBe("write_file");
+    expect(chain[0].id).toBe("n1");
+    expect(chain[1].id).toBe("n2");
   });
 
   it("chains are separated by agent_name", () => {
@@ -69,6 +69,17 @@ describe("useActionChainsStore", () => {
     expect(store.getChain("agent-1")).toHaveLength(1);
     expect(store.getChain("agent-2")).toHaveLength(1);
     expect(store.getChain("agent-3")).toHaveLength(0);
+  });
+
+  it("id dedup: same node.id replay does not duplicate", () => {
+    const store = useActionChainsStore();
+    const payload = {
+      agent_name: "agent-1",
+      node: makeNode({ id: "n1", ability_names: ["read_file"] }),
+    };
+    store.onActionChainUpdated(payload);
+    store.onActionChainUpdated(payload);
+    expect(store.getChain("agent-1")).toHaveLength(1);
   });
 
   it("clearChain removes agent chain", () => {

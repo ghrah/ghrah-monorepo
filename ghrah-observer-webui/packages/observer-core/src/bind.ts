@@ -1,8 +1,6 @@
 import type {
-  AbilityResultPayload,
   ActionChainUpdatedPayload,
   AgentConfigPayload,
-  AgentResponsePayload,
   AgentSpawnedPayload,
   AgentTerminatedPayload,
   CommandResultPayload,
@@ -32,8 +30,6 @@ export function connectStores(client: ObserverClient): () => void {
   const changes = useChangesStore();
   const manifests = useManifestsStore();
 
-  const pendingToolArgs = new Map<string, Record<string, unknown>>();
-
   client.onConnected(() => {
     connection.setConnected();
   });
@@ -50,25 +46,18 @@ export function connectStores(client: ObserverClient): () => void {
     agents.onAgentTerminated(msg.payload as AgentTerminatedPayload),
   );
 
-  client.on(EventType.ACTION_CHAIN_UPDATED, (msg: ServerMessage) =>
-    chains.onActionChainUpdated(msg.payload as ActionChainUpdatedPayload),
-  );
+  client.on(EventType.ACTION_CHAIN_UPDATED, (msg: ServerMessage) => {
+    const payload = msg.payload as ActionChainUpdatedPayload;
+    const node = payload.node;
+    if (!node) return;
+    chains.onActionChainUpdated(payload);
+    chat.onActionChainNode(payload.agent_name, node);
+    changes.onActionChainNode(payload.agent_name, node);
+  });
 
   client.on(EventType.HITL_REQUEST, (msg: ServerMessage) => {
     const payload = msg.payload as HITLRequestPayload;
     hitl.onHitlRequest(payload);
-    pendingToolArgs.set(payload.promise_id, payload.tool_args ?? {});
-  });
-
-  client.on(EventType.AGENT_RESPONSE, (msg: ServerMessage) =>
-    chat.onAgentResponse(msg.payload as AgentResponsePayload),
-  );
-
-  client.on(EventType.ABILITY_RESULT, (msg: ServerMessage) => {
-    const payload = msg.payload as AbilityResultPayload;
-    const toolArgs = pendingToolArgs.get(payload.request_id);
-    pendingToolArgs.delete(payload.request_id);
-    changes.onAbilityResult(payload, toolArgs);
   });
 
   client.on(SystemType.COMMAND_RESULT, (msg: ServerMessage) => {
@@ -111,8 +100,6 @@ export function connectStores(client: ObserverClient): () => void {
     EventType.AGENT_TERMINATED,
     EventType.ACTION_CHAIN_UPDATED,
     EventType.HITL_REQUEST,
-    EventType.AGENT_RESPONSE,
-    EventType.ABILITY_RESULT,
     EventType.AGENT_ERROR,
     EventType.MANIFEST_ABILITY_CREATED,
     EventType.MANIFEST_ABILITY_UPDATED,
@@ -126,6 +113,5 @@ export function connectStores(client: ObserverClient): () => void {
     for (const et of eventTypes) client.off(et);
     client.off(SystemType.COMMAND_RESULT);
     client.clearLifecycleCallbacks();
-    pendingToolArgs.clear();
   };
 }

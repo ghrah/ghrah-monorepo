@@ -1,46 +1,35 @@
-import type { AbilityResultPayload } from "@ghrah/protocol";
+import type { ActionNode } from "@ghrah/protocol";
 import { defineStore } from "pinia";
 import { ref } from "vue";
-
-export interface FileChange {
-  agentName: string;
-  abilityName: string;
-  filePath?: string;
-  success: boolean;
-  result?: unknown;
-  error?: string;
-  timestamp?: number;
-}
-
-const FILE_CHANGE_ABILITIES = new Set(["write_file", "edit_file", "delete_file"]);
+import { type FileChange, projectNodeToFileChanges } from "../projection.js";
 
 export const useChangesStore = defineStore("ghrah-changes", () => {
   const changes = ref<FileChange[]>([]);
+  const seenKeys = new Set<string>();
 
-  function onAbilityResult(payload: AbilityResultPayload, toolArgs?: Record<string, unknown>) {
-    if (!FILE_CHANGE_ABILITIES.has(payload.ability_name)) return;
-
-    changes.value = [
-      ...changes.value,
-      {
-        agentName: payload.agent_name,
-        abilityName: payload.ability_name,
-        filePath: toolArgs?.["file_path"] as string | undefined,
-        success: payload.success,
-        result: payload.result,
-        error: payload.error ?? undefined,
-        timestamp: Date.now(),
-      },
-    ];
+  function onActionChainNode(_agentName: string, node: ActionNode) {
+    const fcs = projectNodeToFileChanges(node);
+    if (fcs.length === 0) return;
+    const next = [...changes.value];
+    let appended = false;
+    for (const fc of fcs) {
+      const key = `${fc.nodeId}#${fc.abilityName}#${fc.filePath ?? ""}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      next.push(fc);
+      appended = true;
+    }
+    if (appended) changes.value = next;
   }
 
   function clearAll() {
     changes.value = [];
+    seenKeys.clear();
   }
 
   return {
     changes,
-    onAbilityResult,
+    onActionChainNode,
     clearAll,
   };
 });

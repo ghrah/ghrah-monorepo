@@ -156,24 +156,30 @@ describe("connectStores", () => {
     });
   });
 
-  describe("chat events", () => {
-    it("adds message on agent_response", async () => {
+  describe("chat events (projection-driven from action_chain_updated)", () => {
+    it("projects conversation entry from action_chain_updated", async () => {
       await connectClient();
       const store = useChatStore();
 
       internals(client)._dispatch(
-        EventType.AGENT_RESPONSE,
-        makeMsg(EventType.AGENT_RESPONSE, {
-          sender: "agent-1",
-          recipient: "user",
-          content: "Hello",
-          message_type: "result",
-          metadata: {},
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, {
+          agent_name: "agent-1",
+          node: {
+            id: "node-1",
+            agent_name: "agent-1",
+            ability_names: ["conversation"],
+            messages_delta: [
+              { role: "ai", content_blocks: [{ type: "text", text: "Hello" }], metadata: {} },
+            ],
+          },
         }),
       );
 
-      expect(store.getMessages("agent-1")).toHaveLength(1);
-      expect(store.getMessages("agent-1")[0].content).toBe("Hello");
+      const entries = store.getEntries("agent-1");
+      expect(entries).toHaveLength(1);
+      expect(entries[0].content).toBe("Hello");
+      expect(entries[0].kind).toBe("conversation");
     });
   });
 
@@ -225,23 +231,58 @@ describe("connectStores", () => {
     });
   });
 
-  describe("changes events", () => {
-    it("adds file change on ability_result for write_file with tool_args from HITL", async () => {
+  describe("changes events (node projection)", () => {
+    it("adds file change on action_chain_updated for write_file", async () => {
       await connectClient();
       const store = useChangesStore();
 
-      // pendingToolArgs 仅由 HITL_REQUEST 注入（ACTION_CHAIN_UPDATED 死分支已删，
-      // 见 Phase B item 3：node 无 request_id/tool_args wire 字段）。
       internals(client)._dispatch(
-        EventType.HITL_REQUEST,
-        makeMsg(EventType.HITL_REQUEST, {
-          promise_id: "r1",
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, {
           agent_name: "agent-1",
-          ability_name: "write_file",
-          tool_args: { file_path: "/tmp/test.txt" },
-          context: {},
+          node: {
+            id: "node-1",
+            agent_name: "agent-1",
+            action_results: [
+              {
+                ability_name: "write_file",
+                action_result: { outcome: "success", data: { file_path: "/tmp/test.txt" } },
+              },
+            ],
+          },
         }),
       );
+
+      expect(store.changes).toHaveLength(1);
+      expect(store.changes[0].filePath).toBe("/tmp/test.txt");
+      expect(store.changes[0].abilityName).toBe("write_file");
+    });
+
+    it("ignores non-file-change abilities (no entry)", async () => {
+      await connectClient();
+      const store = useChangesStore();
+
+      internals(client)._dispatch(
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, {
+          agent_name: "agent-1",
+          node: {
+            id: "node-2",
+            agent_name: "agent-1",
+            action_results: [
+              { ability_name: "read_file", action_result: { outcome: "success", data: {} } },
+            ],
+          },
+        }),
+      );
+
+      expect(store.changes).toHaveLength(0);
+    });
+
+    it("ABILITY_RESULT no longer feeds changes store (join removed, zero residual)", async () => {
+      await connectClient();
+      const store = useChangesStore();
+
       internals(client)._dispatch(
         EventType.ABILITY_RESULT,
         makeMsg(EventType.ABILITY_RESULT, {
@@ -253,36 +294,42 @@ describe("connectStores", () => {
         }),
       );
 
-      expect(store.changes).toHaveLength(1);
-      expect(store.changes[0].filePath).toBe("/tmp/test.txt");
+      expect(store.changes).toHaveLength(0);
     });
 
-    it("ignores non-file-change ability_results", async () => {
+    it("reconnect replay dedup: same ACTION_CHAIN_UPDATED node dispatched twice = single entries", async () => {
       await connectClient();
-      const store = useChangesStore();
+      const chatStore = useChatStore();
+      const chainStore = useActionChainsStore();
+      const changesStore = useChangesStore();
+
+      const node = {
+        id: "node-r1",
+        agent_name: "agent-1",
+        ability_names: ["write_file", "conversation"],
+        messages_delta: [
+          { role: "ai", content_blocks: [{ type: "text", text: "reply" }], metadata: {} },
+        ],
+        action_results: [
+          {
+            ability_name: "write_file",
+            action_result: { outcome: "success", data: { file_path: "/x" } },
+          },
+        ],
+      };
 
       internals(client)._dispatch(
-        EventType.HITL_REQUEST,
-        makeMsg(EventType.HITL_REQUEST, {
-          promise_id: "r1",
-          agent_name: "agent-1",
-          ability_name: "read_file",
-          tool_args: {},
-          context: {},
-        }),
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, { agent_name: "agent-1", node }),
       );
       internals(client)._dispatch(
-        EventType.ABILITY_RESULT,
-        makeMsg(EventType.ABILITY_RESULT, {
-          request_id: "r1",
-          agent_name: "agent-1",
-          ability_name: "read_file",
-          success: true,
-          result: "Content",
-        }),
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, { agent_name: "agent-1", node }),
       );
 
-      expect(store.changes).toHaveLength(0);
+      expect(chainStore.getChain("agent-1")).toHaveLength(1);
+      expect(chatStore.getEntries("agent-1")).toHaveLength(1);
+      expect(changesStore.changes).toHaveLength(1);
     });
   });
 
@@ -403,17 +450,21 @@ describe("connectStores", () => {
       disconnect();
 
       internals(client)._dispatch(
-        EventType.AGENT_RESPONSE,
-        makeMsg(EventType.AGENT_RESPONSE, {
-          sender: "agent-1",
-          recipient: "user",
-          content: "Hello",
-          message_type: "result",
-          metadata: {},
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, {
+          agent_name: "agent-1",
+          node: {
+            id: "node-1",
+            agent_name: "agent-1",
+            ability_names: ["conversation"],
+            messages_delta: [
+              { role: "ai", content_blocks: [{ type: "text", text: "Hello" }], metadata: {} },
+            ],
+          },
         }),
       );
 
-      expect(chatStore.getMessages("agent-1")).toHaveLength(0);
+      expect(chatStore.getEntries("agent-1")).toHaveLength(0);
     });
   });
 
