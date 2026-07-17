@@ -135,6 +135,20 @@ class TestWireFormatCompat:
         assert dumped["client_type"] == "core"
         assert dumped["seq_id"] == 42
 
+    def test_task_update_expected_version_roundtrip(self):
+        """task_update 命令经 envelope_from_dict 收窄 + model_dump 后保留 expected_version。"""
+        env = envelope_from_dict(
+            {
+                "type": "task_update",
+                "payload": {"task_id": "t1", "status": "in_progress", "expected_version": 3},
+                "request_id": "req-2",
+            }
+        )
+        dumped = env.model_dump()
+        assert isinstance(dumped["payload"], dict)
+        assert dumped["payload"]["task_id"] == "t1"
+        assert dumped["payload"]["expected_version"] == 3
+
 
 # ─── S1.1 验收：未知 type 兜底 ───
 

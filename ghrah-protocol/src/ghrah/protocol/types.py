@@ -861,6 +861,7 @@ class TaskUpdatePayload(BaseModel):
     error: str | None = None
     metadata: dict[str, Any] | None = None
     metadata_patch: dict[str, Any] | None = None
+    expected_version: int | None = None
 
 
 class TaskIdPayload(BaseModel):
