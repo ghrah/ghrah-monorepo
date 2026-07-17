@@ -1,6 +1,6 @@
 export { connectStores } from "./bind.js";
 export { ObserverClient } from "./client.js";
-export { type ActionNode, useActionChainsStore } from "./stores/action-chains.js";
+export { type ActionChainEntry, useActionChainsStore } from "./stores/action-chains.js";
 export { type AgentInfo, useAgentsStore } from "./stores/agents.js";
 export { type FileChange, useChangesStore } from "./stores/changes.js";
 export { type ChatMessage, useChatStore } from "./stores/chat.js";

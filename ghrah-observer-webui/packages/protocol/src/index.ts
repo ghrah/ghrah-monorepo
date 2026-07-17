@@ -16,8 +16,8 @@ export {
 } from "./client.js";
 export {
   ClientType,
-  CommandType,
   CORE_COMMANDS,
+  CommandType,
   EventType,
   MANIFEST_COMMANDS,
   type MessageType,
@@ -26,9 +26,9 @@ export {
   WORKSPACE_COMMANDS,
 } from "./enums.js";
 export {
+  parseMessage,
   type ServerMessage,
   ServerMessageSchema,
-  parseMessage,
   serializeMessage,
 } from "./message.js";
 export {
@@ -38,6 +38,10 @@ export {
   AbilityResultPayloadSchema,
   type ActionChainUpdatedPayload,
   ActionChainUpdatedPayloadSchema,
+  type ActionNode,
+  ActionNodeSchema,
+  type ActionResultItem,
+  ActionResultItemSchema,
   type AgentConfigPayload,
   AgentConfigPayloadSchema,
   type AgentErrorPayload,
@@ -50,6 +54,8 @@ export {
   AgentTerminatedPayloadSchema,
   type BroadcastMessagePayload,
   BroadcastMessagePayloadSchema,
+  type ChatMessageWire,
+  ChatMessageWireSchema,
   type ClusterStatusPayload,
   ClusterStatusPayloadSchema,
   type CommandResultPayload,

@@ -6,10 +6,10 @@ import type {
   AgentSpawnedPayload,
   AgentTerminatedPayload,
   CommandResultPayload,
-  ServerMessage,
   HITLRequestPayload,
   ManifestAbilityEventPayload,
   ManifestAgentEventPayload,
+  ServerMessage,
 } from "@ghrah/protocol";
 import { CommandType, EventType, SystemType } from "@ghrah/protocol";
 import type { ObserverClient } from "./client.js";
@@ -50,17 +50,9 @@ export function connectStores(client: ObserverClient): () => void {
     agents.onAgentTerminated(msg.payload as AgentTerminatedPayload),
   );
 
-  client.on(EventType.ACTION_CHAIN_UPDATED, (msg: ServerMessage) => {
-    const payload = msg.payload as ActionChainUpdatedPayload;
-    chains.onActionChainUpdated(payload);
-    const node = payload.node as Record<string, unknown> | undefined;
-    if (node?.request_id) {
-      pendingToolArgs.set(
-        node.request_id as string,
-        (node.tool_args ?? {}) as Record<string, unknown>,
-      );
-    }
-  });
+  client.on(EventType.ACTION_CHAIN_UPDATED, (msg: ServerMessage) =>
+    chains.onActionChainUpdated(msg.payload as ActionChainUpdatedPayload),
+  );
 
   client.on(EventType.HITL_REQUEST, (msg: ServerMessage) => {
     const payload = msg.payload as HITLRequestPayload;

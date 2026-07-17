@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { ActionNode } from "@ghrah/observer-core";
+import type { ActionChainEntry } from "@ghrah/observer-core";
 import { computed } from "vue";
 
-const props = defineProps<{ node: ActionNode }>();
+const props = defineProps<{ node: ActionChainEntry }>();
 
 const statusIcon = computed(() => {
   if (props.node.success === true) return "\u2705";

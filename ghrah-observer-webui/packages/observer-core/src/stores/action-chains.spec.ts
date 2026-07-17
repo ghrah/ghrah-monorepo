@@ -1,6 +1,13 @@
+import type { ActionChainUpdatedPayload, ActionNode } from "@ghrah/protocol";
+import { ActionNodeSchema } from "@ghrah/protocol";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useActionChainsStore } from "./action-chains.js";
+
+// 通过 schema 构造合法 wire 节点（填默认值），避免手写字面量缺字段导致 type 错误。
+function makeNode(overrides: Partial<ActionNode> = {}): ActionNode {
+  return ActionNodeSchema.parse(overrides);
+}
 
 describe("useActionChainsStore", () => {
   beforeEach(() => {
@@ -14,13 +21,20 @@ describe("useActionChainsStore", () => {
 
   it("onActionChainUpdated adds node to agent chain", () => {
     const store = useActionChainsStore();
-    store.onActionChainUpdated({
+    const payload: ActionChainUpdatedPayload = {
       agent_name: "agent-1",
-      node: {
-        ability_name: "read_file",
-        tool_args: { file_path: "/tmp/a.txt" },
-      },
-    });
+      node: makeNode({
+        id: "node-1",
+        ability_names: ["read_file"],
+        action_results: [
+          {
+            ability_name: "read_file",
+            action_result: { outcome: "success", data: { file_path: "/tmp/a.txt" } },
+          },
+        ],
+      }),
+    };
+    store.onActionChainUpdated(payload);
     const chain = store.getChain("agent-1");
     expect(chain).toHaveLength(1);
     expect(chain[0].ability_name).toBe("read_file");
@@ -30,11 +44,11 @@ describe("useActionChainsStore", () => {
     const store = useActionChainsStore();
     store.onActionChainUpdated({
       agent_name: "agent-1",
-      node: { ability_name: "read_file", tool_args: {} },
+      node: makeNode({ id: "n1", ability_names: ["read_file"] }),
     });
     store.onActionChainUpdated({
       agent_name: "agent-1",
-      node: { ability_name: "write_file", tool_args: {} },
+      node: makeNode({ id: "n2", ability_names: ["write_file"] }),
     });
     const chain = store.getChain("agent-1");
     expect(chain).toHaveLength(2);
@@ -46,11 +60,11 @@ describe("useActionChainsStore", () => {
     const store = useActionChainsStore();
     store.onActionChainUpdated({
       agent_name: "agent-1",
-      node: { ability_name: "read_file", tool_args: {} },
+      node: makeNode({ id: "n1", ability_names: ["read_file"] }),
     });
     store.onActionChainUpdated({
       agent_name: "agent-2",
-      node: { ability_name: "execute_command", tool_args: {} },
+      node: makeNode({ id: "n2", ability_names: ["execute_command"] }),
     });
     expect(store.getChain("agent-1")).toHaveLength(1);
     expect(store.getChain("agent-2")).toHaveLength(1);
@@ -61,7 +75,7 @@ describe("useActionChainsStore", () => {
     const store = useActionChainsStore();
     store.onActionChainUpdated({
       agent_name: "agent-1",
-      node: { ability_name: "read_file", tool_args: {} },
+      node: makeNode({ id: "n1", ability_names: ["read_file"] }),
     });
     store.clearChain("agent-1");
     expect(store.getChain("agent-1")).toHaveLength(0);
@@ -71,11 +85,11 @@ describe("useActionChainsStore", () => {
     const store = useActionChainsStore();
     store.onActionChainUpdated({
       agent_name: "agent-1",
-      node: { ability_name: "read_file", tool_args: {} },
+      node: makeNode({ id: "n1", ability_names: ["read_file"] }),
     });
     store.onActionChainUpdated({
       agent_name: "agent-2",
-      node: { ability_name: "write_file", tool_args: {} },
+      node: makeNode({ id: "n2", ability_names: ["write_file"] }),
     });
     store.clearAll();
     expect(store.getChain("agent-1")).toHaveLength(0);

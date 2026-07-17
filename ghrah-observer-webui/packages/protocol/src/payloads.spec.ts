@@ -420,7 +420,23 @@ describe("Event payload schemas", () => {
     const result = ActionChainUpdatedPayloadSchema.parse({
       agent_name: "agent-1",
     });
-    expect(result.node).toEqual({});
+    expect(result.node).toMatchObject({
+      id: "",
+      agent_name: "",
+      iteration: 0,
+      ability_names: [],
+      agent_state: {},
+      messages_delta: [],
+      action_results: [],
+      metadata: {},
+      branch_name: "main",
+      session_id: "",
+      is_snapshot: false,
+    });
+    // 未提供时无默认值的可选字段应为 undefined。
+    expect(result.node.parent_id).toBeUndefined();
+    expect(result.node.messages_snapshot).toBeUndefined();
+    expect(result.node.timestamp).toBeUndefined();
   });
 
   it("AgentErrorPayloadSchema", () => {

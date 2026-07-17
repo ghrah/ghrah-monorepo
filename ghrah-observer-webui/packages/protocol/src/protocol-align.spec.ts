@@ -1,17 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { ServerMessageSchema, parseMessage, serializeMessage } from "./message.js";
+import { parseMessage, ServerMessageSchema, serializeMessage } from "./message.js";
 import {
   AbilityDefinitionPayloadSchema,
   AbilityResultPayloadSchema,
   ActionChainUpdatedPayloadSchema,
+  ActionNodeSchema,
+  ActionResultItemSchema,
   AgentConfigPayloadSchema,
   AgentErrorPayloadSchema,
   AgentResponsePayloadSchema,
   AgentSpawnedPayloadSchema,
   AgentTerminatedPayloadSchema,
   BroadcastMessagePayloadSchema,
+  ChatMessageWireSchema,
   ClusterStatusPayloadSchema,
   CommandResultPayloadSchema,
   CreateWorkspacePayloadSchema,
@@ -176,7 +179,7 @@ describe("Pydantic-Zod cross-validation", () => {
 
 describe("ServerMessage cross-validation", () => {
   it("Zod parses Python minimal ServerMessage snapshot", () => {
-    const pythonSnapshot = loadSnapshot("GatewayMessage_minimal");
+    const pythonSnapshot = loadSnapshot("Message_minimal");
     const parsed = ServerMessageSchema.parse(pythonSnapshot);
     expect(parsed.type).toBe("ping");
     expect(parsed.payload).toEqual({});
@@ -200,4 +203,86 @@ describe("ServerMessage cross-validation", () => {
     expect(reparsed.request_id).toBe(parsed.request_id);
   });
 });
-       
+
+// NOTE: ActionChainUpdatedPayload 快照为 synthetic 样本（由 Python serialize_node
+// 离线生成、手贴入仓），非运行时真实产物；字段形态对齐 serialize_node 输出契约。
+describe("ActionNode typed schema alignment", () => {
+  function loadNode(): Record<string, unknown> {
+    const snap = loadSnapshot("ActionChainUpdatedPayload");
+    return snap.node as Record<string, unknown>;
+  }
+
+  it("ActionNodeSchema parses serialize_node output keys (bidirectional)", () => {
+    const node = loadNode();
+    const parsed = ActionNodeSchema.parse(node);
+
+    const pythonKeys = new Set(Object.keys(node));
+    const tsKeys = new Set(Object.keys(parsed));
+
+    // Python serialize_node 的每个键 TS 必须识别（不丢字段）。
+    const missingFromTs = [...pythonKeys].filter((k) => !tsKeys.has(k));
+    expect(missingFromTs, `Keys missing from TS: ${missingFromTs.join(", ")}`).toEqual([]);
+
+    // TS 多出的键只允许是 schema 显式声明的默认值字段（防止泄漏未声明键）。
+    const declaredTsKeys = new Set([
+      "id",
+      "parent_id",
+      "agent_name",
+      "timestamp",
+      "iteration",
+      "ability_names",
+      "agent_state",
+      "messages_delta",
+      "messages_snapshot",
+      "is_snapshot",
+      "action_results",
+      "metadata",
+      "branch_name",
+      "session_id",
+    ]);
+    const extraInTs = [...tsKeys].filter((k) => !pythonKeys.has(k));
+    const undeclaredExtra = extraInTs.filter((k) => !declaredTsKeys.has(k));
+    expect(undeclaredExtra, `Undeclared extra keys in TS: ${undeclaredExtra.join(", ")}`).toEqual(
+      [],
+    );
+  });
+
+  it("ActionNodeSchema preserves scalar fields from serialize_node", () => {
+    const node = loadNode();
+    const parsed = ActionNodeSchema.parse(node);
+
+    expect(parsed.id).toBe("node-001");
+    expect(parsed.agent_name).toBe("agent-1");
+    expect(parsed.iteration).toBe(1);
+    expect(parsed.branch_name).toBe("main");
+    expect(parsed.session_id).toBe("sess-001");
+    expect(parsed.ability_names).toEqual(["conversation", "write_file"]);
+  });
+
+  it("ChatMessageWireSchema preserves source normalization values", () => {
+    const node = loadNode();
+    const messages = (node.messages_delta as unknown[]) ?? [];
+    const parsed = messages.map((m) => ChatMessageWireSchema.parse(m));
+
+    const sources = parsed.map((m) => m.source);
+    expect(sources).toContain("human:user");
+    expect(sources).toContain("agent:agent-1");
+  });
+
+  it("ActionResultItemSchema parses ability_name + action_result.data.file_path", () => {
+    const node = loadNode();
+    const results = (node.action_results as unknown[]) ?? [];
+    const parsed = results.map((r) => ActionResultItemSchema.parse(r));
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].ability_name).toBe("write_file");
+    expect(parsed[0].action_result?.outcome).toBe("success");
+    expect(parsed[0].action_result?.data?.file_path).toBe("/tmp/test.txt");
+  });
+
+  it("ActionNodeSchema tolerates empty node {} default", () => {
+    const parsed = ActionNodeSchema.parse({});
+    expect(parsed.id).toBe("");
+    expect(parsed.messages_delta).toEqual([]);
+  });
+});

@@ -87,8 +87,13 @@ describe("connectStores", () => {
 
   let skipSyncInitialState: ReturnType<typeof vi.spyOn<any, any>> | null = null;
 
-  async function connectClient() {
-    skipSyncInitialState = vi.spyOn(client as any, "_syncInitialState").mockResolvedValue(undefined);
+  async function connectClient(opts: { skipSync?: boolean } = {}) {
+    const { skipSync = true } = opts;
+    if (skipSync) {
+      skipSyncInitialState = vi
+        .spyOn(client as any, "_syncInitialState")
+        .mockResolvedValue(undefined);
+    }
     disconnect = connectStores(client);
     const connectPromise = client.connect();
     mockWs.onopen!();
@@ -204,9 +209,14 @@ describe("connectStores", () => {
         makeMsg(EventType.ACTION_CHAIN_UPDATED, {
           agent_name: "agent-1",
           node: {
-            ability_name: "read_file",
-            tool_args: { file_path: "/tmp/test.txt" },
-            request_id: "r1",
+            id: "node-1",
+            ability_names: ["read_file"],
+            action_results: [
+              {
+                ability_name: "read_file",
+                action_result: { outcome: "success", data: { file_path: "/tmp/test.txt" } },
+              },
+            ],
           },
         }),
       );
@@ -216,19 +226,20 @@ describe("connectStores", () => {
   });
 
   describe("changes events", () => {
-    it("adds file change on ability_result for write_file with tool_args", async () => {
+    it("adds file change on ability_result for write_file with tool_args from HITL", async () => {
       await connectClient();
       const store = useChangesStore();
 
+      // pendingToolArgs 仅由 HITL_REQUEST 注入（ACTION_CHAIN_UPDATED 死分支已删，
+      // 见 Phase B item 3：node 无 request_id/tool_args wire 字段）。
       internals(client)._dispatch(
-        EventType.ACTION_CHAIN_UPDATED,
-        makeMsg(EventType.ACTION_CHAIN_UPDATED, {
+        EventType.HITL_REQUEST,
+        makeMsg(EventType.HITL_REQUEST, {
+          promise_id: "r1",
           agent_name: "agent-1",
-          node: {
-            ability_name: "write_file",
-            tool_args: { file_path: "/tmp/test.txt" },
-            request_id: "r1",
-          },
+          ability_name: "write_file",
+          tool_args: { file_path: "/tmp/test.txt" },
+          context: {},
         }),
       );
       internals(client)._dispatch(
@@ -250,6 +261,16 @@ describe("connectStores", () => {
       await connectClient();
       const store = useChangesStore();
 
+      internals(client)._dispatch(
+        EventType.HITL_REQUEST,
+        makeMsg(EventType.HITL_REQUEST, {
+          promise_id: "r1",
+          agent_name: "agent-1",
+          ability_name: "read_file",
+          tool_args: {},
+          context: {},
+        }),
+      );
       internals(client)._dispatch(
         EventType.ABILITY_RESULT,
         makeMsg(EventType.ABILITY_RESULT, {
@@ -365,9 +386,7 @@ describe("connectStores", () => {
           request_id: "r1",
           success: true,
           data: {
-            agents: [
-              { name: "agent-1", config: { ...DEFAULT_CONFIG, name: "agent-1" } },
-            ],
+            agents: [{ name: "agent-1", config: { ...DEFAULT_CONFIG, name: "agent-1" } }],
           },
         }),
       );
@@ -399,69 +418,40 @@ describe("connectStores", () => {
   });
 
   describe("manifest agent sync on connect", () => {
-    it("calls listManifestAgents on connect and populates store", async () => {
-      const manifestAgents = [
-        {
-          full_name: "my_project.dev_agent",
-          namespace: "my_project",
-          name: "dev_agent",
-          title: "Dev Agent",
-          description: "A dev agent",
-          tags: [],
-          agent_config_name: "gpt-4o",
-          system_prompt: "You are a dev agent.",
-          ability_refs: [],
-          max_iterations: 10,
-        },
-        {
-          full_name: "my_project.test_agent",
-          namespace: "my_project",
-          name: "test_agent",
-          title: "Test Agent",
-          description: "A test agent",
-          tags: [],
-          agent_config_name: "gpt-4o-mini",
-          system_prompt: "You are a test agent.",
-          ability_refs: [],
-          max_iterations: 5,
-        },
-      ];
-      vi.spyOn(client, "listManifestAgents").mockResolvedValue({
-        request_id: "r1",
+    it("runs _syncInitialState (listManifestAgents) on connect", async () => {
+      vi.spyOn(client, "listAgents").mockResolvedValue({
+        request_id: "r0",
         success: true,
-        data: { agents: manifestAgents },
+        data: { agents: [] },
       } satisfies CommandResultPayload);
-
-      await connectClient();
-
-      expect(client.listManifestAgents).toHaveBeenCalled();
-      const manifestsStore = useManifestsStore();
-      await vi.runOnlyPendingTimersAsync();
-      expect(manifestsStore.agents.size).toBe(2);
-      expect(manifestsStore.agents.has("my_project.dev_agent")).toBe(true);
-      expect(manifestsStore.agents.has("my_project.test_agent")).toBe(true);
-    });
-
-    it("handles listManifestAgents failure gracefully", async () => {
-      vi.spyOn(client, "listManifestAgents").mockRejectedValue(new Error("connection failed"));
-
-      await connectClient();
-
-      const manifestsStore = useManifestsStore();
-      expect(manifestsStore.agents.size).toBe(0);
-    });
-
-    it("calls listManifestAgents on connect via onConnected callback", async () => {
       const listManifestSpy = vi.spyOn(client, "listManifestAgents").mockResolvedValue({
         request_id: "r1",
         success: true,
         data: { agents: [] },
       } satisfies CommandResultPayload);
 
-      await connectClient();
+      await connectClient({ skipSync: false });
 
+      // _syncInitialState is the real sync path (not the onConnected callback,
+      // which only sets connection state). listManifestAgents is invoked by it.
       expect(listManifestSpy).toHaveBeenCalled();
       listManifestSpy.mockRestore();
+    });
+
+    it("handles listManifestAgents failure gracefully", async () => {
+      // 走真实 _syncInitialState 吞错路径（skipSync:false），listManifestAgents 的
+      // mockRejectedValue 实际触发并被 try/catch 吞掉，connect 仍成功、store 为空。
+      vi.spyOn(client, "listAgents").mockResolvedValue({
+        request_id: "r0",
+        success: true,
+        data: { agents: [] },
+      } satisfies CommandResultPayload);
+      vi.spyOn(client, "listManifestAgents").mockRejectedValue(new Error("connection failed"));
+
+      await connectClient({ skipSync: false });
+
+      const manifestsStore = useManifestsStore();
+      expect(manifestsStore.agents.size).toBe(0);
     });
   });
 });

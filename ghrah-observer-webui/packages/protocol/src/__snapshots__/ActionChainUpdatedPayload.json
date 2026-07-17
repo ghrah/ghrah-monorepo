@@ -1,4 +1,68 @@
 {
   "agent_name": "agent-1",
-  "node": {}
+  "node": {
+    "id": "node-001",
+    "parent_id": null,
+    "agent_name": "agent-1",
+    "timestamp": "2026-07-17T09:00:00+00:00",
+    "iteration": 1,
+    "ability_names": [
+      "conversation",
+      "write_file"
+    ],
+    "agent_state": {
+      "status": "running"
+    },
+    "messages_delta": [
+      {
+        "role": "user",
+        "content_blocks": [
+          {
+            "type": "text",
+            "text": "hello agent"
+          }
+        ],
+        "source": "human:user",
+        "metadata": {}
+      },
+      {
+        "role": "ai",
+        "content_blocks": [
+          {
+            "type": "text",
+            "text": "hi there"
+          },
+          {
+            "type": "tool_call",
+            "id": "call-001",
+            "name": "write_file",
+            "arguments": {
+              "file_path": "/tmp/test.txt",
+              "content": "hello"
+            }
+          }
+        ],
+        "source": "agent:agent-1",
+        "metadata": {}
+      }
+    ],
+    "messages_snapshot": null,
+    "is_snapshot": false,
+    "action_results": [
+      {
+        "ability_name": "write_file",
+        "action_result": {
+          "outcome": "success",
+          "data": {
+            "file_path": "/tmp/test.txt",
+            "content": "hello"
+          },
+          "next_action_hint": null
+        }
+      }
+    ],
+    "metadata": {},
+    "branch_name": "main",
+    "session_id": "sess-001"
+  }
 }

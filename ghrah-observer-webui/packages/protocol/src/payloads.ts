@@ -200,6 +200,45 @@ export const ContentBlockSchema = z.discriminatedUnion("type", [
 
 export type ContentBlock = z.infer<typeof ContentBlockSchema>;
 
+export const ChatMessageWireSchema = z.object({
+  role: z.enum(["system", "user", "ai", "tool"]).default("user"),
+  content_blocks: z.array(ContentBlockSchema).optional().default([]),
+  source: z.string().nullable().optional(),
+  metadata: z.record(z.unknown()).optional().default({}),
+});
+export type ChatMessageWire = z.infer<typeof ChatMessageWireSchema>;
+
+export const ActionResultItemSchema = z.object({
+  ability_name: z.string(),
+  action_result: z
+    .object({
+      outcome: z.enum(["success", "failure", "needs_input", "delegate"]).optional(),
+      data: z.record(z.unknown()).optional().default({}),
+      next_action_hint: z.string().nullable().optional(),
+    })
+    .nullable()
+    .optional(),
+});
+export type ActionResultItem = z.infer<typeof ActionResultItemSchema>;
+
+export const ActionNodeSchema = z.object({
+  id: z.string().optional().default(""),
+  parent_id: z.string().nullable().optional(),
+  agent_name: z.string().optional().default(""),
+  timestamp: z.string().optional(),
+  iteration: z.number().int().optional().default(0),
+  ability_names: z.array(z.string()).optional().default([]),
+  agent_state: z.record(z.unknown()).optional().default({}),
+  messages_delta: z.array(ChatMessageWireSchema).optional().default([]),
+  messages_snapshot: z.array(ChatMessageWireSchema).nullable().optional(),
+  is_snapshot: z.boolean().optional().default(false),
+  action_results: z.array(ActionResultItemSchema).optional().default([]),
+  metadata: z.record(z.unknown()).optional().default({}),
+  branch_name: z.string().optional().default("main"),
+  session_id: z.string().optional().default(""),
+});
+export type ActionNode = z.infer<typeof ActionNodeSchema>;
+
 export const AgentResponsePayloadSchema = z.object({
   sender: z.string(),
   recipient: z.string(),
@@ -211,7 +250,7 @@ export const AgentResponsePayloadSchema = z.object({
 
 export const ActionChainUpdatedPayloadSchema = z.object({
   agent_name: z.string(),
-  node: z.record(z.unknown()).optional().default({}),
+  node: ActionNodeSchema.optional().default({}),
 });
 
 export const AgentErrorPayloadSchema = z.object({
