@@ -18,6 +18,7 @@ export interface ChatEntry {
   agentName: string;
   childSeq: number;
   pending?: boolean;
+  error?: string;
 }
 
 export interface FileChange {

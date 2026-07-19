@@ -1,14 +1,23 @@
 <script setup lang="ts">
 import { useAgentsStore } from "@ghrah/observer-core";
 import { ref } from "vue";
+import MonacoDiff from "@/components/monaco-diff.vue";
 import { useObserver } from "@/composables/useObserver";
 
 const agents = useAgentsStore();
-const { terminateAgent, createWorkspace, workspaceSnapshot, workspaceDiff, error: observerError } = useObserver();
+const {
+  terminateAgent,
+  createWorkspace,
+  workspaceSnapshot,
+  workspaceDiff,
+  error: observerError,
+} = useObserver();
 
 const showMenu = ref(false);
 const loading = ref(false);
 const errorMsg = ref<string | null>(null);
+const showDiff = ref(false);
+const diffPatch = ref<string>("");
 
 async function handleTerminate() {
   if (!agents.selectedAgentName) return;
@@ -61,12 +70,24 @@ async function handleDiff() {
   errorMsg.value = null;
   const result = await workspaceDiff(agents.selectedAgentName);
   loading.value = false;
+  if (result === null) {
+    errorMsg.value = observerError.value ?? "Not connected to server";
+    return;
+  }
   if (result && !result.success) {
     errorMsg.value = result.error ?? "Failed to get workspace diff";
-  } else if (result === null) {
-    errorMsg.value = observerError.value ?? "Not connected to server";
+    return;
   }
+  const data = (result?.data ?? {}) as Record<string, unknown>;
+  const patch = typeof data.diff === "string" ? data.diff : "";
+  diffPatch.value = patch;
+  showDiff.value = true;
   showMenu.value = false;
+}
+
+function closeDiff() {
+  showDiff.value = false;
+  diffPatch.value = "";
 }
 
 function close() {
@@ -114,5 +135,17 @@ function close() {
     </div>
 
     <div v-if="showMenu" class="fixed inset-0 z-30" @click="close" />
+
+    <div v-if="showDiff" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="closeDiff">
+      <div class="bg-white dark:bg-gray-900 rounded shadow-lg w-[90vw] h-[80vh] flex flex-col">
+        <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+          <span class="text-sm font-semibold">Workspace Diff — {{ agents.selectedAgentName }}</span>
+          <button type="button" class="text-xs btn-secondary" @click="closeDiff">Close</button>
+        </div>
+        <div class="flex-1 min-h-0">
+          <MonacoDiff :patch="diffPatch" />
+        </div>
+      </div>
+    </div>
   </div>
 </template>

@@ -1,19 +1,17 @@
 import type { ActionNode } from "@ghrah/protocol";
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { type ChatEntry, projectNodeToChatEntries } from "../projection.js";
 
 export const useChatStore = defineStore("ghrah-chat", () => {
-  const entries = ref<Map<string, ChatEntry[]>>(new Map());
-  const dedupKeys = ref<Map<string, Set<string>>>(new Map());
+  const entries = ref<ChatEntry[]>([]);
+  const dedupKeys = ref<Set<string>>(new Set());
   let pendingSeq = 0;
 
-  function onActionChainNode(agentName: string, node: ActionNode) {
+  function onActionChainNode(node: ActionNode) {
     const projected = projectNodeToChatEntries(node);
     if (projected.length === 0) return;
-    const bucket = entries.value.get(agentName) ?? [];
-    const keys = dedupKeys.value.get(agentName) ?? new Set<string>();
-    const next = [...bucket];
+    const next = [...entries.value];
     for (const e of projected) {
       const key = `${e.nodeId}#${e.kind}#${e.from}#${e.to}#${e.childSeq}`;
       if (e.kind === "human_input") {
@@ -23,19 +21,24 @@ export const useChatStore = defineStore("ghrah-chat", () => {
         );
         if (idx >= 0) {
           next[idx] = { ...next[idx], nodeId: e.nodeId, pending: false, timestamp: e.timestamp };
-          keys.add(key);
+          keysAdd(key);
           continue;
         }
       }
-      if (keys.has(key)) continue;
+      if (dedupKeys.value.has(key)) continue;
       next.push(e);
-      keys.add(key);
+      keysAdd(key);
     }
-    entries.value = new Map(entries.value).set(agentName, next);
-    dedupKeys.value = new Map(dedupKeys.value).set(agentName, keys);
+    entries.value = next;
   }
 
-  function addPendingEntry(agentName: string, partial: { to: string; content: string }): ChatEntry {
+  function keysAdd(key: string) {
+    const next = new Set(dedupKeys.value);
+    next.add(key);
+    dedupKeys.value = next;
+  }
+
+  function addPendingEntry(partial: { to: string; content: string; agentName: string }): ChatEntry {
     const seq = ++pendingSeq;
     const entry: ChatEntry = {
       from: "user",
@@ -44,41 +47,39 @@ export const useChatStore = defineStore("ghrah-chat", () => {
       kind: "human_input",
       timestamp: new Date().toISOString(),
       nodeId: "",
-      agentName,
+      agentName: partial.agentName,
       childSeq: -seq,
       pending: true,
     };
-    const bucket = entries.value.get(agentName) ?? [];
-    entries.value = new Map(entries.value).set(agentName, [...bucket, entry]);
+    entries.value = [...entries.value, entry];
     return entry;
   }
 
-  function getEntries(agentName: string): ChatEntry[] {
-    return entries.value.get(agentName) ?? [];
+  // 发送失败回退：FIFO 找首条 content+to 匹配的 pending，标记 error 留流
+  function markPendingError(to: string, content: string, error: string) {
+    const idx = entries.value.findIndex(
+      (p) => p.pending === true && p.to === to && p.content === content,
+    );
+    if (idx < 0) return;
+    const next = [...entries.value];
+    next[idx] = { ...next[idx], pending: false, error };
+    entries.value = next;
   }
 
-  function clearEntries(agentName: string) {
-    if (!entries.value.has(agentName) && !dedupKeys.value.has(agentName)) return;
-    const nextEntries = new Map(entries.value);
-    const nextKeys = new Map(dedupKeys.value);
-    nextEntries.delete(agentName);
-    nextKeys.delete(agentName);
-    entries.value = nextEntries;
-    dedupKeys.value = nextKeys;
-  }
+  const allEntries = computed<ChatEntry[]>(() => entries.value);
 
   function clearAll() {
-    entries.value = new Map();
-    dedupKeys.value = new Map();
+    entries.value = [];
+    dedupKeys.value = new Set();
     pendingSeq = 0;
   }
 
   return {
     entries,
+    allEntries,
     onActionChainNode,
     addPendingEntry,
-    getEntries,
-    clearEntries,
+    markPendingError,
     clearAll,
   };
 });

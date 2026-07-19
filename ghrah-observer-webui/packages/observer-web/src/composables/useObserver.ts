@@ -80,9 +80,9 @@ export function useObserver() {
     return connect(connection.serverUrl);
   }
 
-  async function sendMessage(content: string) {
-    if (!agents.selectedAgentName) return null;
-    return withClient((c) => c.sendMessage(agents.selectedAgentName!, content));
+  async function sendMessage(target: string, content: string) {
+    if (!target) return null;
+    return withClient((c) => c.sendMessage(target, content));
   }
 
   async function sendHitlResponse(promiseId: string, approved: boolean, reason?: string) {

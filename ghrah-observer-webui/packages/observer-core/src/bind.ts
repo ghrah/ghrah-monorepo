@@ -51,7 +51,7 @@ export function connectStores(client: ObserverClient): () => void {
     const node = payload.node;
     if (!node) return;
     chains.onActionChainUpdated(payload);
-    chat.onActionChainNode(payload.agent_name, node);
+    chat.onActionChainNode(node);
     changes.onActionChainNode(payload.agent_name, node);
   });
 

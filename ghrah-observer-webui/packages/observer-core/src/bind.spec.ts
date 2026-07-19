@@ -176,7 +176,7 @@ describe("connectStores", () => {
         }),
       );
 
-      const entries = store.getEntries("agent-1");
+      const entries = store.allEntries;
       expect(entries).toHaveLength(1);
       expect(entries[0].content).toBe("Hello");
       expect(entries[0].kind).toBe("conversation");
@@ -328,8 +328,56 @@ describe("connectStores", () => {
       );
 
       expect(chainStore.getChain("agent-1")).toHaveLength(1);
-      expect(chatStore.getEntries("agent-1")).toHaveLength(1);
+      expect(chatStore.allEntries).toHaveLength(1);
       expect(changesStore.changes).toHaveLength(1);
+    });
+
+    it("reconnect replay dedup across multiple agents: chat flat stream + chain buckets both deduped", async () => {
+      await connectClient();
+      const chatStore = useChatStore();
+      const chainStore = useActionChainsStore();
+
+      const nodeA = {
+        id: "node-a",
+        agent_name: "agent-A",
+        ability_names: ["conversation"],
+        messages_delta: [
+          { role: "ai", content_blocks: [{ type: "text", text: "from-A" }], metadata: {} },
+        ],
+      };
+      const nodeB = {
+        id: "node-b",
+        agent_name: "agent-B",
+        ability_names: ["conversation"],
+        messages_delta: [
+          { role: "ai", content_blocks: [{ type: "text", text: "from-B" }], metadata: {} },
+        ],
+      };
+
+      internals(client)._dispatch(
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, { agent_name: "agent-A", node: nodeA }),
+      );
+      internals(client)._dispatch(
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, { agent_name: "agent-B", node: nodeB }),
+      );
+      // 重连 replay：相同节点再次派发
+      internals(client)._dispatch(
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, { agent_name: "agent-A", node: nodeA }),
+      );
+      internals(client)._dispatch(
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, { agent_name: "agent-B", node: nodeB }),
+      );
+
+      // chain 分桶：每 agent 1 条
+      expect(chainStore.getChain("agent-A")).toHaveLength(1);
+      expect(chainStore.getChain("agent-B")).toHaveLength(1);
+      // chat 扁平流：2 条（A+B 各一条，replay 不重复）
+      expect(chatStore.allEntries).toHaveLength(2);
+      expect(chatStore.allEntries.map((e) => e.agentName).sort()).toEqual(["agent-A", "agent-B"]);
     });
   });
 
@@ -464,7 +512,7 @@ describe("connectStores", () => {
         }),
       );
 
-      expect(chatStore.getEntries("agent-1")).toHaveLength(0);
+      expect(chatStore.allEntries).toHaveLength(0);
     });
   });
 

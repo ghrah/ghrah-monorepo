@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import type { ContentBlock } from "@ghrah/protocol";
+import type { ChatEntry } from "@ghrah/observer-core";
 import { useAgentsStore, useChatStore, useConnectionStore } from "@ghrah/observer-core";
+import type { ContentBlock } from "@ghrah/protocol";
 import { computed, nextTick, ref, watch } from "vue";
+import { useMarkdown } from "@/composables/useMarkdown";
 import { useObserver } from "@/composables/useObserver";
 import MessageInput from "./message-input.vue";
 
@@ -9,16 +11,28 @@ const chat = useChatStore();
 const agents = useAgentsStore();
 const connection = useConnectionStore();
 const { sendMessage } = useObserver();
+const { render: renderMarkdown } = useMarkdown();
 
 const messageContainer = ref<HTMLElement | null>(null);
+const filterAgent = ref<string | null>(null);
 
-const selectedMessages = computed(() => {
-  if (!agents.selectedAgentName) return [];
-  return chat.getMessages(agents.selectedAgentName);
+const filteredEntries = computed<ChatEntry[]>(() => {
+  const all = chat.allEntries;
+  if (filterAgent.value === null) return all;
+  return all.filter((e) => e.agentName === filterAgent.value);
 });
 
-async function handleSend(content: string) {
-  await sendMessage(content);
+const canChat = computed(() => agents.activeAgents.length > 0 && connection.state === "connected");
+
+async function handleSend(targets: string[], content: string) {
+  for (const target of targets) {
+    chat.addPendingEntry({ to: target, content, agentName: target });
+    sendMessage(target, content)
+      .then((r) => {
+        if (r === null) chat.markPendingError(target, content, "发送失败：未连接");
+      })
+      .catch((e) => chat.markPendingError(target, content, `发送失败：${String(e ?? "")}`));
+  }
   await nextTick(() => scrollToBottom());
 }
 
@@ -28,53 +42,90 @@ function scrollToBottom() {
   }
 }
 
-watch(selectedMessages, () => {
+watch(filteredEntries, () => {
   nextTick(() => scrollToBottom());
 });
 
-function messageClass(msg: { messageType: string; sender: string }): string {
-  if (msg.messageType === "error") return "msg-error";
-  if (msg.messageType === "thinking") return "msg-thinking";
-  if (msg.sender === "user") return "msg-user";
-  return "msg-agent";
-}
-
-function blockClass(block: ContentBlock): string {
-  if (block.type === "reasoning") return "block-reasoning";
-  return "";
-}
-
-function blockText(block: ContentBlock): string {
-  switch (block.type) {
-    case "text":
-      return block.text;
-    case "reasoning":
-      return block.reasoning;
-    case "error":
-      return block.message;
+function entryClass(entry: ChatEntry): string {
+  if (entry.error) return "entry-error";
+  switch (entry.kind) {
+    case "human_input":
+      return "entry-human";
+    case "conversation":
+      return "entry-conversation";
+    case "send_message":
+      return "entry-send";
+    case "broadcast":
+      return "entry-broadcast";
+    case "end_task":
+      return "entry-endtask";
     default:
-      return "";
+      return "entry-conversation";
   }
 }
 
-function hasStructuredBlocks(msg: { contentBlocks?: ContentBlock[] }): boolean {
-  return !!(msg.contentBlocks && msg.contentBlocks.length > 0);
+function entryHeader(entry: ChatEntry): string {
+  switch (entry.kind) {
+    case "human_input":
+      return `you → @${entry.to}`;
+    case "conversation":
+      return `@${entry.from}`;
+    case "send_message":
+      return `@${entry.from} → @${entry.to}`;
+    case "broadcast":
+      return `@${entry.from} → @all`;
+    case "end_task":
+      return `✓ @${entry.from}`;
+    default:
+      return `@${entry.from}`;
+  }
+}
+
+function imgSrc(block: Extract<ContentBlock, { type: "image" }>): string {
+  if (block.url) return block.url;
+  if (block.base64) return `data:${block.mime_type ?? "image/png"};base64,${block.base64}`;
+  return "";
+}
+
+function audioSrc(block: Extract<ContentBlock, { type: "audio" }>): string {
+  return `data:${block.mime_type};base64,${block.data}`;
+}
+
+function fileHref(block: Extract<ContentBlock, { type: "file" }>): string {
+  if (block.url) return block.url;
+  if (block.base64)
+    return `data:${block.mime_type ?? "application/octet-stream"};base64,${block.base64}`;
+  return "";
+}
+
+function fileLabel(block: Extract<ContentBlock, { type: "file" }>): string {
+  return block.filename ?? "file";
+}
+
+function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "text" }> {
+  return block.type === "text";
 }
 </script>
 
 <template>
   <div class="flex flex-col h-full">
-    <div class="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
-      <h3 class="text-sm font-semibold truncate">
-        {{ agents.selectedAgentName ? `Chat: ${agents.selectedAgentName}` : "Chat" }}
-      </h3>
+    <div class="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between">
+      <h3 class="text-sm font-semibold truncate">Chat</h3>
+      <select
+        v-model="filterAgent"
+        class="text-xs bg-transparent border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5"
+        aria-label="Filter by agent"
+      >
+        <option :value="null">all</option>
+        <option v-for="a in agents.activeAgents" :key="a.name" :value="a.name">{{ a.name }}</option>
+      </select>
     </div>
 
-    <div v-if="!agents.selectedAgentName" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
-      Select an agent to start chatting
+    <div v-if="!canChat" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
+      Connect and spawn an agent to start chatting
     </div>
 
-    <div v-else-if="selectedMessages.length === 0" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
+    <div v-else-if="filteredEntries.length === 0" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
       No messages yet
     </div>
 
@@ -84,24 +135,55 @@ function hasStructuredBlocks(msg: { contentBlocks?: ContentBlock[] }): boolean {
       class="flex-1 overflow-y-auto p-3 space-y-2"
     >
       <div
-        v-for="(msg, i) in selectedMessages"
-        :key="i"
-        :class="['message-bubble', messageClass(msg)]"
+        v-for="entry in filteredEntries"
+        :key="`${entry.nodeId}-${entry.childSeq}`"
+        :class="['chat-entry', entryClass(entry), { 'entry-pending': entry.pending }]"
       >
-        <span class="font-semibold text-xs mr-2">{{ msg.sender }}</span>
-        <template v-if="hasStructuredBlocks(msg)">
+        <div class="entry-header">{{ entryHeader(entry) }}</div>
+
+        <div v-if="entry.error" class="block-error">
+          <span class="text-xs text-red-600 dark:text-red-400">{{ entry.error }}</span>
+        </div>
+
+        <!-- 富块渲染 -->
+        <template v-else-if="entry.blocks && entry.blocks.length > 0">
           <div
-            v-for="(block, j) in msg.contentBlocks"
+            v-for="(block, j) in entry.blocks"
             :key="j"
-            :class="['text-sm', blockClass(block)]"
-          >{{ blockText(block) }}</div>
+            :class="['entry-block', `block-${block.type}`]"
+          >
+            <div v-if="isText(block)" class="markdown-body" v-html="renderMarkdown(block.text)" />
+            <details v-else-if="block.type === 'reasoning'" class="block-reasoning">
+              <summary class="text-xs italic text-gray-500 dark:text-gray-400">reasoning{{ block.incomplete ? "…" : "" }}</summary>
+              <pre class="text-xs whitespace-pre-wrap">{{ block.reasoning }}</pre>
+            </details>
+            <img v-else-if="block.type === 'image'" :src="imgSrc(block)" alt="image" class="max-w-full rounded" />
+            <audio v-else-if="block.type === 'audio'" :src="audioSrc(block)" controls class="w-full" />
+            <a v-else-if="block.type === 'file'" :href="fileHref(block)" :download="fileLabel(block)" class="text-xs text-blue-600 dark:text-blue-400 underline">
+              📎 {{ fileLabel(block) }}
+            </a>
+            <details v-else-if="block.type === 'tool_call'" class="block-tool">
+              <summary class="text-xs">🔧 {{ block.name }}</summary>
+              <pre class="text-xs whitespace-pre-wrap">{{ block.arguments }}</pre>
+            </details>
+            <details v-else-if="block.type === 'tool_result'" class="block-tool">
+              <summary :class="['text-xs', block.success ? 'text-green-600' : 'text-red-600']">↳ {{ block.name ?? block.tool_call_id }}{{ block.success ? "" : " (failed)" }}</summary>
+              <pre class="text-xs whitespace-pre-wrap">{{ block.content }}</pre>
+              <pre v-if="block.error" class="text-xs text-red-500 whitespace-pre-wrap">{{ block.error }}</pre>
+            </details>
+            <div v-else-if="block.type === 'error'" class="block-error">
+              <span class="text-xs text-red-600 dark:text-red-400">{{ block.error_type }}: {{ block.message }}</span>
+            </div>
+          </div>
         </template>
-        <span v-else :class="['text-sm', msg.messageType === 'thinking' ? 'italic text-gray-500 dark:text-gray-400' : '']">{{ msg.content }}</span>
+
+        <!-- 无块：纯 content -->
+        <span v-else class="text-sm">{{ entry.content }}</span>
       </div>
     </div>
 
     <MessageInput
-      v-if="agents.selectedAgentName"
+      v-if="canChat"
       :disabled="connection.state !== 'connected'"
       @send="handleSend"
     />
@@ -109,64 +191,119 @@ function hasStructuredBlocks(msg: { contentBlocks?: ContentBlock[] }): boolean {
 </template>
 
 <style scoped>
-.message-bubble {
+.chat-entry {
   padding: 0.375rem 0.75rem;
   border-radius: 0.5rem;
   max-width: 85%;
   word-break: break-word;
 }
 
-.msg-agent {
-  background: #e8f0fe;
-  color: #1a3a5c;
-  align-self: flex-start;
-}
-
-:root.dark .msg-agent {
-  background: #1e3a5f;
-  color: #b8d4f0;
-}
-
-.msg-user {
+.entry-human {
   background: #d1fae5;
   color: #065f46;
   align-self: flex-end;
   margin-left: auto;
 }
-
-:root.dark .msg-user {
+:root.dark .entry-human {
   background: #064e3b;
   color: #a7f3d0;
 }
 
-.msg-error {
-  background: #fee2e2;
-  color: #991b1b;
+.entry-conversation {
+  background: #e8f0fe;
+  color: #1a3a5c;
+  align-self: flex-start;
+}
+:root.dark .entry-conversation {
+  background: #1e3a5f;
+  color: #b8d4f0;
 }
 
-:root.dark .msg-error {
-  background: #7f1d1d;
-  color: #fecaca;
-}
-
-.msg-thinking {
+.entry-send {
   background: #f3f4f6;
-  color: #6b7280;
-  font-style: italic;
+  color: #4b5563;
+  align-self: flex-start;
+  margin-left: 2rem;
+  border-left: 2px solid #9ca3af;
 }
-
-:root.dark .msg-thinking {
+:root.dark .entry-send {
   background: #1f2937;
   color: #9ca3af;
 }
 
-.block-reasoning {
-  font-style: italic;
-  color: #6b7280;
-  padding: 0.125rem 0;
+.entry-broadcast {
+  background: #fef3c7;
+  color: #92400e;
+  align-self: center;
+  margin: 0 auto;
+  border: 1px dashed #d97706;
+}
+:root.dark .entry-broadcast {
+  background: #422006;
+  color: #fde68a;
 }
 
-:root.dark .block-reasoning {
+.entry-endtask {
+  background: transparent;
+  color: #6b7280;
+  font-style: italic;
+  align-self: flex-start;
+}
+:root.dark .entry-endtask {
   color: #9ca3af;
+}
+
+.entry-pending {
+  opacity: 0.55;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.85; }
+}
+
+.entry-error {
+  background: #fee2e2;
+  color: #991b1b;
+  align-self: flex-end;
+  margin-left: auto;
+}
+:root.dark .entry-error {
+  background: #7f1d1d;
+  color: #fecaca;
+}
+
+.block-error {
+  margin-top: 0.125rem;
+}
+
+.entry-header {
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-bottom: 0.125rem;
+  opacity: 0.8;
+}
+
+.entry-block {
+  margin-top: 0.125rem;
+}
+
+.block-reasoning,
+.block-tool {
+  margin: 0.125rem 0;
+}
+
+.markdown-body :deep(p) {
+  margin: 0.125rem 0;
+}
+.markdown-body :deep(pre) {
+  background: rgba(0, 0, 0, 0.05);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  overflow-x: auto;
+}
+:root.dark .markdown-body :deep(pre) {
+  background: rgba(0, 0, 0, 0.3);
 }
 </style>
