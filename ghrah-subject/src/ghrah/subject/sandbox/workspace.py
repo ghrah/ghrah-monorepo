@@ -1,11 +1,39 @@
+# SPDX-FileCopyrightText: 2026 chenxya <chenxya@ghrah.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""兼容 re-export 层（W2 迁移）。
+
+按计划 §三：保留旧 API 表面（AgentWorkspace / WorkspaceManager /
+WorkspaceStatus / SnapshotError / SnapshotInfo）作为兼容桥，实际实现平移至
+``ghrah.subject.workspace.providers.git.GitWorkspaceProvider``。
+
+兼容桥只做映射不含逻辑（W5 store/orphan adopt 在 Manager 重建后补）：
+- ``AgentWorkspace`` 包装 WorkspaceRecord + GitWorkspaceProvider，方法委托；
+- ``WorkspaceManager`` 以 agent_name 为键构建 git 类型默认 workspace，内存登记
+  （无持久化，与原行为一致；W4/W5 接 store）。
+
+现有 6 个 WORKSPACE_* 命令与生产调用方（ForwardUnit / ability_runner /
+Observer SDK）经此桥零改动。
+"""
+
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-import shutil
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+from ghrah.subject.workspace import (
+    GitWorkspaceProvider,
+    SnapshotError,
+    WorkspaceProviderError,
+    WorkspaceRecord,
+    path_to_locator,
+)
+from ghrah.subject.workspace import (
+    SnapshotInfo as _NewSnapshotInfo,
+)
 
 if TYPE_CHECKING:
     from ghrah.subject.sandbox.executor import SandboxExecutor
@@ -21,13 +49,14 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-class SnapshotError(Exception):
-    """快照操作错误。"""
-
-
 @dataclass
 class WorkspaceStatus:
-    """工作区 Git 状态。"""
+    """工作区 Git 状态（兼容旧形态）。
+
+    由 :meth:`AgentWorkspace.status` 从 provider 通用 status 的 extra 映射而来，
+    保留 branch/is_clean/staged_files/unstaged_files/untracked_files 字段以维持
+    现有调用方与测试零改动。
+    """
 
     branch: str
     is_clean: bool
@@ -36,159 +65,53 @@ class WorkspaceStatus:
     untracked_files: list[str]
 
 
-@dataclass
-class SnapshotInfo:
-    """快照信息。"""
-
-    commit_hash: str
-    message: str
-    timestamp: float
+# 兼容旧导入名（指向新包的 pydantic SnapshotInfo）。
+SnapshotInfo = _NewSnapshotInfo
 
 
 @dataclass
 class AgentWorkspace:
-    """单个 Agent 的工作区。
+    """单个 Agent 的工作区（兼容桥）。
 
-    每个工作区是一个 Git 仓库，位于 WorkspaceManager.root_path/<agent_name>/。
+    包装 :class:`WorkspaceRecord` + :class:`GitWorkspaceProvider`，方法委托至
+    provider，保留 .name/.path/.sandbox 旧字段。
     """
 
     name: str
     path: str
     sandbox: SandboxExecutor = field(repr=False)
+    record: WorkspaceRecord = field(repr=False)
+    provider: GitWorkspaceProvider = field(repr=False)
 
     async def snapshot(self, message: str = "") -> str:
-        """创建快照（git add -A + git commit）。
-
-        Returns:
-            commit hash
-        """
-        if not message:
-            import time
-            message = f"snapshot at {time.time()}"
-
-        add_result = await self.sandbox.execute_command(
-            ["git", "add", "-A"], cwd=self.path,
-        )
-        if not add_result.success:
-            raise SnapshotError(f"git add failed: {add_result.stderr}")
-
-        status = await self.status()
-        if status.is_clean:
-            rev_result = await self.sandbox.execute_command(
-                ["git", "rev-parse", "HEAD"], cwd=self.path,
-            )
-            if rev_result.success:
-                return rev_result.stdout.strip()
-            raise SnapshotError(f"git rev-parse HEAD failed: {rev_result.stderr}")
-
-        commit_result = await self.sandbox.execute_command(
-            ["git", "commit", "-m", message], cwd=self.path,
-        )
-        if not commit_result.success:
-            raise SnapshotError(f"git commit failed: {commit_result.stderr}")
-
-        rev_result = await self.sandbox.execute_command(
-            ["git", "rev-parse", "HEAD"], cwd=self.path,
-        )
-        if not rev_result.success:
-            raise SnapshotError(f"git rev-parse HEAD failed: {rev_result.stderr}")
-
-        logger.info("Workspace '%s' snapshot: %s", self.name, rev_result.stdout.strip())
-        return rev_result.stdout.strip()
+        return await self.provider.snapshot(self.record, message=message)
 
     async def diff(self, snapshot_id: str | None = None) -> str:
-        """获取 diff（与指定快照或工作区对比）。"""
-        args = ["git", "diff"]
-        if snapshot_id:
-            args.append(snapshot_id)
-        result = await self.sandbox.execute_command(args, cwd=self.path)
-        return result.stdout
+        return await self.provider.diff(self.record, snapshot_id=snapshot_id)
 
     async def rollback(self, snapshot_id: str) -> None:
-        """回滚到指定快照（git checkout + git clean）。"""
-        checkout_result = await self.sandbox.execute_command(
-            ["git", "checkout", snapshot_id, "--", "."], cwd=self.path,
-        )
-        if not checkout_result.success:
-            raise SnapshotError(f"git checkout failed: {checkout_result.stderr}")
-
-        clean_result = await self.sandbox.execute_command(
-            ["git", "clean", "-fd"], cwd=self.path,
-        )
-        if not clean_result.success and clean_result.stderr:
-            logger.warning("git clean warning: %s", clean_result.stderr)
-
-        logger.info("Workspace '%s' rolled back to %s", self.name, snapshot_id)
+        await self.provider.rollback(self.record, snapshot_id)
 
     async def status(self) -> WorkspaceStatus:
-        """获取工作区 Git 状态。"""
-        branch_result = await self.sandbox.execute_command(
-            ["git", "branch", "--show-current"], cwd=self.path,
-        )
-        branch = branch_result.stdout.strip() or "main"
-
-        status_result = await self.sandbox.execute_command(
-            ["git", "status", "--porcelain"], cwd=self.path,
-        )
-
-        staged: list[str] = []
-        unstaged: list[str] = []
-        untracked: list[str] = []
-
-        for line in status_result.stdout.splitlines():
-            if not line:
-                continue
-            if len(line) < 4:
-                continue
-            index_char = line[0]
-            work_char = line[1]
-            filepath = line[3:]
-
-            if index_char in ("M", "A", "D", "R"):
-                staged.append(filepath)
-            elif work_char in ("M", "D"):
-                unstaged.append(filepath)
-            elif index_char == "?":
-                untracked.append(filepath)
-
+        ws_status = await self.provider.status(self.record)
+        extra = ws_status.extra
         return WorkspaceStatus(
-            branch=branch,
-            is_clean=not (staged or unstaged or untracked),
-            staged_files=staged,
-            unstaged_files=unstaged,
-            untracked_files=untracked,
+            branch=str(extra.get("branch", "main")),
+            is_clean=bool(extra.get("is_clean", True)),
+            staged_files=list(extra.get("staged_files", [])),
+            unstaged_files=list(extra.get("unstaged_files", [])),
+            untracked_files=list(extra.get("untracked_files", [])),
         )
 
     async def list_snapshots(self, max_count: int = 50) -> list[SnapshotInfo]:
-        """列出快照历史。"""
-        result = await self.sandbox.execute_command(
-            ["git", "log", "--format=%H|%s|%ct", f"-n{max_count}"],
-            cwd=self.path,
-        )
-        if not result.success:
-            return []
-
-        snapshots: list[SnapshotInfo] = []
-        for line in result.stdout.strip().splitlines():
-            parts = line.split("|", 2)
-            if len(parts) == 3:
-                try:
-                    snapshots.append(SnapshotInfo(
-                        commit_hash=parts[0],
-                        message=parts[1],
-                        timestamp=float(parts[2]),
-                    ))
-                except ValueError:
-                    continue
-        return snapshots
+        return await self.provider.list_snapshots(self.record, max_count=max_count)
 
 
 class WorkspaceManager:
-    """Agent 工作区管理器。
+    """Agent 工作区管理器（兼容桥）。
 
-    使用 Git 作为物理文件的唯一真相源。
-    利用 git diff/apply/checkout 实现状态快照与回滚。
-    所有 Git 操作通过 SandboxExecutor 执行，绝对禁止阻塞主线程。
+    以 agent_name 为键构建 git 类型默认 workspace（``<root_path>/<agent_name>``），
+    内存登记（无持久化，与原行为一致）。实际 git 操作经 GitWorkspaceProvider。
     """
 
     def __init__(
@@ -203,13 +126,11 @@ class WorkspaceManager:
         self._workspaces: dict[str, AgentWorkspace] = {}
 
     async def start(self) -> None:
-        """初始化 WorkspaceManager。"""
         os.makedirs(self._root_path, exist_ok=True)
         if self.sandbox and self._owns_sandbox:
             await self.sandbox.start()
 
     async def stop(self) -> None:
-        """清理。"""
         self._workspaces.clear()
         if self.sandbox and self._owns_sandbox:
             await self.sandbox.stop()
@@ -219,7 +140,6 @@ class WorkspaceManager:
         return self._root_path
 
     async def create_workspace(self, agent_name: str) -> AgentWorkspace:
-        """为 Agent 创建工作区目录并初始化 Git 仓库。"""
         if agent_name in self._workspaces:
             return self._workspaces[agent_name]
 
@@ -227,61 +147,38 @@ class WorkspaceManager:
             raise SnapshotError("SandboxExecutor is required for workspace operations")
 
         ws_path = os.path.join(self._root_path, agent_name)
-        os.makedirs(ws_path, exist_ok=True)
-
-        init_result = await self.sandbox.execute_command(
-            ["git", "init"], cwd=ws_path,
+        record = WorkspaceRecord(
+            name=agent_name,
+            provider_type="git",
+            locator=path_to_locator(ws_path),
         )
-        if not init_result.success:
-            raise SnapshotError(f"Failed to git init: {init_result.stderr}")
-
-        await self.sandbox.execute_command(
-            ["git", "config", "user.email", "agent@ghrah.local"], cwd=ws_path,
-        )
-        await self.sandbox.execute_command(
-            ["git", "config", "user.name", f"agent-{agent_name}"], cwd=ws_path,
-        )
-        await self.sandbox.execute_command(
-            ["git", "config", "commit.gpgsign", "false"], cwd=ws_path,
-        )
-        await self.sandbox.execute_command(
-            ["git", "config", "tag.gpgsign", "false"], cwd=ws_path,
-        )
-
-        marker_path = os.path.join(ws_path, ".ghrah-workspace")
-        with open(marker_path, "w") as f:
-            f.write(f"# Workspace for agent: {agent_name}\n")
-
-        await self.sandbox.execute_command(["git", "add", "-A"], cwd=ws_path)
-        commit_result = await self.sandbox.execute_command(
-            ["git", "commit", "-m", f"Initial workspace for {agent_name}"],
-            cwd=ws_path,
-        )
-        if not commit_result.success:
-            logger.warning("Initial commit failed (may be empty): %s", commit_result.stderr)
+        provider = GitWorkspaceProvider(self.sandbox)
+        try:
+            await provider.init(record)
+        except WorkspaceProviderError as exc:
+            # provider init 失败透传为 SnapshotError 以兼容旧错误类型契约
+            raise SnapshotError(str(exc)) from exc
 
         workspace = AgentWorkspace(
-            name=agent_name, path=ws_path, sandbox=self.sandbox,
+            name=agent_name,
+            path=ws_path,
+            sandbox=self.sandbox,
+            record=record,
+            provider=provider,
         )
         self._workspaces[agent_name] = workspace
         logger.info("Created workspace for agent '%s' at %s", agent_name, ws_path)
         return workspace
 
     async def destroy_workspace(self, agent_name: str) -> None:
-        """销毁 Agent 工作区（递归删除目录）。"""
         workspace = self._workspaces.pop(agent_name, None)
         if workspace is None:
             return
-
-        ws_path = workspace.path
-        if os.path.exists(ws_path):
-            await asyncio.to_thread(shutil.rmtree, ws_path)
-        logger.info("Destroyed workspace for agent '%s' at %s", agent_name, ws_path)
+        await workspace.provider.destroy(workspace.record)
+        logger.info("Destroyed workspace for agent '%s' at %s", agent_name, workspace.path)
 
     def get_workspace(self, agent_name: str) -> AgentWorkspace | None:
-        """获取 Agent 工作区实例。"""
         return self._workspaces.get(agent_name)
 
     def list_workspaces(self) -> list[str]:
-        """列出所有已注册的工作区 Agent 名称。"""
         return list(self._workspaces.keys())
