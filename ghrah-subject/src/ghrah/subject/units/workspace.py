@@ -45,6 +45,16 @@ class _WorkspaceServiceAdapter:
             return path
         return None
 
+    def resolve_agent_default_path(self, agent_name: str) -> str | None:
+        """新名叠加：语义对齐 resolve_agent_path，以 WorkspaceRecord 取向。
+
+        默认回退到 resolve_agent_path（MVP 每 agent 一个默认 workspace）。
+        """
+        return self.resolve_agent_path(agent_name)
+
+    def get_workspace_record(self, workspace_id: str) -> Any | None:
+        return self._manager.get_record(workspace_id)
+
 
 class WorkspaceUnit(SubjectUnit):
     """Owns WorkspaceManager and workspace command/event routes."""
@@ -189,6 +199,65 @@ class WorkspaceUnit(SubjectUnit):
                         "staged_files": status.staged_files,
                         "unstaged_files": status.unstaged_files,
                         "untracked_files": status.untracked_files,
+                    },
+                }
+
+            if command == "workspace_register":
+                locator = payload.get("locator", "")
+                if not locator:
+                    return {"success": False, "error": "locator is required"}
+                ws = await self.manager.register_workspace(
+                    locator,
+                    name=payload.get("name", ""),
+                    provider_type=payload.get("provider_type"),
+                )
+                return {
+                    "success": True,
+                    "data": {
+                        "workspace_id": ws.record.workspace_id,
+                        "name": ws.record.name,
+                        "provider_type": ws.record.provider_type,
+                        "locator": ws.record.locator,
+                        "path": ws.path,
+                    },
+                }
+
+            if command == "workspace_get":
+                workspace_id = payload.get("workspace_id", "")
+                record = self.manager.get_record(workspace_id)
+                if record is None:
+                    return {
+                        "success": False,
+                        "error": f"Workspace not found: {workspace_id}",
+                    }
+                return {
+                    "success": True,
+                    "data": {
+                        "workspace_id": record.workspace_id,
+                        "name": record.name,
+                        "provider_type": record.provider_type,
+                        "subject_id": record.subject_id,
+                        "locator": record.locator,
+                        "created_at": record.created_at.isoformat(),
+                        "updated_at": record.updated_at.isoformat(),
+                    },
+                }
+
+            if command == "workspace_list":
+                provider_type = payload.get("provider_type")
+                records = self.manager.list_records_by_provider(provider_type)
+                return {
+                    "success": True,
+                    "data": {
+                        "workspaces": [
+                            {
+                                "workspace_id": r.workspace_id,
+                                "name": r.name,
+                                "provider_type": r.provider_type,
+                                "locator": r.locator,
+                            }
+                            for r in records
+                        ],
                     },
                 }
 

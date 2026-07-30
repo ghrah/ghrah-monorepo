@@ -27,7 +27,7 @@ from ghrah.abilities import (
     ActionOutcome,
     ActionResult,
 )
-from ghrah.abilities.paths import ABILITY_PATH_SPECS
+from ghrah.abilities.paths import ABILITY_PATH_SPECS, resolve_relative_path
 from ghrah.subject.event_bus import SUBJECT_HITL_REQUEST_CREATED, SubjectEventBus
 from ghrah.subject.hitl.notary import HITLNotary, HITLPromise
 from ghrah.subject.hitl.policy import HITLVerdict
@@ -339,7 +339,7 @@ class AbilityRunner:
                     continue
                 if os.path.isabs(value):
                     continue
-                resolved[key] = os.path.join(workspace_path, value)
+                resolved[key] = resolve_relative_path(workspace_path, value)
                 logger.info(
                     "Resolved path for agent=%s ability=%s: %s → %s",
                     agent_name, ability_name, value, resolved[key],
@@ -352,7 +352,7 @@ class AbilityRunner:
                     continue
                 if os.path.isabs(value):
                     continue
-                resolved[key] = os.path.join(workspace_path, value)
+                resolved[key] = resolve_relative_path(workspace_path, value)
                 logger.info(
                     "Resolved working_dir for agent=%s ability=%s: %s → %s",
                     agent_name, ability_name, value, resolved[key],

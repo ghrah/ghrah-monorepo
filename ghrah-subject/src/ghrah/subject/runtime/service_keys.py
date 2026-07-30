@@ -20,6 +20,7 @@ from ghrah.subject.runtime.capability import CapabilityRegistry
 from ghrah.subject.sandbox.executor import SandboxExecutor
 from ghrah.subject.transport.core import CoreTransport
 from ghrah.subject.transport.observer import ObserverEndpoint
+from ghrah.subject.workspace.models import WorkspaceRecord
 
 __all__ = [
     "ABILITY_EXECUTOR",
@@ -64,7 +65,14 @@ class SubjectServiceKey(Generic[T]):
 
 
 class WorkspaceService(Protocol):
-    """Workspace contract required by runtime units."""
+    """Workspace contract required by runtime units.
+
+    旧名作桥、新名叠加（计划 §2.7）：
+    - ``resolve_agent_path`` 保留为兼容桥（现有生产调用方零改动）；
+    - ``resolve_agent_default_path`` 新名叠加，语义对齐旧名但以 WorkspaceRecord 取向，
+      是 Stage B agent active workspace 切换的对接点；
+    - ``get_workspace_record`` workspace_id 键控一等查询（W6 新命令对接点）。
+    """
 
     @property
     def root_path(self) -> str:
@@ -74,7 +82,21 @@ class WorkspaceService(Protocol):
         """Create or return a workspace for an agent."""
 
     def resolve_agent_path(self, agent_name: str) -> str | None:
-        """Resolve an agent name to its workspace path, if present."""
+        """Resolve an agent name to its workspace path, if present.
+
+        兼容桥：返回 agent 默认 workspace 的路径；含原「manager 无记录但磁盘存在
+        目录」的回退行为。保留旧名，现有生产调用方零改动。
+        """
+
+    def resolve_agent_default_path(self, agent_name: str) -> str | None:
+        """Resolve an agent name to its default workspace path (new name overlay).
+
+        语义对齐 ``resolve_agent_path``，以 WorkspaceRecord 取向；Stage B agent
+        active workspace 切换的对接点。默认实现可回退到 ``resolve_agent_path``。
+        """
+
+    def get_workspace_record(self, workspace_id: str) -> WorkspaceRecord | None:
+        """Return the WorkspaceRecord for a workspace_id, if registered."""
 
 
 class ManifestPermissionIndex(Protocol):

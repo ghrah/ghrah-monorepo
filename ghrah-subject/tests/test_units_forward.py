@@ -93,6 +93,13 @@ class _FakeWorkspaceService:
         self.resolved_agents.append(agent_name)
         return str(Path(self._workspace_root) / agent_name)
 
+    def resolve_agent_default_path(self, agent_name: str) -> str | None:
+        # 新名叠加：默认回退到 resolve_agent_path（保留旧实现不动）。
+        return self.resolve_agent_path(agent_name)
+
+    def get_workspace_record(self, workspace_id: str) -> Any | None:
+        return None
+
 
 def _config(tmp_path: Path) -> SubjectConfig:
     return SubjectConfig(

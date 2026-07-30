@@ -372,3 +372,62 @@ class WorkspaceManager:
 
     def list_records(self) -> list[WorkspaceRecord]:
         return [ws.record for ws in self._by_id.values()]
+
+    def list_records_by_provider(self, provider_type: str | None = None) -> list[WorkspaceRecord]:
+        """按 provider_type 过滤记录（None 表示全部）。"""
+        records = self.list_records()
+        if provider_type is None:
+            return records
+        return [r for r in records if r.provider_type == provider_type]
+
+    async def register_workspace(
+        self, locator: str, *, name: str = "", provider_type: str | None = None
+    ) -> AgentWorkspace:
+        """把已有目录登记为 workspace（workspace_register 命令后端）。
+
+        provider_type 给定则用该 provider；否则由 registry.detect 探测。经 provider
+        init（目录不存在则创建）或 adopt（有 marker 则认领）登记 store + 内存。
+        """
+        if self._registry is None:
+            raise SnapshotError(
+                "WorkspaceManager not started: registry unavailable for register_workspace"
+            )
+        pt = provider_type
+        provider = self._registry.get(pt) if pt is not None else self._registry.detect(locator)
+        if provider is None:
+            raise SnapshotError(f"Cannot detect provider for locator: {locator}")
+        # 先尝试 adopt（认领已有 marker 目录），失败则 init（新建/重写）
+        try:
+            adopt_result = await provider.adopt(locator)
+        except Exception as exc:  # noqa: BLE001
+            raise SnapshotError(f"adopt failed: {exc}") from exc
+        if adopt_result is not None and adopt_result.subject_id == self._subject_id:
+            ws_path = locator_to_path(locator)
+            record = WorkspaceRecord(
+                workspace_id=adopt_result.workspace_id,
+                name=name or adopt_result.name or os.path.basename(ws_path),
+                provider_type=adopt_result.provider_type,
+                subject_id=adopt_result.subject_id,
+                locator=locator,
+            )
+        else:
+            ws_path = locator_to_path(locator)
+            record = WorkspaceRecord(
+                name=name or os.path.basename(ws_path),
+                provider_type=provider.provider_type,
+                subject_id=self._subject_id,
+                locator=locator,
+            )
+            try:
+                await provider.init(record)
+            except WorkspaceProviderError as exc:
+                raise SnapshotError(str(exc)) from exc
+        # 去重：同 workspace_id 已登记则返回现有
+        existing = self._by_id.get(record.workspace_id)
+        if existing is not None:
+            return existing
+        self._index_record(record)
+        if self._store is not None:
+            await self._persist(record)
+        logger.info("Registered workspace %s (%s)", record.workspace_id, locator)
+        return self._by_id[record.workspace_id]

@@ -6,6 +6,7 @@ from ghrah.abilities import CommandSafetyChecker
 from ghrah.manifest.types import PermissionFlags
 
 from ghrah.subject.permission_checker import PermissionChecker, PermissionDecision
+from ghrah.subject.workspace.models import WorkspaceRecord
 
 _EXECUTE_COMMAND_PERMS = PermissionFlags(shell_access=True, require_hitl=True)
 
@@ -180,6 +181,13 @@ class _FakeWorkspace:
     def resolve_agent_path(self, agent_name: str) -> str | None:
         return f"{self._root}/{agent_name}"
 
+    def resolve_agent_default_path(self, agent_name: str) -> str | None:
+        # 新名叠加：默认回退到 resolve_agent_path（保留旧实现不动）。
+        return self.resolve_agent_path(agent_name)
+
+    def get_workspace_record(self, workspace_id: str) -> WorkspaceRecord | None:
+        return None
+
 
 class TestAbilityRunnerWorkingDir:
     def test_working_dir_resolved_for_execute_command(self) -> None:
@@ -233,3 +241,29 @@ class TestAbilityRunnerWorkingDir:
         )
         assert result["file_path"] == "/workspace/agent1/src/main.py"
         assert "working_dir" not in result
+
+    def test_dot_resolves_to_workspace_root_not_pwd(self) -> None:
+        """`.` 解析到 agent 默认 workspace 根，不泄漏进程 $PWD（计划 §2.8）。
+
+        针对 Subject/ghrah-core 能力栈：execute_command 的 working_dir="." 经
+        统一解析入口 resolve_relative_path 落到 /workspace/agent1，而非 $PWD。
+        """
+        import os
+
+        from ghrah.subject.ability_runner import AbilityRunner
+        from ghrah.subject.hitl.notary import HITLNotary
+        from ghrah.subject.hitl.policy import HITLPolicy
+
+        runner = AbilityRunner(
+            hitl_notary=HITLNotary(HITLPolicy()),
+            workspace=_FakeWorkspace("/workspace"),
+        )
+
+        result = runner._resolve_paths(
+            "execute_command",
+            {"command": "ls", "working_dir": "."},
+            "agent1",
+        )
+        # "." → agent 默认 workspace 根，不是 os.path.join(ws, agent) 也不是 $PWD
+        assert result["working_dir"] == os.path.join("/workspace", "agent1")
+        assert result["working_dir"] != os.getcwd()
