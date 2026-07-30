@@ -87,6 +87,8 @@ class WorkspaceUnit(SubjectUnit):
             root_path=ctx.config.sandbox.workspace_root,
             sandbox=sandbox,
             owns_sandbox=False,
+            db_path=ctx.config.persistence.db_path,
+            subject_id="default",
         )
         self._service = _WorkspaceServiceAdapter(self._manager)
         ctx.services.set(WORKSPACE_SERVICE, self._service)
