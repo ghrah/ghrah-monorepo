@@ -75,6 +75,7 @@ class CommandType(StrEnum):
     INIT_CLUSTER = "init_cluster"
     SHUTDOWN_CLUSTER = "shutdown_cluster"
     CLUSTER_STATUS = "cluster_status"
+    LIST_CLUSTERS = "list_clusters"
 
     # ─── 订阅类（Observer 本地处理）───
     SUBSCRIBE = "subscribe"
@@ -255,6 +256,7 @@ CORE_COMMANDS: frozenset[str] = frozenset({
     CommandType.INIT_CLUSTER.value,
     CommandType.SHUTDOWN_CLUSTER.value,
     CommandType.CLUSTER_STATUS.value,
+    CommandType.LIST_CLUSTERS.value,
     CommandType.SESSION_CREATE.value,
     CommandType.SESSION_SWITCH.value,
     CommandType.SESSION_LIST.value,
@@ -581,19 +583,42 @@ class GetAgentInfoPayload(BaseModel):
 class InitClusterPayload(BaseModel):
     """init_cluster 命令载荷。"""
 
+    cluster_id: str
     config: dict[str, Any] = Field(default_factory=dict)
 
 
 class ShutdownClusterPayload(BaseModel):
     """shutdown_cluster 命令载荷。"""
 
+    cluster_id: str
     config: dict[str, Any] = Field(default_factory=dict)
 
 
 class ClusterStatusPayload(BaseModel):
-    """cluster_status 命令载荷（空载荷）。"""
+    """cluster_status 命令载荷。"""
+
+    cluster_id: str
+
+
+class ListClustersPayload(BaseModel):
+    """list_clusters 命令载荷（空载荷）。"""
 
     pass
+
+
+class ClusterInfoPayload(BaseModel):
+    """单个集群的信息（list_clusters 结果项）。"""
+
+    cluster_id: str
+    active_agents: int
+    status: str
+    bound: bool
+
+
+class ListClustersResultPayload(BaseModel):
+    """list_clusters 命令结果载荷。"""
+
+    clusters: list[ClusterInfoPayload]
 
 
 # ─── Workspace 管理载荷模型 ───
@@ -1116,6 +1141,7 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     CommandType.INIT_CLUSTER: InitClusterPayload,
     CommandType.SHUTDOWN_CLUSTER: ShutdownClusterPayload,
     CommandType.CLUSTER_STATUS: ClusterStatusPayload,
+    CommandType.LIST_CLUSTERS: ListClustersPayload,
     CommandType.HITL_RESPONSE: HITLResponsePayload,
     # persist_*: payload 为裸 dict（Stage 2 补齐真实 payload 模型）
     # workspace_* / manifest_* / get_chain_history: payload 模型存在但消费侧

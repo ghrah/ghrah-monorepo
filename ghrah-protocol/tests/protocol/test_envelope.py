@@ -334,6 +334,7 @@ class TestPayloadMap:
             CommandType.INIT_CLUSTER,
             CommandType.SHUTDOWN_CLUSTER,
             CommandType.CLUSTER_STATUS,
+            CommandType.LIST_CLUSTERS,
             CommandType.HITL_RESPONSE,
         }
         for ct in expected:
