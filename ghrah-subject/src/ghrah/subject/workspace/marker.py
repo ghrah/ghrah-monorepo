@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 __all__ = [
     "MARKER_FILENAME",
     "MarkerData",
+    "adopt_marker_matches",
     "read_marker",
     "write_marker",
 ]
@@ -102,3 +103,36 @@ def read_marker(dir_path: str) -> MarkerData | None:
 def marker_path(dir_path: str) -> str:
     """返回 marker 文件完整路径。"""
     return os.path.join(dir_path, MARKER_FILENAME)
+
+
+def adopt_marker_matches(
+    marker: MarkerData | None,
+    *,
+    workspace_id: str | None = None,
+    provider_type: str | None = None,
+    subject_id: str | None = None,
+) -> bool:
+    """认领三要素校验：marker 非空且给定要素全部匹配则可认领。
+
+    None 表示该要素不做校验（manager 按需传入：workspace_id 比对认领主键、
+    provider_type 比对探测/声明、subject_id 比对目标 subject，防误认领其他
+    subject 的目录）。旧格式 marker（read_marker 返回 None）→ 不匹配，拒绝认领。
+
+    Args:
+        marker: read_marker 解析结果（None 表示无/旧格式/损坏 marker）。
+        workspace_id: 预期 workspace_id，None 跳过此项校验。
+        provider_type: 预期 provider_type，None 跳过此项校验。
+        subject_id: 预期 subject_id，None 跳过此项校验。
+
+    Returns:
+        True 当且仅当 marker 非空且所有给定要素一致。
+    """
+    if marker is None:
+        return False
+    if workspace_id is not None and marker.workspace_id != workspace_id:
+        return False
+    if provider_type is not None and marker.provider_type != provider_type:
+        return False
+    if subject_id is not None and marker.subject_id != subject_id:
+        return False
+    return True

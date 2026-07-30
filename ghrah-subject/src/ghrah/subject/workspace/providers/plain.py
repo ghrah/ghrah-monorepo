@@ -54,10 +54,12 @@ class PlainWorkspaceProvider(WorkspaceProvider):
         logger.info("Initialized plain workspace %s (%s)", record.workspace_id, ws_path)
 
     async def adopt(self, locator: str) -> AdoptResult | None:
-        """读 marker 校验三要素；无 marker / 旧格式 / 不匹配返回 None。"""
+        """读 marker 校验 provider_type 一致；无 marker / 旧格式 /
+        marker 声明非 plain 类型 → 返回 None（不误认领）。
+        """
         ws_path = locator_to_path(locator)
         marker = read_marker(ws_path)
-        if marker is None:
+        if marker is None or marker.provider_type != self.provider_type:
             return None
         return AdoptResult(
             workspace_id=marker.workspace_id,

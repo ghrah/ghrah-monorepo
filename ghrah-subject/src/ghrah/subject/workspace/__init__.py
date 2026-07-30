@@ -11,7 +11,11 @@ W1-W3 阶段：models + ABC + git/plain provider + registry。
 from __future__ import annotations
 
 from ghrah.subject.workspace.errors import SnapshotError, WorkspaceProviderError
-from ghrah.subject.workspace.marker import MARKER_FILENAME, MarkerData
+from ghrah.subject.workspace.marker import (
+    MARKER_FILENAME,
+    MarkerData,
+    adopt_marker_matches,
+)
 from ghrah.subject.workspace.models import (
     AdoptResult,
     SnapshotInfo,
@@ -30,12 +34,14 @@ from ghrah.subject.workspace.providers.git import (
 )
 from ghrah.subject.workspace.providers.plain import PlainWorkspaceProvider
 from ghrah.subject.workspace.registry import ProviderRegistry, build_default_registry
+from ghrah.subject.workspace.store import WorkspaceStore
 
 __all__ = [
     "AdoptResult",
     "GitWorkspaceProvider",
     "MARKER_FILENAME",
     "MarkerData",
+    "adopt_marker_matches",
     "PlainWorkspaceProvider",
     "ProviderRegistry",
     "SnapshotError",
@@ -46,6 +52,7 @@ __all__ = [
     "WorkspaceProviderError",
     "WorkspaceRecord",
     "WorkspaceStatus",
+    "WorkspaceStore",
     "build_default_registry",
     "locator_to_path",
     "path_to_locator",

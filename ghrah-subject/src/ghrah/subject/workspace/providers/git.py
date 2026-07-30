@@ -129,10 +129,15 @@ class GitWorkspaceProvider(VersionedWorkspaceProvider):
         logger.info("Initialized git workspace %s (%s)", record.workspace_id, ws_path)
 
     async def adopt(self, locator: str) -> AdoptResult | None:
-        """读 marker 校验三要素；无 marker / 旧格式 / 不匹配返回 None。"""
+        """读 marker 校验 provider_type 一致；无 marker / 旧格式 /
+        marker 声明非 git 类型 → 返回 None（不误认领）。
+
+        workspace_id / subject_id 与目标 subject 的比对由 manager 在认领时
+        经 adopt_marker_matches 完成（provider 只保证 provider_type 自洽）。
+        """
         ws_path = locator_to_path(locator)
         marker = read_marker(ws_path)
-        if marker is None:
+        if marker is None or marker.provider_type != self.provider_type:
             return None
         return _adopt_result_from_marker(marker)
 
