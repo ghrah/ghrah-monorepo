@@ -64,7 +64,7 @@ async def test_send_receive_and_send_and_wait_with_mock_websocket() -> None:
         received_event.set()
 
     transport = WebSocketCoreTransport(
-        CoreTransportConfig(url="ws://core/ws?x=1"),
+        CoreTransportConfig(url="ws://core/ws?x=1", cluster_id="test-cluster"),
         client_id="cid",
         connect_factory=connect,
     )
@@ -76,6 +76,11 @@ async def test_send_receive_and_send_and_wait_with_mock_websocket() -> None:
             "ws://core/ws?x=1&client_type=subject&client_id=cid"
         )
         assert connections[0][1]["ping_interval"] == 30.0
+
+        # 连接成功后自动发出 init_cluster(cluster_id=config 值)
+        init_message = json.loads(ws.sent[0])
+        assert init_message["type"] == "init_cluster"
+        assert init_message["payload"] == {"cluster_id": "test-cluster"}
 
         await transport.send({"type": "ping"})
         assert json.loads(ws.sent[-1]) == {"type": "ping"}
@@ -165,5 +170,9 @@ async def test_disconnect_reconnects_with_mock_websocket() -> None:
         await asyncio.wait_for(reconnected.wait(), timeout=1.0)
         assert len(connections) == 2
         assert transport.is_connected is True
+        # 重连成功后重发 init_cluster（幂等重绑定，M1 恢复路径）
+        init_message = json.loads(connections[1].sent[0])
+        assert init_message["type"] == "init_cluster"
+        assert init_message["payload"] == {"cluster_id": "default"}
     finally:
         await transport.stop()

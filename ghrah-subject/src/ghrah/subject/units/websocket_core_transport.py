@@ -159,6 +159,34 @@ class WebSocketCoreTransport:
             ping_timeout=10,
         )
         logger.info("WebSocketCoreTransport connected to Core at %s", url)
+        await self._send_init_cluster()
+
+    async def _send_init_cluster(self) -> None:
+        """连接/重连成功后自动发 init_cluster（D-strict 必要适配，幂等重绑定）。
+
+        fire-and-forget：同一 WS 上消息有序，init 先于后续命令到达 Core；
+        同 client_id 重连时 Core 侧 ConnectionManager 已 evict 旧 session（解绑），
+        故重发 init 可幂等重绑定。发送失败仅 log warning 不阻断连接。
+        """
+
+        message: CoreMessage = {
+            "type": "init_cluster",
+            "payload": {"cluster_id": self._config.cluster_id},
+            "request_id": generate_request_id(),
+        }
+        try:
+            await self.send(message)
+        except Exception:
+            logger.warning(
+                "WebSocketCoreTransport failed to send init_cluster(cluster_id=%s); "
+                "connection remains usable but agent commands may be rejected until retry.",
+                self._config.cluster_id,
+            )
+            return
+        logger.info(
+            "WebSocketCoreTransport sent init_cluster(cluster_id=%s).",
+            self._config.cluster_id,
+        )
 
     async def _receive_loop(self) -> None:
         while self._running:

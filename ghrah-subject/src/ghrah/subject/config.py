@@ -70,6 +70,8 @@ class CoreTransportConfig:
         max_reconnect_attempts: 最大重连尝试次数，None 表示无限重试
         ping_interval: 心跳间隔（秒）
         command_timeout: 命令执行超时时间（秒）
+        cluster_id: Subject 持有的稳定 cluster 标识（MVP 单元素，默认 "default"），
+            连接/重连成功后自动发 init_cluster(cluster_id)；不复用 transport 随机 client_id
     """
 
     url: str = "ws://localhost:4111/ws"
@@ -77,6 +79,7 @@ class CoreTransportConfig:
     max_reconnect_attempts: int | None = None
     ping_interval: float = 30.0
     command_timeout: float = 300.0
+    cluster_id: str = "default"
 
 
 @dataclass
@@ -279,6 +282,7 @@ class SubjectConfig:
                 None,
                 "GHRAH_SUBJECT_CORE_MAX_RECONNECT_ATTEMPTS",
             ),
+            cluster_id=os.environ.get("GHRAH_SUBJECT_CORE_CLUSTER_ID", "default"),
         )
 
         # sandbox default_timeout：专用 env，未设置时回退到 core.command_timeout（向后兼容）
