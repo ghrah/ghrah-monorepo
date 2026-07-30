@@ -144,29 +144,42 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async initCluster(config?: Record<string, unknown>): Promise<CommandResultPayload> {
+  async initCluster(
+    clusterId: string,
+    config?: Record<string, unknown>,
+  ): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.INIT_CLUSTER,
-      payload: { config: config ?? {} },
+      payload: { cluster_id: clusterId, config: config ?? {} },
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 30_000);
   }
 
-  async shutdownCluster(): Promise<CommandResultPayload> {
+  async shutdownCluster(clusterId: string): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.SHUTDOWN_CLUSTER,
-      payload: {},
+      payload: { cluster_id: clusterId, config: {} },
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 30_000);
   }
 
-  async clusterStatus(): Promise<CommandResultPayload> {
+  async clusterStatus(clusterId: string): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.CLUSTER_STATUS,
+      payload: { cluster_id: clusterId },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async listClusters(): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.LIST_CLUSTERS,
       payload: {},
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,

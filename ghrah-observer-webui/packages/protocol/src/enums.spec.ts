@@ -37,6 +37,7 @@ describe("CommandType", () => {
     "init_cluster",
     "shutdown_cluster",
     "cluster_status",
+    "list_clusters",
     "subscribe",
     "unsubscribe",
     "execute_ability",
@@ -68,7 +69,7 @@ describe("CommandType", () => {
     "manifest_validate",
   ]);
 
-  it("has exactly 37 values matching Python CommandType", () => {
+  it("has exactly 38 values matching Python CommandType", () => {
     const tsValues = new Set(Object.values(CommandType));
     expect(tsValues).toEqual(PYTHON_COMMAND_VALUES);
   });
@@ -154,9 +155,10 @@ describe("CORE_COMMANDS", () => {
     "init_cluster",
     "shutdown_cluster",
     "cluster_status",
+    "list_clusters",
   ]);
 
-  it("contains exactly 13 core command values", () => {
+  it("contains exactly 14 core command values", () => {
     expect(CORE_COMMANDS).toEqual(PYTHON_CORE_COMMANDS);
   });
 });

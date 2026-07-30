@@ -23,6 +23,8 @@ import {
   HITLResponsePayloadSchema,
   InitClusterPayloadSchema,
   ListAgentsPayloadSchema,
+  ListClustersPayloadSchema,
+  ListClustersResultPayloadSchema,
   ManifestAbilityEventPayloadSchema,
   ManifestAgentEventPayloadSchema,
   ManifestDeletePayloadSchema,
@@ -285,23 +287,55 @@ describe("HITLResponsePayloadSchema", () => {
 });
 
 describe("InitClusterPayloadSchema", () => {
-  it("parses with default config", () => {
-    const result = InitClusterPayloadSchema.parse({});
+  it("parses with required cluster_id and default config", () => {
+    const result = InitClusterPayloadSchema.parse({ cluster_id: "cluster-1" });
+    expect(result.cluster_id).toBe("cluster-1");
     expect(result.config).toEqual({});
+  });
+
+  it("rejects empty payload (cluster_id required)", () => {
+    expect(InitClusterPayloadSchema.safeParse({}).success).toBe(false);
   });
 });
 
 describe("ShutdownClusterPayloadSchema", () => {
-  it("parses with default config", () => {
-    const result = ShutdownClusterPayloadSchema.parse({});
+  it("parses with required cluster_id and default config", () => {
+    const result = ShutdownClusterPayloadSchema.parse({ cluster_id: "cluster-1" });
+    expect(result.cluster_id).toBe("cluster-1");
     expect(result.config).toEqual({});
+  });
+
+  it("rejects empty payload (cluster_id required)", () => {
+    expect(ShutdownClusterPayloadSchema.safeParse({}).success).toBe(false);
   });
 });
 
 describe("ClusterStatusPayloadSchema", () => {
+  it("parses with required cluster_id", () => {
+    const result = ClusterStatusPayloadSchema.parse({ cluster_id: "cluster-1" });
+    expect(result).toEqual({ cluster_id: "cluster-1" });
+  });
+
+  it("rejects empty payload (cluster_id required)", () => {
+    expect(ClusterStatusPayloadSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe("ListClustersPayloadSchema", () => {
   it("parses empty object", () => {
-    const result = ClusterStatusPayloadSchema.parse({});
+    const result = ListClustersPayloadSchema.parse({});
     expect(result).toEqual({});
+  });
+});
+
+describe("ListClustersResultPayloadSchema", () => {
+  it("parses clusters list", () => {
+    const result = ListClustersResultPayloadSchema.parse({
+      clusters: [{ cluster_id: "cluster-1", active_agents: 2, status: "running", bound: true }],
+    });
+    expect(result.clusters).toHaveLength(1);
+    expect(result.clusters[0].cluster_id).toBe("cluster-1");
+    expect(result.clusters[0].bound).toBe(true);
   });
 });
 

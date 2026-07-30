@@ -19,6 +19,7 @@ export enum CommandType {
   INIT_CLUSTER = "init_cluster",
   SHUTDOWN_CLUSTER = "shutdown_cluster",
   CLUSTER_STATUS = "cluster_status",
+  LIST_CLUSTERS = "list_clusters",
 
   SUBSCRIBE = "subscribe",
   UNSUBSCRIBE = "unsubscribe",
@@ -112,6 +113,7 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.INIT_CLUSTER,
   CommandType.SHUTDOWN_CLUSTER,
   CommandType.CLUSTER_STATUS,
+  CommandType.LIST_CLUSTERS,
 ]);
 
 export const WORKSPACE_COMMANDS: ReadonlySet<string> = new Set([

@@ -82,14 +82,31 @@ export const HITLResponsePayloadSchema = z.object({
 });
 
 export const InitClusterPayloadSchema = z.object({
+  cluster_id: z.string(),
   config: z.record(z.unknown()).optional().default({}),
 });
 
 export const ShutdownClusterPayloadSchema = z.object({
+  cluster_id: z.string(),
   config: z.record(z.unknown()).optional().default({}),
 });
 
-export const ClusterStatusPayloadSchema = z.object({});
+export const ClusterStatusPayloadSchema = z.object({
+  cluster_id: z.string(),
+});
+
+export const ListClustersPayloadSchema = z.object({});
+
+export const ClusterInfoPayloadSchema = z.object({
+  cluster_id: z.string(),
+  active_agents: z.number(),
+  status: z.string(),
+  bound: z.boolean(),
+});
+
+export const ListClustersResultPayloadSchema = z.object({
+  clusters: z.array(ClusterInfoPayloadSchema),
+});
 
 export const PersistSavePayloadSchema = z.object({
   key: z.string(),
@@ -373,6 +390,9 @@ export type HITLResponsePayload = z.infer<typeof HITLResponsePayloadSchema>;
 export type InitClusterPayload = z.infer<typeof InitClusterPayloadSchema>;
 export type ShutdownClusterPayload = z.infer<typeof ShutdownClusterPayloadSchema>;
 export type ClusterStatusPayload = z.infer<typeof ClusterStatusPayloadSchema>;
+export type ListClustersPayload = z.infer<typeof ListClustersPayloadSchema>;
+export type ClusterInfoPayload = z.infer<typeof ClusterInfoPayloadSchema>;
+export type ListClustersResultPayload = z.infer<typeof ListClustersResultPayloadSchema>;
 export type PersistSavePayload = z.infer<typeof PersistSavePayloadSchema>;
 export type PersistLoadPayload = z.infer<typeof PersistLoadPayloadSchema>;
 export type PersistDeletePayload = z.infer<typeof PersistDeletePayloadSchema>;

@@ -66,11 +66,13 @@ export class Launcher {
   }
 
   async startCluster(): Promise<void> {
-    // TODO: send init_cluster command via WebSocket
+    // TODO: send init_cluster command via WebSocket (payload requires cluster_id:
+    // client.initCluster(clusterId, config?))
   }
 
   async stopCluster(): Promise<void> {
-    // TODO: send shutdown_cluster command via WebSocket
+    // TODO: send shutdown_cluster command via WebSocket (payload requires cluster_id:
+    // client.shutdownCluster(clusterId))
   }
 
   private async isReachable(url: string): Promise<boolean> {
