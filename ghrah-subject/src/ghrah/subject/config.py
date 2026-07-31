@@ -13,6 +13,8 @@ import logging
 import os
 from dataclasses import InitVar, dataclass, field
 
+from ghrah.protocol.types import RecoveryAction
+
 # AbilityRunnerConfig 已存在于 ability_runner.py（含 hitl_timeout），此处 re-export
 # 统一取用点。注意：ability_runner.py 不反向 import config.py，无循环依赖。
 from ghrah.subject.ability_runner import AbilityRunnerConfig
@@ -135,6 +137,42 @@ class TransportKindConfig:
 
 
 @dataclass
+class ProjectConfig:
+    """project Unit 配置切片。
+
+    Attributes:
+        default_workspace_locator: default project 首启 bootstrap 用的工作区
+            locator（git 类型，``file://`` 解析）。空串表示派生自
+            ``sandbox.workspace_root + "/projects/default"``（由
+            ``SubjectConfig.__post_init__`` 填充）。
+        default_db_path_template: per-project 独立 DB 路径模板，``{project_id}``
+            占位符由 ProjectManager 替换。
+    """
+
+    default_workspace_locator: str = ""
+    default_db_path_template: str = "~/.ghrah/projects/{project_id}.db"
+
+
+@dataclass
+class RecoveryConfig:
+    """recovery Unit 配置切片。
+
+    Attributes:
+        enabled: 是否在 engine.start() 末尾触发 reconcile
+        subject_id: 对账归属的 subject 标识（默认 "default"）
+        on_unknown_workspace: reconcile 遇到孤立 workspace 时的默认策略
+        reconcile_on_start: 启动时是否自动对账（enabled 之外的独立开关）
+        bootstrap_default_project: 首启自动建 default project（决策 6）
+    """
+
+    enabled: bool = True
+    subject_id: str = "default"
+    on_unknown_workspace: RecoveryAction = RecoveryAction.PAUSE
+    reconcile_on_start: bool = True
+    bootstrap_default_project: bool = True
+
+
+@dataclass
 class SubjectConfig:
     """Subject 运行时配置（各 Unit 配置切片的容器）。
 
@@ -173,6 +211,8 @@ class SubjectConfig:
     manifest_slice: InitVar[ManifestConfig | None] = None
     hitl_slice: InitVar[HITLPolicyConfig | None] = None
     ability_runner_slice: InitVar[AbilityRunnerConfig | None] = None
+    project_slice: InitVar[ProjectConfig | None] = None
+    recovery_slice: InitVar[RecoveryConfig | None] = None
 
     # 非 slice 的新字段（有默认值，可直接构造）。
     transport: TransportKindConfig = field(default_factory=TransportKindConfig)
@@ -184,6 +224,8 @@ class SubjectConfig:
     _manifest: ManifestConfig = field(init=False)
     _hitl: HITLPolicyConfig = field(init=False)
     _ability_runner: AbilityRunnerConfig = field(init=False)
+    _project: ProjectConfig = field(init=False)
+    _recovery: RecoveryConfig = field(init=False)
 
     def __post_init__(
         self,
@@ -192,6 +234,8 @@ class SubjectConfig:
         manifest_slice: ManifestConfig | None,
         hitl_slice: HITLPolicyConfig | None,
         ability_runner_slice: AbilityRunnerConfig | None,
+        project_slice: ProjectConfig | None,
+        recovery_slice: RecoveryConfig | None,
     ) -> None:
         self._persistence = persistence_slice or PersistenceConfig(db_path=self.db_path)
         self._sandbox = sandbox_slice or SandboxUnitConfig(
@@ -203,6 +247,16 @@ class SubjectConfig:
         self._ability_runner = ability_runner_slice or AbilityRunnerConfig(
             hitl_timeout=self.core.command_timeout,
         )
+        # project slice：default_workspace_locator 为空时派生自 sandbox.workspace_root
+        # + "/projects/default"（flat 兼容真相）。
+        self._project = project_slice or ProjectConfig(
+            default_workspace_locator=(
+                ""
+                if not self._sandbox.workspace_root
+                else self._sandbox.workspace_root.rstrip("/") + "/projects/default"
+            ),
+        )
+        self._recovery = recovery_slice or RecoveryConfig()
 
     # ── 只读 slice property（非 Optional，mypy strict 友好）──
 
@@ -226,6 +280,14 @@ class SubjectConfig:
     def ability_runner(self) -> AbilityRunnerConfig:
         return self._ability_runner
 
+    @property
+    def project(self) -> ProjectConfig:
+        return self._project
+
+    @property
+    def recovery(self) -> RecoveryConfig:
+        return self._recovery
+
     @classmethod
     def from_env(cls) -> SubjectConfig:
         """从环境变量创建配置。
@@ -236,11 +298,18 @@ class SubjectConfig:
         嵌套配置使用双下划线分隔：
         例如：GHRAH_SUBJECT_CORE_URL, GHRAH_SUBJECT_HITL_POLICY_WORKSPACE_ROOT
 
-        S2.0 新增：
         - GHRAH_SUBJECT_SANDBOX_DEFAULT_TIMEOUT（回退 GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT）
         - GHRAH_SUBJECT_ABILITY_HITL_TIMEOUT（回退 GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT）
         - GHRAH_SUBJECT_TRANSPORT_CORE_KIND / GHRAH_SUBJECT_TRANSPORT_OBSERVER_KIND
         - GHRAH_SUBJECT_ENABLED_UNITS（逗号分隔，第三方 Unit allowlist）
+        - GHRAH_SUBJECT_PROJECT_DEFAULT_WORKSPACE_LOCATOR
+          （空→派生自 sandbox.workspace_root + "/projects/default"）
+        - GHRAH_SUBJECT_PROJECT_DEFAULT_DB_PATH_TEMPLATE
+        - GHRAH_SUBJECT_RECOVERY_ENABLED
+        - GHRAH_SUBJECT_RECOVERY_SUBJECT_ID
+        - GHRAH_SUBJECT_RECOVERY_ON_UNKNOWN_WORKSPACE（resume|pause|drop）
+        - GHRAH_SUBJECT_RECOVERY_RECONCILE_ON_START
+        - GHRAH_SUBJECT_RECOVERY_BOOTSTRAP_DEFAULT_PROJECT
         """
         hitl_policy = HITLPolicyConfig(
             auto_approve_abilities=os.environ.get(
@@ -322,6 +391,47 @@ class SubjectConfig:
             "GHRAH_SUBJECT_WORKSPACE_ROOT", os.path.expanduser("~/ghrah-workspace")
         )
 
+        # project slice：default_workspace_locator 空时由 __post_init__ 派生。
+        project_default_workspace_locator = os.environ.get(
+            "GHRAH_SUBJECT_PROJECT_DEFAULT_WORKSPACE_LOCATOR", ""
+        )
+        project_default_db_path_template = os.environ.get(
+            "GHRAH_SUBJECT_PROJECT_DEFAULT_DB_PATH_TEMPLATE",
+            "~/.ghrah/projects/{project_id}.db",
+        )
+        project_slice = ProjectConfig(
+            default_workspace_locator=project_default_workspace_locator,
+            default_db_path_template=project_default_db_path_template,
+        )
+
+        # recovery slice
+        _on_unknown_raw = os.environ.get(
+            "GHRAH_SUBJECT_RECOVERY_ON_UNKNOWN_WORKSPACE", "pause"
+        ).lower()
+        try:
+            on_unknown_workspace = RecoveryAction(_on_unknown_raw)
+        except ValueError:
+            logger.warning(
+                "Invalid RecoveryAction for "
+                "GHRAH_SUBJECT_RECOVERY_ON_UNKNOWN_WORKSPACE=%r, using default PAUSE",
+                _on_unknown_raw,
+            )
+            on_unknown_workspace = RecoveryAction.PAUSE
+        recovery_slice = RecoveryConfig(
+            enabled=os.environ.get("GHRAH_SUBJECT_RECOVERY_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            subject_id=os.environ.get("GHRAH_SUBJECT_RECOVERY_SUBJECT_ID", "default"),
+            on_unknown_workspace=on_unknown_workspace,
+            reconcile_on_start=os.environ.get(
+                "GHRAH_SUBJECT_RECOVERY_RECONCILE_ON_START", "true"
+            ).lower()
+            in ("true", "1", "yes"),
+            bootstrap_default_project=os.environ.get(
+                "GHRAH_SUBJECT_RECOVERY_BOOTSTRAP_DEFAULT_PROJECT", "true"
+            ).lower()
+            in ("true", "1", "yes"),
+        )
+
         return cls(
             workspace_root=workspace_root,
             db_path=os.environ.get(
@@ -341,6 +451,8 @@ class SubjectConfig:
             ability_runner_slice=AbilityRunnerConfig(hitl_timeout=ability_hitl_timeout),
             transport=transport,
             enabled_third_party_units=enabled_third_party_units,
+            project_slice=project_slice,
+            recovery_slice=recovery_slice,
         )
 
 
