@@ -8,7 +8,7 @@ WorkspaceRecord 是 workspace 的持久化主键身份与定位信息，与物�
 - 身份/定位/时间戳在此模型；
 - 物理 git/plain/NFS/数据表后端的 init/adopt/status/destroy 由 provider 分派。
 
-按计划 §2.1：WorkspaceRecord 不持 project_id——project 与 workspace 的 1:N
+WorkspaceRecord 不持 project_id——project 与 workspace 的 1:N
 挂载关系由 ProjectRecord.workspaces 表达（Stage B），本注册表对 project 无感知。
 
 locator 用 URI 形态（MVP 仅 file:///abs/path），不假设文件系统：非文件系统后端

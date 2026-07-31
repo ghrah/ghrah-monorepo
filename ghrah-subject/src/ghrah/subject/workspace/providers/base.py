@@ -4,7 +4,7 @@
 
 """WorkspaceProvider 抽象基类 + 能力位 + 窄化版本接口。
 
-按计划 §2.2：跨 git / plain / 其他 VCS / NFS / 数据表的公共分母只有
+跨 git / plain / 其他 VCS / NFS / 数据表的公共分母只有
 身份、定位、初始化、认领、状态、销毁。版本控制能力（snapshot/rollback/diff）
 是 git 特有能力，**不进基类签名**，经 :class:`WorkspaceCaps` capability 位 +
 :class:`VersionedWorkspaceProvider` 窄化接口暴露。

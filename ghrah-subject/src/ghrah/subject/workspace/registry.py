@@ -4,7 +4,6 @@
 
 """ProviderRegistry：provider 注册表 + detect 反查。
 
-按计划 §2.3：
     register(provider_cls)  # 注册 provider 类型
     get(provider_type)      # 取 provider 实例（未注册 → 清晰报错）
     detect(locator)          # adopt 反查：先看 marker.provider_type，否则探测规则

@@ -4,7 +4,7 @@
 
 """PlainWorkspaceProvider：无版本能力的纯目录后端。
 
-按计划 §2.5：provider_type="plain"，capabilities=FILESYSTEM_BACKED（无版本能力）。
+provider_type="plain"，capabilities=FILESYSTEM_BACKED（无版本能力）。
 init: mkdir -p + 写 marker；status: 存在性 + 可写性；destroy: 递归删除。
 用途：数据目录、构建产物目录、不需要版本能力的工作区。
 """

@@ -4,7 +4,7 @@
 
 """结构化 workspace marker 读写（.ghrah-workspace）。
 
-按计划 §2.6：从一行注释升级为 JSON，认领校验三要素
+从一行注释升级为 JSON，认领校验三要素
 （workspace_id / provider_type / subject_id）。
 
 marker 内容：

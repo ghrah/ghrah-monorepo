@@ -4,7 +4,7 @@
 
 """GitWorkspaceProvider：迁移自 AgentWorkspace 的 git 后端。
 
-按计划 §2.4：provider_type="git"，capabilities = FILESYSTEM_BACKED | SNAPSHOT |
+provider_type="git"，capabilities = FILESYSTEM_BACKED | SNAPSHOT |
 ROLLBACK | DIFF，实现 VersionedWorkspaceProvider。现有 AgentWorkspace 的全部 git
 逻辑（git init/config/add/commit、snapshot=commit、diff、rollback=checkout、status、
 list_snapshots）平移为 provider 方法，仍经 SandboxExecutor 执行 git 命令。

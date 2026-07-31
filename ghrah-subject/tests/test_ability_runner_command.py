@@ -243,7 +243,7 @@ class TestAbilityRunnerWorkingDir:
         assert "working_dir" not in result
 
     def test_dot_resolves_to_workspace_root_not_pwd(self) -> None:
-        """`.` 解析到 agent 默认 workspace 根，不泄漏进程 $PWD（计划 §2.8）。
+        """`.` 解析到 agent 默认 workspace 根，不泄漏进程 $PWD。
 
         针对 Subject/ghrah-core 能力栈：execute_command 的 working_dir="." 经
         统一解析入口 resolve_relative_path 落到 /workspace/agent1，而非 $PWD。

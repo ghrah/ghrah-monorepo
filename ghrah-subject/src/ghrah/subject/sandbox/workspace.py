@@ -4,7 +4,6 @@
 
 """兼容 re-export 层 + WorkspaceManager 重构（W5）。
 
-按计划 §三/§2.7：
 - ``AgentWorkspace`` / ``WorkspaceStatus`` / ``SnapshotError`` / ``SnapshotInfo``
   保留旧 API 表面作为兼容桥，实际 git 实现平移至 GitWorkspaceProvider。
 - ``WorkspaceManager`` 重构为 workspace_id 键控 + ProviderRegistry + WorkspaceStore

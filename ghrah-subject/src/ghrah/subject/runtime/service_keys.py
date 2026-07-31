@@ -67,7 +67,7 @@ class SubjectServiceKey(Generic[T]):
 class WorkspaceService(Protocol):
     """Workspace contract required by runtime units.
 
-    旧名作桥、新名叠加（计划 §2.7）：
+    旧名作桥、新名叠加：
     - ``resolve_agent_path`` 保留为兼容桥（现有生产调用方零改动）；
     - ``resolve_agent_default_path`` 新名叠加，语义对齐旧名但以 WorkspaceRecord 取向，
       是 Stage B agent active workspace 切换的对接点；
