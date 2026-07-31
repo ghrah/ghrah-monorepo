@@ -149,6 +149,25 @@ class CommandType(StrEnum):
     TASK_GET = "task_get"
     TASK_DELETE = "task_delete"
 
+    # ─── Project 管理类（Observer → Subject，13 个）───
+    PROJECT_CREATE = "project_create"
+    PROJECT_UPDATE = "project_update"
+    PROJECT_LIST = "project_list"
+    PROJECT_GET = "project_get"
+    PROJECT_DELETE = "project_delete"
+    PROJECT_ADD_AGENT = "project_add_agent"
+    PROJECT_REMOVE_AGENT = "project_remove_agent"
+    PROJECT_LINK_TASK = "project_link_task"
+    PROJECT_UNLINK_TASK = "project_unlink_task"
+    PROJECT_SET_RECOVERY = "project_set_recovery"
+    PROJECT_PAUSE = "project_pause"
+    PROJECT_RESUME = "project_resume"
+    PROJECT_STOP = "project_stop"
+
+    # ─── 恢复类（Observer → Subject，2 个）───
+    RECONCILE_NOW = "reconcile_now"
+    RECONCILE_STATUS = "reconcile_status"
+
 
 class EventType(StrEnum):
     """事件类型。
@@ -197,6 +216,21 @@ class EventType(StrEnum):
     TASK_CANCELED = "task_canceled"
     TASK_BLOCKED = "task_blocked"
     TASK_DELETED = "task_deleted"
+
+    # ─── Project 事件（Subject → Observer，9 个）───
+    PROJECT_CREATED = "project_created"
+    PROJECT_UPDATED = "project_updated"
+    PROJECT_DELETED = "project_deleted"
+    PROJECT_PAUSED = "project_paused"
+    PROJECT_RESUMED = "project_resumed"
+    PROJECT_STOPPED = "project_stopped"
+    PROJECT_AGENT_ADDED = "project_agent_added"
+    PROJECT_AGENT_REMOVED = "project_agent_removed"
+    PROJECT_RECOVERY_SET = "project_recovery_set"
+
+    # ─── 恢复事件（Subject → Observer，2 个）───
+    SUBJECT_RECONCILED = "subject_reconciled"
+    RECONCILE_FAILED = "reconcile_failed"
 
 
 class TaskStatus(StrEnum):
@@ -318,6 +352,47 @@ TASK_COMMANDS: frozenset[str] = frozenset({
     CommandType.TASK_GET.value,
     CommandType.TASK_DELETE.value,
 })
+
+PROJECT_COMMANDS: frozenset[str] = frozenset({
+    CommandType.PROJECT_CREATE.value,
+    CommandType.PROJECT_UPDATE.value,
+    CommandType.PROJECT_LIST.value,
+    CommandType.PROJECT_GET.value,
+    CommandType.PROJECT_DELETE.value,
+    CommandType.PROJECT_ADD_AGENT.value,
+    CommandType.PROJECT_REMOVE_AGENT.value,
+    CommandType.PROJECT_LINK_TASK.value,
+    CommandType.PROJECT_UNLINK_TASK.value,
+    CommandType.PROJECT_SET_RECOVERY.value,
+    CommandType.PROJECT_PAUSE.value,
+    CommandType.PROJECT_RESUME.value,
+    CommandType.PROJECT_STOP.value,
+})
+
+RECONCILE_COMMANDS: frozenset[str] = frozenset({
+    CommandType.RECONCILE_NOW.value,
+    CommandType.RECONCILE_STATUS.value,
+})
+
+
+# ─── Project 附属枚举 ───
+
+
+class ProjectStatus(StrEnum):
+    """Project lifecycle state（与 ghrah-subject project/models.py 对齐）。"""
+
+    ACTIVE = "active"
+    PAUSED = "paused"
+    STOPPED = "stopped"
+    FAILED = "failed"
+
+
+class RecoveryAction(StrEnum):
+    """恢复动作（on_restart 取值 / reconcile 未知 workspace 处理）。"""
+
+    RESUME = "resume"
+    PAUSE = "pause"
+    DROP = "drop"
 
 
 # ─── 命令载荷模型 ───
@@ -874,6 +949,7 @@ class TaskInfoPayload(BaseModel):
     """Task 信息载荷，用于 task 命令结果和事件。"""
 
     task_id: str
+    project_id: str
     title: str
     description: str = ""
     agent_name: str | None = None
@@ -894,6 +970,7 @@ class TaskCreatePayload(BaseModel):
     """task_create 命令载荷。"""
 
     title: str
+    project_id: str
     description: str = ""
     agent_name: str | None = None
     priority: TaskPriority = TaskPriority.NORMAL
@@ -962,6 +1039,7 @@ class TaskListPayload(BaseModel):
     agent_name: str | None = None
     status: TaskStatus | list[TaskStatus] | None = None
     parent_id: str | None = None
+    project_id: str | None = None
     include_terminal: bool = True
     limit: int = 100
 
@@ -985,6 +1063,191 @@ class TaskEventPayload(BaseModel):
     task: TaskInfoPayload
     previous_status: TaskStatus | None = None
     reason: str | None = None
+
+
+# ─── Project 载荷模型 ───
+
+
+class PathGrantSchema(BaseModel):
+    """Agent 对某 workspace 子路径的访问授权。"""
+
+    workspace_id: str
+    subpath: str = "."
+
+
+class WorkspaceMountSchema(BaseModel):
+    """Project 挂载的 workspace（对齐 ghrah-subject project/models.WorkspaceMount）。"""
+
+    workspace_id: str
+    role: str | None = None
+    default_for_agents: bool = False
+
+
+class AgentSpecSchema(BaseModel):
+    """Project 内 agent desired-state 摘要。"""
+
+    name: str
+    cluster_id: str
+    manifest_ref: str = ""
+    instance_manifest_path: str = ""
+    system_prompt: str = ""
+    abilities: list[str] | None = None
+    path_grants: list[PathGrantSchema] = Field(default_factory=list)
+
+
+class ProjectInfoPayload(BaseModel):
+    """Project 信息基类载荷。
+
+    对齐 ghrah-subject project/models.ProjectRecord，用于 project_get/project_list
+    结果项及 PROJECT_* 事件回执。version/deleted_at/cluster_ids/workspaces/
+    db_path 为 ProjectRecord 全量字段；命令 payload 子类按需复用并追加入参字段。
+    """
+
+    project_id: str
+    name: str
+    manifest_ref: str = ""
+    instance_manifest_dir: str = ""
+    cluster_ids: list[str] = Field(default_factory=list)
+    workspaces: list[WorkspaceMountSchema] = Field(default_factory=list)
+    db_path: str = ""
+    agents: list[AgentSpecSchema] = Field(default_factory=list)
+    task_ids: list[str] = Field(default_factory=list)
+    status: ProjectStatus = ProjectStatus.ACTIVE
+    recovery: str = RecoveryAction.RESUME.value
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+    deleted_at: str | None = None
+
+
+class ProjectCreatePayload(BaseModel):
+    """project_create 命令载荷。"""
+
+    name: str
+    manifest_ref: str = ""
+    default_workspace_locator: str = ""
+    default_workspace_name: str = ""
+    instance_manifest_dir: str = ".ghrah/agents"
+    recovery: str = RecoveryAction.RESUME.value
+
+
+class ProjectUpdatePayload(BaseModel):
+    """project_update 命令载荷（乐观锁）。"""
+
+    project_id: str
+    name: str | None = None
+    manifest_ref: str | None = None
+    instance_manifest_dir: str | None = None
+    expected_version: int | None = None
+
+
+class ProjectIdPayload(BaseModel):
+    """project_get / project_delete / project_pause / project_resume /
+    project_stop 命令载荷（project_id 键控）。"""
+
+    project_id: str
+
+
+class ProjectDeletePayload(ProjectIdPayload):
+    """project_delete 命令载荷。"""
+
+    force: bool = False
+
+
+class ProjectListPayload(BaseModel):
+    """project_list 命令载荷（可选 status 过滤；MVP 不分页）。"""
+
+    status: ProjectStatus | None = None
+    include_deleted: bool = False
+
+
+class ProjectAddAgentPayload(BaseModel):
+    """project_add_agent 命令载荷。"""
+
+    project_id: str
+    agent: AgentSpecSchema
+    expected_version: int | None = None
+
+
+class ProjectRemoveAgentPayload(BaseModel):
+    """project_remove_agent 命令载荷。"""
+
+    project_id: str
+    agent_name: str
+    expected_version: int | None = None
+
+
+class ProjectLinkTaskPayload(BaseModel):
+    """project_link_task 命令载荷。"""
+
+    project_id: str
+    task_id: str
+    expected_version: int | None = None
+
+
+class ProjectUnlinkTaskPayload(BaseModel):
+    """project_unlink_task 命令载荷。"""
+
+    project_id: str
+    task_id: str
+    expected_version: int | None = None
+
+
+class ProjectSetRecoveryPayload(ProjectIdPayload):
+    """project_set_recovery 命令载荷。"""
+
+    recovery: RecoveryAction = RecoveryAction.RESUME
+    expected_version: int | None = None
+
+
+class ProjectListResultPayload(BaseModel):
+    """project_list 命令结果载荷。"""
+
+    projects: list[ProjectInfoPayload] = Field(default_factory=list)
+    count: int = 0
+
+
+class ReconcileNowPayload(BaseModel):
+    """reconcile_now 命令载荷（触发一次 reconcile）。"""
+
+    subject_id: str = "default"
+
+
+class ReconcileStatusPayload(BaseModel):
+    """reconcile_status 命令载荷（查询最近一次 reconcile 报告）。"""
+
+    subject_id: str = "default"
+
+
+# ─── Project 事件载荷模型 ───
+
+
+class ProjectEventPayload(BaseModel):
+    """project_* 事件载荷（created/updated/deleted/paused/resumed/stopped/
+    recovery_set 通用基类）。
+
+    携带变更后全量 ProjectInfoPayload 快照，Observer 据此更新本地 store。
+    """
+
+    project: ProjectInfoPayload
+
+
+class ProjectAgentEventPayload(BaseModel):
+    """project_agent_added / project_agent_removed 事件载荷。"""
+
+    project: ProjectInfoPayload
+    agent_name: str
+
+
+class ReconcileReportPayload(BaseModel):
+    """subject_reconciled / reconcile_failed 事件载荷（reconcile 报告摘要）。"""
+
+    subject_id: str
+    success: bool
+    projects_reconciled: int = 0
+    agents_spawned: int = 0
+    workspaces_adopted: int = 0
+    errors: list[str] = Field(default_factory=list)
 
 
 # ─── Session 事件载荷模型 ───
@@ -1195,6 +1458,23 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     CommandType.SESSION_LIST: SessionListPayload,
     CommandType.SESSION_ARCHIVE: SessionArchivePayload,
     CommandType.SESSION_DELETE: SessionDeletePayload,
+    # Project 管理（13 个）
+    CommandType.PROJECT_CREATE: ProjectCreatePayload,
+    CommandType.PROJECT_UPDATE: ProjectUpdatePayload,
+    CommandType.PROJECT_LIST: ProjectListPayload,
+    CommandType.PROJECT_GET: ProjectIdPayload,
+    CommandType.PROJECT_DELETE: ProjectDeletePayload,
+    CommandType.PROJECT_ADD_AGENT: ProjectAddAgentPayload,
+    CommandType.PROJECT_REMOVE_AGENT: ProjectRemoveAgentPayload,
+    CommandType.PROJECT_LINK_TASK: ProjectLinkTaskPayload,
+    CommandType.PROJECT_UNLINK_TASK: ProjectUnlinkTaskPayload,
+    CommandType.PROJECT_SET_RECOVERY: ProjectSetRecoveryPayload,
+    CommandType.PROJECT_PAUSE: ProjectIdPayload,
+    CommandType.PROJECT_RESUME: ProjectIdPayload,
+    CommandType.PROJECT_STOP: ProjectIdPayload,
+    # 恢复（2 个）
+    CommandType.RECONCILE_NOW: ReconcileNowPayload,
+    CommandType.RECONCILE_STATUS: ReconcileStatusPayload,
 }
 
 EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
@@ -1232,6 +1512,19 @@ EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
     EventType.MANIFEST_AGENT_CREATED: ManifestAgentEventPayload,
     EventType.MANIFEST_AGENT_UPDATED: ManifestAgentEventPayload,
     EventType.MANIFEST_AGENT_DELETED: ManifestAgentEventPayload,
+    # Project 事件（9 个）
+    EventType.PROJECT_CREATED: ProjectEventPayload,
+    EventType.PROJECT_UPDATED: ProjectEventPayload,
+    EventType.PROJECT_DELETED: ProjectEventPayload,
+    EventType.PROJECT_PAUSED: ProjectEventPayload,
+    EventType.PROJECT_RESUMED: ProjectEventPayload,
+    EventType.PROJECT_STOPPED: ProjectEventPayload,
+    EventType.PROJECT_AGENT_ADDED: ProjectAgentEventPayload,
+    EventType.PROJECT_AGENT_REMOVED: ProjectAgentEventPayload,
+    EventType.PROJECT_RECOVERY_SET: ProjectEventPayload,
+    # 恢复事件（2 个）
+    EventType.SUBJECT_RECONCILED: ReconcileReportPayload,
+    EventType.RECONCILE_FAILED: ReconcileReportPayload,
 }
 
 PAYLOAD_MAP: dict[str, type[BaseModel]] = {
