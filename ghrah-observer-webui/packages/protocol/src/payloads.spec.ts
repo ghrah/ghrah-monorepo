@@ -48,6 +48,9 @@ import {
   WorkspaceCreatedPayloadSchema,
   WorkspaceDestroyedPayloadSchema,
   WorkspaceDiffPayloadSchema,
+  WorkspaceGetPayloadSchema,
+  WorkspaceListPayloadSchema,
+  WorkspaceRegisterPayloadSchema,
   WorkspaceRollbackPayloadSchema,
   WorkspaceRolledBackPayloadSchema,
   WorkspaceSnapshotCreatedPayloadSchema,
@@ -422,6 +425,39 @@ describe("Workspace command payload schemas", () => {
   it("WorkspaceStatusPayloadSchema", () => {
     const result = WorkspaceStatusPayloadSchema.parse({ agent_name: "agent-1" });
     expect(result.agent_name).toBe("agent-1");
+  });
+
+  it("WorkspaceRegisterPayloadSchema with provider_type", () => {
+    const result = WorkspaceRegisterPayloadSchema.parse({
+      locator: "file:///tmp/agent-1",
+      name: "agent-1",
+      provider_type: "git",
+    });
+    expect(result.locator).toBe("file:///tmp/agent-1");
+    expect(result.provider_type).toBe("git");
+  });
+
+  it("WorkspaceRegisterPayloadSchema defaults name and optional provider_type", () => {
+    const result = WorkspaceRegisterPayloadSchema.parse({
+      locator: "file:///tmp/data",
+    });
+    expect(result.name).toBe("");
+    expect(result.provider_type).toBeUndefined();
+  });
+
+  it("WorkspaceGetPayloadSchema", () => {
+    const result = WorkspaceGetPayloadSchema.parse({ workspace_id: "wid-001" });
+    expect(result.workspace_id).toBe("wid-001");
+  });
+
+  it("WorkspaceListPayloadSchema defaults to undefined filter", () => {
+    const result = WorkspaceListPayloadSchema.parse({});
+    expect(result.provider_type).toBeUndefined();
+  });
+
+  it("WorkspaceListPayloadSchema with provider_type filter", () => {
+    const result = WorkspaceListPayloadSchema.parse({ provider_type: "git" });
+    expect(result.provider_type).toBe("git");
   });
 });
 

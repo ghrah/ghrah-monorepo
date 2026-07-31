@@ -57,6 +57,9 @@ describe("CommandType", () => {
     "workspace_rollback",
     "workspace_diff",
     "workspace_status",
+    "workspace_register",
+    "workspace_get",
+    "workspace_list",
     "manifest_list_abilities",
     "manifest_get_ability",
     "manifest_put_ability",
@@ -69,7 +72,7 @@ describe("CommandType", () => {
     "manifest_validate",
   ]);
 
-  it("has exactly 38 values matching Python CommandType", () => {
+  it("has exactly 41 values matching Python CommandType", () => {
     const tsValues = new Set(Object.values(CommandType));
     expect(tsValues).toEqual(PYTHON_COMMAND_VALUES);
   });
@@ -171,9 +174,12 @@ describe("WORKSPACE_COMMANDS", () => {
     "workspace_rollback",
     "workspace_diff",
     "workspace_status",
+    "workspace_register",
+    "workspace_get",
+    "workspace_list",
   ]);
 
-  it("contains exactly 6 workspace command values", () => {
+  it("contains exactly 9 workspace command values", () => {
     expect(WORKSPACE_COMMANDS).toEqual(PYTHON_WORKSPACE);
   });
 });

@@ -156,6 +156,20 @@ export const WorkspaceStatusPayloadSchema = z.object({
   agent_name: z.string(),
 });
 
+export const WorkspaceRegisterPayloadSchema = z.object({
+  locator: z.string(),
+  name: z.string().optional().default(""),
+  provider_type: z.string().nullable().optional(),
+});
+
+export const WorkspaceGetPayloadSchema = z.object({
+  workspace_id: z.string(),
+});
+
+export const WorkspaceListPayloadSchema = z.object({
+  provider_type: z.string().nullable().optional(),
+});
+
 export const AgentSpawnedPayloadSchema = z.object({
   name: z.string(),
   config: AgentConfigPayloadSchema,
@@ -403,6 +417,9 @@ export type WorkspaceSnapshotPayload = z.infer<typeof WorkspaceSnapshotPayloadSc
 export type WorkspaceRollbackPayload = z.infer<typeof WorkspaceRollbackPayloadSchema>;
 export type WorkspaceDiffPayload = z.infer<typeof WorkspaceDiffPayloadSchema>;
 export type WorkspaceStatusPayload = z.infer<typeof WorkspaceStatusPayloadSchema>;
+export type WorkspaceRegisterPayload = z.infer<typeof WorkspaceRegisterPayloadSchema>;
+export type WorkspaceGetPayload = z.infer<typeof WorkspaceGetPayloadSchema>;
+export type WorkspaceListPayload = z.infer<typeof WorkspaceListPayloadSchema>;
 export type AgentSpawnedPayload = z.infer<typeof AgentSpawnedPayloadSchema>;
 export type AgentTerminatedPayload = z.infer<typeof AgentTerminatedPayloadSchema>;
 export type AgentResponsePayload = z.infer<typeof AgentResponsePayloadSchema>;

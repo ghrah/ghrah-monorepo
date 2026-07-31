@@ -1,0 +1,5 @@
+{
+  "locator": "file:///tmp/agent-1",
+  "name": "agent-1",
+  "provider_type": "git"
+}

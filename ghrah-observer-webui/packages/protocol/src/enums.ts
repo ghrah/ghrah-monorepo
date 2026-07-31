@@ -44,6 +44,9 @@ export enum CommandType {
   WORKSPACE_ROLLBACK = "workspace_rollback",
   WORKSPACE_DIFF = "workspace_diff",
   WORKSPACE_STATUS = "workspace_status",
+  WORKSPACE_REGISTER = "workspace_register",
+  WORKSPACE_GET = "workspace_get",
+  WORKSPACE_LIST = "workspace_list",
 
   MANIFEST_LIST_ABILITIES = "manifest_list_abilities",
   MANIFEST_GET_ABILITY = "manifest_get_ability",
@@ -123,6 +126,9 @@ export const WORKSPACE_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.WORKSPACE_ROLLBACK,
   CommandType.WORKSPACE_DIFF,
   CommandType.WORKSPACE_STATUS,
+  CommandType.WORKSPACE_REGISTER,
+  CommandType.WORKSPACE_GET,
+  CommandType.WORKSPACE_LIST,
 ]);
 
 export const MANIFEST_COMMANDS: ReadonlySet<string> = new Set([
