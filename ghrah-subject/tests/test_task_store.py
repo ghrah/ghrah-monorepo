@@ -27,6 +27,7 @@ def _make(
     *,
     task_id: str = "0" * 32,
     title: str = "T",
+    project_id: str = "proj-1",
     status: TaskStatus = TaskStatus.PENDING,
     priority: TaskPriority = TaskPriority.NORMAL,
     agent_name: str | None = None,
@@ -39,6 +40,7 @@ def _make(
     now = datetime.now(UTC)
     return TaskRecord(
         task_id=task_id,
+        project_id=project_id,
         title=title,
         status=status,
         priority=priority,
@@ -58,7 +60,7 @@ def _make(
 
 class TestCrudAndRoundtrip:
     async def test_upsert_and_get(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         got = await store.get(record.task_id)
         assert got is not None
@@ -69,7 +71,7 @@ class TestCrudAndRoundtrip:
         assert await store.get("nonexistent") is None
 
     async def test_exists_true_false(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         assert await store.exists(record.task_id) is True
         assert await store.exists("nonexistent") is False
@@ -119,7 +121,7 @@ class TestCrudAndRoundtrip:
 
 class TestOptimisticLock:
     async def test_update_success_bumps_version(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
 
         def _bump(r: TaskRecord) -> TaskRecord:
@@ -136,7 +138,7 @@ class TestOptimisticLock:
         assert got.version == 2
 
     async def test_update_stale_version_raises(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
 
         def _noop(r: TaskRecord) -> TaskRecord:
@@ -149,7 +151,7 @@ class TestOptimisticLock:
     async def test_update_expected_version_none_skips_check(
         self, store: TaskStore
     ) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
 
         def _bump(r: TaskRecord) -> TaskRecord:
@@ -172,7 +174,7 @@ class TestOptimisticLock:
         )
 
     async def test_update_mutator_applied(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
 
         def _change(r: TaskRecord) -> TaskRecord:
@@ -188,7 +190,7 @@ class TestOptimisticLock:
     async def test_update_reads_raw_row_including_deleted(
         self, store: TaskStore
     ) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         assert await store.soft_delete(record.task_id) is True
 
@@ -210,19 +212,19 @@ class TestOptimisticLock:
 
 class TestSoftDelete:
     async def test_soft_delete_returns_true_then_false(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         assert await store.soft_delete(record.task_id) is True
         assert await store.soft_delete(record.task_id) is False
 
     async def test_get_excludes_deleted_default(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         assert await store.soft_delete(record.task_id) is True
         assert await store.get(record.task_id) is None
 
     async def test_get_include_deleted_returns_record(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         assert await store.soft_delete(record.task_id) is True
         got = await store.get(record.task_id, include_deleted=True)
@@ -230,14 +232,14 @@ class TestSoftDelete:
         assert got.deleted_at is not None
 
     async def test_list_excludes_deleted_default(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         assert await store.soft_delete(record.task_id) is True
         result = await store.list()
         assert result == []
 
     async def test_list_include_deleted(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         assert await store.soft_delete(record.task_id) is True
         result = await store.list(include_deleted=True, include_terminal=True)
@@ -245,14 +247,14 @@ class TestSoftDelete:
         assert result[0].deleted_at is not None
 
     async def test_exists_excludes_deleted_default(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         assert await store.soft_delete(record.task_id) is True
         assert await store.exists(record.task_id) is False
         assert await store.exists(record.task_id, include_deleted=True) is True
 
     async def test_soft_delete_bumps_version(self, store: TaskStore) -> None:
-        record = make_task_record(title="T")
+        record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         assert await store.soft_delete(record.task_id) is True
         got = await store.get(record.task_id, include_deleted=True)
@@ -329,6 +331,25 @@ class TestListFilters:
 
     async def test_list_empty(self, store: TaskStore) -> None:
         assert await store.list() == []
+
+    async def test_list_by_project_id(self, store: TaskStore) -> None:
+        await store.upsert(_make(task_id="a" * 32, title="A", project_id="proj-1"))
+        await store.upsert(_make(task_id="b" * 32, title="B", project_id="proj-2"))
+        await store.upsert(_make(task_id="c" * 32, title="C", project_id="proj-1"))
+        result = await store.list(project_id="proj-1", include_terminal=True)
+        assert {r.task_id[0] for r in result} == {"a", "c"}
+        result2 = await store.list(project_id="proj-2", include_terminal=True)
+        assert {r.task_id[0] for r in result2} == {"b"}
+
+    async def test_list_project_id_excludes_sentinel(self, store: TaskStore) -> None:
+        # sentinel 行（project_id=''）不应被任何真实 project_id 过滤命中
+        await store.upsert(_make(task_id="s" * 32, title="S", project_id=""))
+        await store.upsert(_make(task_id="a" * 32, title="A", project_id="proj-1"))
+        result = await store.list(project_id="proj-1", include_terminal=True)
+        assert {r.task_id[0] for r in result} == {"a"}
+        # 无过滤时 sentinel 行可见
+        all_result = await store.list(include_terminal=True)
+        assert {r.task_id[0] for r in all_result} == {"s", "a"}
 
 
 # ─── E. count_dependents 子串防护（验证门）───
@@ -455,5 +476,73 @@ class TestReopenPersistence:
             assert got is not None
             assert got.title == "T"
             assert got.status == TaskStatus.PENDING
+        finally:
+            await s2.stop()
+
+
+# ─── G. project_id 列迁移（旧库无该列）───
+
+
+class TestProjectIdMigration:
+    async def test_migrates_old_db_without_project_id_column(
+        self, tmp_path: Path
+    ) -> None:
+        """旧库（无 project_id 列）经 start() 迁移后可正常读写，旧行落 sentinel。"""
+        import aiosqlite
+
+        db_path = tmp_path / "tasks.db"
+        # 模拟旧库：手动建无 project_id 列的表并插入一行
+        async with aiosqlite.connect(str(db_path)) as db:
+            await db.execute(
+                "CREATE TABLE subject_tasks ("
+                "task_id TEXT PRIMARY KEY, title TEXT NOT NULL, "
+                "description TEXT NOT NULL DEFAULT '', agent_name TEXT, "
+                "status TEXT NOT NULL, priority TEXT NOT NULL, parent_id TEXT, "
+                "dependencies TEXT NOT NULL DEFAULT '[]', result TEXT, error TEXT, "
+                "created_at TEXT NOT NULL, updated_at TEXT NOT NULL, started_at TEXT, "
+                "completed_at TEXT, metadata TEXT NOT NULL DEFAULT '{}', "
+                "version INTEGER NOT NULL DEFAULT 1, deleted_at TEXT)"
+            )
+            await db.execute(
+                "INSERT INTO subject_tasks (task_id, title, status, priority, "
+                "dependencies, metadata, created_at, updated_at, version) "
+                "VALUES (?, 'Old', 'pending', 'normal', '[]', '{}', "
+                "'2025-01-01T00:00:00+00:00', '2025-01-01T00:00:00+00:00', 1)",
+                ("d" * 32,),
+            )
+            await db.commit()
+
+        # start() 触发迁移
+        s = TaskStore(db_path)
+        await s.start()
+        try:
+            got = await s.get("d" * 32, include_deleted=True)
+            assert got is not None
+            assert got.title == "Old"
+            # 旧行 project_id 落 sentinel ''
+            assert got.project_id == ""
+            # 新写入正常
+            new_rec = _make(task_id="a" * 32, title="New", project_id="proj-1")
+            await s.upsert(new_rec)
+            got_new = await s.get("a" * 32)
+            assert got_new is not None
+            assert got_new.project_id == "proj-1"
+        finally:
+            await s.stop()
+
+    async def test_migration_idempotent(self, tmp_path: Path) -> None:
+        """对已含 project_id 列的库再 start 不报错。"""
+        db_path = tmp_path / "tasks.db"
+        s = TaskStore(db_path)
+        await s.start()
+        await s.upsert(_make(task_id="a" * 32, title="A", project_id="proj-1"))
+        await s.stop()
+        # 二次 start：列已存在，ALTER 不重复执行
+        s2 = TaskStore(db_path)
+        await s2.start()
+        try:
+            got = await s2.get("a" * 32)
+            assert got is not None
+            assert got.project_id == "proj-1"
         finally:
             await s2.stop()

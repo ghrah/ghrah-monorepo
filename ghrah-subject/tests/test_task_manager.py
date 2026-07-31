@@ -47,12 +47,13 @@ async def _create(
     manager: TaskManager,
     *,
     title: str = "T",
+    project_id: str = "proj-1",
     agent_name: str | None = None,
     parent_id: str | None = None,
     dependencies: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload: dict[str, Any] = {"title": title}
+    payload: dict[str, Any] = {"title": title, "project_id": project_id}
     if agent_name is not None:
         payload["agent_name"] = agent_name
     if parent_id is not None:
@@ -95,9 +96,34 @@ class TestCreate:
         self, manager: tuple[TaskManager, list]
     ) -> None:
         m, _ = manager
-        result = await m.handle_command("task_create", {"title": "   "})
+        result = await m.handle_command("task_create", {"title": "   ", "project_id": "proj-1"})
         assert not result["success"]
         assert "title" in result["error"]
+
+    async def test_create_missing_project_id_rejected(
+        self, manager: tuple[TaskManager, list]
+    ) -> None:
+        m, _ = manager
+        result = await m.handle_command("task_create", {"title": "t"})
+        assert not result["success"]
+        assert "project_id" in result["error"]
+
+    async def test_create_empty_project_id_rejected(
+        self, manager: tuple[TaskManager, list]
+    ) -> None:
+        m, _ = manager
+        result = await m.handle_command(
+            "task_create", {"title": "t", "project_id": ""}
+        )
+        assert not result["success"]
+        assert "project_id" in result["error"]
+
+    async def test_create_persists_project_id(
+        self, manager: tuple[TaskManager, list]
+    ) -> None:
+        m, _ = manager
+        task = await _create(m, title="t", project_id="proj-42")
+        assert task["project_id"] == "proj-42"
 
 
 # ─── 2. list 过滤 + get ───
@@ -164,6 +190,23 @@ class TestListGet:
             await m.handle_command("task_list", {"include_terminal": True})
         )
         assert data["count"] == 1
+
+    async def test_list_filters_by_project_id(
+        self, manager: tuple[TaskManager, list]
+    ) -> None:
+        m, _ = manager
+        a = await _create(m, title="a", project_id="proj-1")
+        b = await _create(m, title="b", project_id="proj-2")
+        c = await _create(m, title="c", project_id="proj-1")
+        data = _data(
+            await m.handle_command(
+                "task_list", {"project_id": "proj-1", "include_terminal": True}
+            )
+        )
+        assert data["count"] == 2
+        ids = {t["task_id"] for t in data["tasks"]}
+        assert ids == {a["task_id"], c["task_id"]}
+        assert b["task_id"] not in ids
 
 
 # ─── 3. assign 不改 status，version+1 ───
@@ -324,7 +367,7 @@ class TestDependencyCycle:
         m, _ = manager
         fake = "f" * 32
         result = await m.handle_command(
-            "task_create", {"title": "x", "dependencies": [fake]}
+            "task_create", {"title": "x", "project_id": "proj-1", "dependencies": [fake]}
         )
         # 依赖不存在 task 会被 graph 丢弃（& self._ids），无环 → 通过
         assert result["success"]
@@ -396,7 +439,7 @@ class TestParentCycle:
         a = await _create(m, title="a")
         data = _data(
             await m.handle_command(
-                "task_create", {"title": "child", "parent_id": a["task_id"]}
+                "task_create", {"title": "child", "project_id": "proj-1", "parent_id": a["task_id"]}
             )
         )
         assert data["task"]["parent_id"] == a["task_id"]

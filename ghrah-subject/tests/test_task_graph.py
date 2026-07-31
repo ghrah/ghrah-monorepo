@@ -14,6 +14,7 @@ def _task(
 ) -> TaskRecord:
     return TaskRecord(
         task_id=task_id,
+        project_id="proj-1",
         title=task_id.upper(),
         dependencies=list(dependencies or []),
         parent_id=parent_id,

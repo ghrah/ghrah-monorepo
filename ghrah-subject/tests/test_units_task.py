@@ -57,7 +57,9 @@ async def test_task_create_via_dispatcher_routes_to_taskunit(
     await engine.start()
     try:
         result = await _dispatch(
-            engine, "task_create", {"title": "alpha task", "agent_name": "alpha"}
+            engine,
+            "task_create",
+            {"title": "alpha task", "project_id": "proj-1", "agent_name": "alpha"},
         )
         assert result["success"]
         task = result["data"]["task"]
@@ -80,7 +82,9 @@ async def test_task_event_broadcast_to_core_event_bus(tmp_path: Path) -> None:
     await engine.start()
     try:
         result = await _dispatch(
-            engine, "task_create", {"title": "t", "agent_name": "alpha"}
+            engine,
+            "task_create",
+            {"title": "t", "project_id": "proj-1", "agent_name": "alpha"},
         )
         task = result["data"]["task"]
         core_events = [e for e in emitted if e[0] == SUBJECT_CORE_EVENT_RECEIVED]
@@ -105,13 +109,22 @@ async def test_end_to_end_lifecycle_protected_delete(tmp_path: Path) -> None:
     await engine.start()
     try:
         b = _data(
-            await _dispatch(engine, "task_create", {"title": "b", "agent_name": "a"})
+            await _dispatch(
+                engine,
+                "task_create",
+                {"title": "b", "project_id": "proj-1", "agent_name": "a"},
+            )
         )["task"]
         a = _data(
             await _dispatch(
                 engine,
                 "task_create",
-                {"title": "a", "dependencies": [b["task_id"]], "agent_name": "a"},
+                {
+                    "title": "a",
+                    "project_id": "proj-1",
+                    "dependencies": [b["task_id"]],
+                    "agent_name": "a",
+                },
             )
         )["task"]
 

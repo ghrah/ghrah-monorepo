@@ -27,6 +27,7 @@ class ConcurrentModificationError(Exception):
 _DDL = """
 CREATE TABLE IF NOT EXISTS subject_tasks (
     task_id      TEXT PRIMARY KEY,
+    project_id   TEXT NOT NULL DEFAULT '',
     title        TEXT NOT NULL,
     description  TEXT NOT NULL DEFAULT '',
     agent_name   TEXT,
@@ -52,6 +53,7 @@ CREATE INDEX IF NOT EXISTS idx_subject_tasks_deleted ON subject_tasks(deleted_at
 
 _COLUMNS = (
     "task_id",
+    "project_id",
     "title",
     "description",
     "agent_name",
@@ -90,6 +92,24 @@ def _row_to_record(row: aiosqlite.Row) -> TaskRecord:
     return TaskRecord.model_validate(d)
 
 
+async def _ensure_project_id_column(db: aiosqlite.Connection) -> None:
+    """安全地为旧库补 project_id 列与索引（仅当列不存在时添加）。
+
+    CREATE TABLE IF NOT EXISTS 对已存在 DB 不补列，故需显式 ALTER 迁移。
+    旧行 project_id 落 '' sentinel，待 S4.6 reconcile bootstrap 认领。
+    """
+    cursor = await db.execute("PRAGMA table_info(subject_tasks)")
+    columns = {row[1] for row in await cursor.fetchall()}
+    if "project_id" not in columns:
+        await db.execute(
+            "ALTER TABLE subject_tasks ADD COLUMN project_id TEXT NOT NULL DEFAULT ''"
+        )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_subject_tasks_project ON subject_tasks(project_id)"
+    )
+    await db.commit()
+
+
 class TaskStore:
     """SQLite TaskStore：独立 aiosqlite 连接，幂等 DDL，乐观锁 + 软删。
 
@@ -115,6 +135,7 @@ class TaskStore:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(_DDL)
+            await _ensure_project_id_column(db)
             self._db = db
         logger.debug("TaskStore started (db=%s)", self._db_path)
 
@@ -234,6 +255,7 @@ class TaskStore:
         agent_name: str | None = None,
         status: str | None = None,
         parent_id: str | None = None,
+        project_id: str | None = None,
         include_terminal: bool = False,
         limit: int = 100,
         include_deleted: bool = False,
@@ -254,6 +276,9 @@ class TaskStore:
             if parent_id is not None:
                 clauses.append("parent_id = ?")
                 params.append(parent_id)
+            if project_id is not None:
+                clauses.append("project_id = ?")
+                params.append(project_id)
             if not include_terminal:
                 placeholders = ", ".join(["?"] * len(_TERMINAL_STATUSES))
                 clauses.append(f"status NOT IN ({placeholders})")

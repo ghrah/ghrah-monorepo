@@ -4,6 +4,8 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import ValidationError
+
 from ghrah.protocol.types import (
     TaskAssignPayload,
     TaskBlockPayload,
@@ -65,7 +67,13 @@ class TaskManager:
         handler = _HANDLERS.get(command)
         if handler is None:
             return _err(f"unknown command: {command}")
-        return await handler(self, payload)
+        try:
+            return await handler(self, payload)
+        except ValidationError as e:
+            missing = [err["loc"][0] for err in e.errors() if err["type"] == "missing"]
+            if missing:
+                return _err(f"{missing[0]} required")
+            return _err(f"invalid payload: {e}")
 
     # ─── helpers ───
 
@@ -103,8 +111,11 @@ class TaskManager:
         title = p.title.strip()
         if not title:
             return _err("title required")
+        if not p.project_id:
+            return _err("project_id required")
         record = make_task_record(
             title=title,
+            project_id=p.project_id,
             description=p.description,
             agent_name=p.agent_name,
             priority=p.priority,
@@ -316,6 +327,7 @@ class TaskManager:
             agent_name=p.agent_name,
             status=single_status,
             parent_id=p.parent_id,
+            project_id=p.project_id,
             include_terminal=p.include_terminal,
             limit=p.limit,
         )

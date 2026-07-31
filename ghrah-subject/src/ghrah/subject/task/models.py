@@ -111,6 +111,7 @@ class TaskRecord(TaskInfoPayload):
 def make_task_record(
     *,
     title: str,
+    project_id: str,
     description: str = "",
     agent_name: str | None = None,
     priority: TaskPriority = TaskPriority.NORMAL,
@@ -122,6 +123,7 @@ def make_task_record(
     now = datetime.now(UTC)
     return TaskRecord(
         task_id=uuid4().hex,
+        project_id=project_id,
         title=title,
         description=description,
         agent_name=agent_name,
