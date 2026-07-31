@@ -109,6 +109,10 @@ class CommandType(StrEnum):
     WORKSPACE_ROLLBACK = "workspace_rollback"
     WORKSPACE_DIFF = "workspace_diff"
     WORKSPACE_STATUS = "workspace_status"
+    # workspace 一等资源命令（workspace_id 键控；W6）
+    WORKSPACE_REGISTER = "workspace_register"
+    WORKSPACE_GET = "workspace_get"
+    WORKSPACE_LIST = "workspace_list"
 
     # ─── Session 管理类（Observer → Subject → Core）───
     SESSION_CREATE = "session_create"
@@ -279,6 +283,9 @@ WORKSPACE_COMMANDS: frozenset[str] = frozenset({
     CommandType.WORKSPACE_ROLLBACK.value,
     CommandType.WORKSPACE_DIFF.value,
     CommandType.WORKSPACE_STATUS.value,
+    CommandType.WORKSPACE_REGISTER.value,
+    CommandType.WORKSPACE_GET.value,
+    CommandType.WORKSPACE_LIST.value,
 })
 
 MANIFEST_COMMANDS: frozenset[str] = frozenset({
@@ -661,6 +668,30 @@ class WorkspaceStatusPayload(BaseModel):
     """workspace_status 命令载荷。"""
 
     agent_name: str
+
+
+class WorkspaceRegisterPayload(BaseModel):
+    """workspace_register 命令载荷（把已有目录登记为 workspace）。
+
+    provider_type 为 None 时由 Subject 按 registry.detect 探测规则分派
+    （有 .git → git；否则 → plain）。locator 为 file:// URI（MVP）。
+    """
+
+    locator: str
+    name: str = ""
+    provider_type: str | None = None
+
+
+class WorkspaceGetPayload(BaseModel):
+    """workspace_get 命令载荷（workspace_id 键控）。"""
+
+    workspace_id: str
+
+
+class WorkspaceListPayload(BaseModel):
+    """workspace_list 命令载荷（可选 provider_type 过滤）。"""
+
+    provider_type: str | None = None
 
 
 # ─── Workspace 事件载荷模型 ───
