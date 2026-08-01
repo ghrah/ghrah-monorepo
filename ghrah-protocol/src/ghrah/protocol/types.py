@@ -1248,6 +1248,10 @@ class ReconcileReportPayload(BaseModel):
     agents_spawned: int = 0
     workspaces_adopted: int = 0
     errors: list[str] = Field(default_factory=list)
+    bootstrap: bool = False
+    paused: int = 0
+    dropped: int = 0
+    tasks_migrated: int = 0
 
 
 # ─── Session 事件载荷模型 ───
