@@ -6,24 +6,26 @@ from ghrah.subject.config import SubjectConfig
 from ghrah.subject.runtime.engine import SubjectEngine
 from ghrah.subject.units._commands import (
     CHAIN_HISTORY_COMMANDS,
-    CORE_COMMANDS,
     MANIFEST_COMMANDS,
     PERSIST_COMMANDS,
     TASK_COMMANDS,
     WORKSPACE_COMMANDS,
 )
 from ghrah.subject.units.ability_runner import AbilityRunnerUnit
-from ghrah.subject.units.forward import ForwardUnit
+from ghrah.subject.units.cluster_transport import ClusterTransportUnit
 from ghrah.subject.units.hitl_notary import HITLNotaryUnit
 from ghrah.subject.units.hitl_policy import HITLPolicyUnit
 from ghrah.subject.units.ledger import LedgerUnit
 from ghrah.subject.units.manifest_store import ManifestStoreUnit
 from ghrah.subject.units.permissions import PermissionsUnit
 from ghrah.subject.units.persistence import PersistenceUnit
+from ghrah.subject.units.project import ProjectUnit
+from ghrah.subject.units.recovery import DesiredStateUnit, RecoveryUnit
 from ghrah.subject.units.sandbox import SandboxUnit
 from ghrah.subject.units.task import TaskUnit
-from ghrah.subject.units.websocket_core_transport import WebSocketCoreTransportUnit
-from ghrah.subject.units.websocket_observer_endpoint import WebSocketObserverEndpointUnit
+from ghrah.subject.units.websocket_observer_endpoint import (
+    WebSocketObserverEndpointUnit,
+)
 from ghrah.subject.units.workspace import WorkspaceUnit
 
 
@@ -42,35 +44,34 @@ def test_register_builtin_units_coexistence_registers_pr3a_pr3b_units() -> None:
     assert isinstance(engine.get_unit("hitl_notary"), HITLNotaryUnit)
     assert isinstance(engine.get_unit("ability_runner"), AbilityRunnerUnit)
     assert isinstance(engine.get_unit("task"), TaskUnit)
+    assert isinstance(engine.get_unit("desired_state"), DesiredStateUnit)
     assert engine.get_unit("websocket_core_transport") is None
     assert engine.get_unit("websocket_observer_endpoint") is None
     assert engine.get_unit("forward") is None
+    assert engine.get_unit("cluster_transport") is None
+    assert engine.get_unit("project") is None
+    assert engine.get_unit("recovery") is None
 
 
-def test_register_builtin_units_full_registers_transport_and_forward_units() -> None:
+def test_register_builtin_units_full_registers_cluster_and_project_units() -> None:
     engine = SubjectEngine(SubjectConfig())
 
     engine.register_builtin_units(profile="full")
 
-    assert isinstance(engine.get_unit("websocket_core_transport"), WebSocketCoreTransportUnit)
+    cluster_transport = engine.get_unit("cluster_transport")
+    assert isinstance(cluster_transport, ClusterTransportUnit)
+    # D2：cluster_transport 不暴露任何命令路由（transport 层）
+    assert cluster_transport.meta.routes.commands == frozenset()
+    assert cluster_transport.meta.routes.long_running_commands == frozenset()
     assert isinstance(
         engine.get_unit("websocket_observer_endpoint"),
         WebSocketObserverEndpointUnit,
     )
-    forward = engine.get_unit("forward")
-    assert isinstance(forward, ForwardUnit)
-    assert forward.meta.routes.commands == frozenset()
-    assert forward.meta.routes.long_running_commands == CORE_COMMANDS
-    assert forward.meta.routes.commands.isdisjoint(
-        forward.meta.routes.long_running_commands
-    )
-    key_names = {key.name for key in forward.meta.requires}
-    assert key_names == {
-        "manifest_store",
-        "capability_registry",
-        "core_transport",
-        "workspace_service",
-    }
+    assert isinstance(engine.get_unit("project"), ProjectUnit)
+    assert isinstance(engine.get_unit("recovery"), RecoveryUnit)
+    assert isinstance(engine.get_unit("desired_state"), DesiredStateUnit)
+    assert engine.get_unit("websocket_core_transport") is None
+    assert engine.get_unit("forward") is None
 
 
 def test_register_builtin_units_rejects_unknown_profile() -> None:

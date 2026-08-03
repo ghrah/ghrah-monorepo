@@ -340,3 +340,46 @@ class TaskStore:
             )
             row = await cursor.fetchone()
             return int(row[0]) if row is not None else 0
+
+    async def reassign_project_id(
+        self,
+        old_id: str,
+        new_id: str,
+        *,
+        include_terminal: bool = True,
+        include_deleted: bool = True,
+    ) -> int:
+        """批量改 project_id：``UPDATE ... SET project_id=new_id, version=version+1,
+        updated_at=now WHERE project_id=old_id``，返回受影响行数。
+
+        供 S4.6 reconcile bootstrap 把 sentinel task（``project_id=''``）认领到
+        default project。默认迁移全部（含终态 + 软删），可经 ``include_terminal``
+        / ``include_deleted`` 收窄。乐观锁 ``version`` 递增以保留变更痕迹。
+
+        Args:
+            old_id: 被替换的 project_id（典型 ``''`` sentinel）。
+            new_id: 目标 project_id（须非空）。
+            include_terminal: 是否迁移终态任务，默认 True。
+            include_deleted: 是否迁移已软删任务，默认 True。
+
+        Returns:
+            受影响行数。
+        """
+        async with self._lock:
+            db = self._require_db()
+            clauses = ["project_id = ?"]
+            params: list[Any] = [old_id]
+            if not include_deleted:
+                clauses.append("deleted_at IS NULL")
+            if not include_terminal:
+                placeholders = ", ".join(["?"] * len(_TERMINAL_STATUSES))
+                clauses.append(f"status NOT IN ({placeholders})")
+                params.extend(_TERMINAL_STATUSES)
+            where = " AND ".join(clauses)
+            now = datetime.now(UTC).isoformat()
+            cursor = await db.execute(
+                f"UPDATE subject_tasks SET project_id = ?, version = version + 1, "  # noqa: S608
+                f"updated_at = ? WHERE {where}",
+                (new_id, now, *params),
+            )
+            return int(cursor.rowcount)

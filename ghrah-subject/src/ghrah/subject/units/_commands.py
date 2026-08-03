@@ -8,18 +8,20 @@ from __future__ import annotations
 
 from ghrah.protocol.types import (  # type: ignore[import-untyped]
     CHAIN_HISTORY_COMMANDS,
-    CORE_COMMANDS,
     MANIFEST_COMMANDS,
     PERSIST_COMMANDS,
+    PROJECT_COMMANDS,
+    RECONCILE_COMMANDS,
     TASK_COMMANDS,
     WORKSPACE_COMMANDS,
 )
 
 __all__ = [
     "CHAIN_HISTORY_COMMANDS",
-    "CORE_COMMANDS",
     "MANIFEST_COMMANDS",
     "PERSIST_COMMANDS",
+    "PROJECT_COMMANDS",
+    "RECONCILE_COMMANDS",
     "TASK_COMMANDS",
     "WORKSPACE_COMMANDS",
 ]

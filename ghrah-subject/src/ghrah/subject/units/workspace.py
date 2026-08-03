@@ -12,7 +12,11 @@ from typing import Any
 
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.runtime.context import SubjectContext
-from ghrah.subject.runtime.service_keys import SANDBOX_EXECUTOR, WORKSPACE_SERVICE
+from ghrah.subject.runtime.service_keys import (
+    SANDBOX_EXECUTOR,
+    WORKSPACE_MANAGER,
+    WORKSPACE_SERVICE,
+)
 from ghrah.subject.sandbox.executor import SandboxExecutor
 from ghrah.subject.sandbox.workspace import WorkspaceManager
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
@@ -66,7 +70,7 @@ class WorkspaceUnit(SubjectUnit):
         self._meta = UnitMeta(
             name="workspace",
             requires=frozenset({SANDBOX_EXECUTOR}),
-            provides=frozenset({WORKSPACE_SERVICE}),
+            provides=frozenset({WORKSPACE_SERVICE, WORKSPACE_MANAGER}),
             routes=RouteSpec(
                 commands=WORKSPACE_COMMANDS,
                 events=frozenset({"agent_spawned", "agent_terminated"}),
@@ -102,6 +106,7 @@ class WorkspaceUnit(SubjectUnit):
         )
         self._service = _WorkspaceServiceAdapter(self._manager)
         ctx.services.set(WORKSPACE_SERVICE, self._service)
+        ctx.services.set(WORKSPACE_MANAGER, self._manager)
 
     async def start(self) -> None:
         await self.manager.start()

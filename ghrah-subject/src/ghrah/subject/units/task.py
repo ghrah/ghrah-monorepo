@@ -11,7 +11,7 @@ from typing import Any
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
 from ghrah.subject.runtime.context import SubjectContext
-from ghrah.subject.runtime.service_keys import TASK_MANAGER
+from ghrah.subject.runtime.service_keys import TASK_MANAGER, TASK_STORE
 from ghrah.subject.task import TaskManager, TaskStore
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units._commands import TASK_COMMANDS
@@ -35,7 +35,7 @@ class TaskUnit(SubjectUnit):
         self._manager: TaskManager | None = None
         self._meta = UnitMeta(
             name="task",
-            provides=frozenset({TASK_MANAGER}),
+            provides=frozenset({TASK_MANAGER, TASK_STORE}),
             routes=RouteSpec(commands=TASK_COMMANDS),
         )
 
@@ -54,6 +54,7 @@ class TaskUnit(SubjectUnit):
         self._store = TaskStore(ctx.config.persistence.db_path)
         self._manager = TaskManager(self._store, on_event=self._emit_event)
         ctx.services.set(TASK_MANAGER, self._manager)
+        ctx.services.set(TASK_STORE, self._store)
 
     async def start(self) -> None:
         if self._store is not None:

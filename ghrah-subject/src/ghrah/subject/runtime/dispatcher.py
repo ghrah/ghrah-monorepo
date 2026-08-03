@@ -16,6 +16,7 @@ from typing import Any, cast
 from ghrah.protocol.types import SystemType  # type: ignore[import-untyped]
 from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
 from ghrah.subject.runtime.context import SubjectContext
+from ghrah.subject.transport.core import CoreTransport
 from ghrah.subject.unit.base import CommandContext, SubjectUnit
 
 __all__ = ["CommandRoute", "MessageDispatcher"]
@@ -66,8 +67,18 @@ class MessageDispatcher:
             for event_type in meta.routes.events:
                 self._event_routes[event_type].append(unit)
 
-    async def dispatch_core_message(self, message: Mapping[str, Any] | Any) -> None:
-        """Dispatch one inbound Core message."""
+    async def dispatch_core_message(
+        self,
+        message: Mapping[str, Any] | Any,
+        *,
+        source: CoreTransport,
+    ) -> None:
+        """Dispatch one inbound Core message.
+
+        ``source``（D1）为接收到该消息的 transport 自身：resolve / pong / reply
+        回路由经 ``source``（替换原单一 ``ctx.core_transport``），保证非默认
+        cluster 的回执在接收到它的那个 transport 的 tracker 上 resolve。
+        """
 
         msg = _message_to_dict(message)
         msg_type = _message_type(msg)
@@ -76,11 +87,11 @@ class MessageDispatcher:
 
         if msg_type == SystemType.COMMAND_RESULT.value:
             if request_id is not None:
-                self._ctx.core_transport.resolve_command_result(request_id, payload)
+                source.resolve_command_result(request_id, payload)
             return
 
         if msg_type == SystemType.PING.value:
-            await self._ctx.core_transport.send({"type": SystemType.PONG.value})
+            await source.send({"type": SystemType.PONG.value})
             return
 
         route = self._command_routes.get(msg_type)
@@ -91,10 +102,10 @@ class MessageDispatcher:
             )
             if route.is_long_running:
                 self._ctx.create_task(
-                    self._dispatch_core_command(route, msg_type, payload, cmd_ctx)
+                    self._dispatch_core_command(route, msg_type, payload, cmd_ctx, source)
                 )
                 return
-            await self._dispatch_core_command(route, msg_type, payload, cmd_ctx)
+            await self._dispatch_core_command(route, msg_type, payload, cmd_ctx, source)
             return
 
         if msg_type in self._event_routes:
@@ -140,12 +151,13 @@ class MessageDispatcher:
         command: str,
         payload: dict[str, Any],
         cmd_ctx: CommandContext,
+        source: CoreTransport,
     ) -> None:
         result = await self._call_unit(route.unit, command, payload, cmd_ctx)
         response_payload = dict(result)
         if cmd_ctx.request_id is not None and "request_id" not in response_payload:
             response_payload["request_id"] = cmd_ctx.request_id
-        await self._ctx.core_transport.send(
+        await source.send(
             {
                 "type": SystemType.COMMAND_RESULT.value,
                 "payload": response_payload,

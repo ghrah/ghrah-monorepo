@@ -7,10 +7,8 @@ from typing import Any
 import pytest
 
 from ghrah.subject.config import CoreTransportConfig
-from ghrah.subject.units.websocket_core_transport import (
-    WebSocketCoreTransport,
-    build_core_websocket_url,
-)
+from ghrah.subject.transport.conn import build_core_websocket_url
+from ghrah.subject.transport.core import WebSocketCoreTransport
 
 _END = object()
 
@@ -59,7 +57,8 @@ async def test_send_receive_and_send_and_wait_with_mock_websocket() -> None:
     received: list[dict[str, Any]] = []
     received_event = asyncio.Event()
 
-    async def on_message(message: dict[str, Any]) -> None:
+    async def on_message(message: dict[str, Any], *, source: Any) -> None:
+        del source
         received.append(message)
         received_event.set()
 
@@ -114,8 +113,8 @@ async def test_disconnect_cancels_pending_request() -> None:
         connections.append(ws)
         return ws
 
-    async def on_message(message: dict[str, Any]) -> None:
-        del message
+    async def on_message(message: dict[str, Any], *, source: Any) -> None:
+        del message, source
 
     transport = WebSocketCoreTransport(
         CoreTransportConfig(max_reconnect_attempts=0),
@@ -156,8 +155,8 @@ async def test_disconnect_reconnects_with_mock_websocket() -> None:
     async def sleep(delay: float) -> None:
         del delay
 
-    async def on_message(message: dict[str, Any]) -> None:
-        del message
+    async def on_message(message: dict[str, Any], *, source: Any) -> None:
+        del message, source
 
     transport = WebSocketCoreTransport(
         CoreTransportConfig(reconnect_interval=0.01, max_reconnect_attempts=1),

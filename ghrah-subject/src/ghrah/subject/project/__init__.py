@@ -18,6 +18,7 @@ from ghrah.subject.project.isolation import (
     validate_path_grants_non_overlapping,
     validate_workspace_locators_non_nested,
 )
+from ghrah.subject.project.manager import ProjectManager
 from ghrah.subject.project.models import (
     PROJECT_TRANSITIONS,
     AgentSpec,
@@ -46,6 +47,7 @@ __all__ = [
     "IsolationContext",
     "IsolationSpec",
     "PathGrant",
+    "ProjectManager",
     "ProjectNotFoundError",
     "ProjectRecord",
     "ProjectStatus",

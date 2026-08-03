@@ -25,16 +25,17 @@ def register_builtin_units(
         raise ValueError(f"Unknown built-in Subject unit profile: {profile}")
 
     from ghrah.subject.units.ability_runner import AbilityRunnerUnit
-    from ghrah.subject.units.forward import ForwardUnit
+    from ghrah.subject.units.cluster_transport import ClusterTransportUnit
     from ghrah.subject.units.hitl_notary import HITLNotaryUnit
     from ghrah.subject.units.hitl_policy import HITLPolicyUnit
     from ghrah.subject.units.ledger import LedgerUnit
     from ghrah.subject.units.manifest_store import ManifestStoreUnit
     from ghrah.subject.units.permissions import PermissionsUnit
     from ghrah.subject.units.persistence import PersistenceUnit
+    from ghrah.subject.units.project import ProjectUnit
+    from ghrah.subject.units.recovery import DesiredStateUnit, RecoveryUnit
     from ghrah.subject.units.sandbox import SandboxUnit
     from ghrah.subject.units.task import TaskUnit
-    from ghrah.subject.units.websocket_core_transport import WebSocketCoreTransportUnit
     from ghrah.subject.units.websocket_observer_endpoint import (
         WebSocketObserverEndpointUnit,
     )
@@ -51,6 +52,7 @@ def register_builtin_units(
         HITLNotaryUnit(engine.config),
         AbilityRunnerUnit(engine.config),
         TaskUnit(engine.config),
+        DesiredStateUnit(engine.config),
     ]
 
     if profile == "full":
@@ -66,9 +68,10 @@ def register_builtin_units(
                 "(Stage 2 only implements 'websocket'; ipc/grpc/http reserved)."
             )
         units.extend([
-            WebSocketCoreTransportUnit(engine.config),
             WebSocketObserverEndpointUnit(engine.config),
-            ForwardUnit(engine.config),
+            ClusterTransportUnit(engine.config),
+            ProjectUnit(engine.config),
+            RecoveryUnit(engine.config),
         ])
 
     for unit in units:

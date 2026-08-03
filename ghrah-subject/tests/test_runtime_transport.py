@@ -36,7 +36,8 @@ async def test_in_process_transport_send_receive_and_send_and_wait() -> None:
     transport = InProcessCoreTransport()
     received: list[dict[str, Any]] = []
 
-    async def on_message(message: dict[str, Any]) -> None:
+    async def on_message(message: dict[str, Any], *, source: Any) -> None:
+        del source
         received.append(message)
 
     await transport.start(on_message)
@@ -62,7 +63,8 @@ async def test_in_process_transport_send_receive_and_send_and_wait() -> None:
 async def test_in_process_transport_stop_cancels_pending_requests() -> None:
     transport = InProcessCoreTransport()
 
-    async def on_message(message: dict[str, Any]) -> None:
+    async def on_message(message: dict[str, Any], *, source: Any) -> None:
+        del message, source
         return None
 
     await transport.start(on_message)

@@ -13,11 +13,9 @@ from ghrah.subject.runtime.dispatcher import MessageDispatcher
 from ghrah.subject.runtime.engine import SubjectEngine
 from ghrah.subject.runtime.service_keys import (
     CAPABILITY_REGISTRY,
-    CORE_TRANSPORT,
     OBSERVER_ENDPOINT,
 )
 from ghrah.subject.runtime.services import SubjectServices
-from ghrah.subject.transport.core import InProcessCoreTransport
 from ghrah.subject.transport.observer import ObserverCommandHandler
 from ghrah.subject.unit.base import SubjectUnit, UnitMeta
 
@@ -89,15 +87,12 @@ def test_dispatcher_access_requires_attach() -> None:
 
 def test_convenience_properties_require_typed_services() -> None:
     services = SubjectServices()
-    transport = InProcessCoreTransport()
     endpoint = _ObserverEndpoint()
     registry = CapabilityRegistry()
-    services.set(CORE_TRANSPORT, transport)
     services.set(OBSERVER_ENDPOINT, endpoint)
     services.set(CAPABILITY_REGISTRY, registry)
     ctx = _create_context(services)
 
-    assert ctx.core_transport is transport
     assert ctx.observer_endpoint is endpoint
     assert ctx.capability_registry is registry
 
@@ -105,5 +100,5 @@ def test_convenience_properties_require_typed_services() -> None:
 def test_missing_convenience_service_raises_clear_error() -> None:
     ctx = _create_context()
 
-    with pytest.raises(RuntimeError, match="core_transport"):
-        _ = ctx.core_transport
+    with pytest.raises(RuntimeError, match="observer_endpoint"):
+        _ = ctx.observer_endpoint

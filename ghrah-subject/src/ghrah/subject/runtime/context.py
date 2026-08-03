@@ -15,11 +15,9 @@ from ghrah.subject.event_bus import SubjectEventBus
 from ghrah.subject.runtime.capability import CapabilityRegistry
 from ghrah.subject.runtime.service_keys import (
     CAPABILITY_REGISTRY,
-    CORE_TRANSPORT,
     OBSERVER_ENDPOINT,
 )
 from ghrah.subject.runtime.services import SubjectServices
-from ghrah.subject.transport.core import CoreTransport
 from ghrah.subject.transport.observer import ObserverEndpoint
 from ghrah.subject.unit.base import SubjectUnit
 
@@ -88,12 +86,6 @@ class SubjectContext:
         if self._dispatcher is None:
             raise RuntimeError("SubjectContext dispatcher has not been attached.")
         return self._dispatcher
-
-    @property
-    def core_transport(self) -> CoreTransport:
-        """Return the required Core transport service."""
-
-        return self._services.require(CORE_TRANSPORT)
 
     @property
     def observer_endpoint(self) -> ObserverEndpoint:

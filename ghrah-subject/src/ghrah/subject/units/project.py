@@ -1,0 +1,141 @@
+# SPDX-FileCopyrightText: 2026 chenxya <chenxya@ghrah.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""Project built-in Subject unit.
+
+thin wrapper around :class:`ProjectManager`：注入依赖（ProjectStore /
+WorkspaceManager / TaskManagerService / ClusterTransportManager / ManifestStore /
+DesiredStateStore），把 manager 的 ``on_event`` 回调桥到 internal event_bus，
+并在每次成功变更命令后把全量 project 快照写入 DesiredStateStore（desired-state
+唯一真相源，父计划 §3.3）。
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from ghrah.subject.config import SubjectConfig
+from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
+from ghrah.subject.project.manager import ProjectManager
+from ghrah.subject.project.store import ProjectStore
+from ghrah.subject.recovery.desired_state import DesiredStateRecord, DesiredStateStore
+from ghrah.subject.runtime.context import SubjectContext
+from ghrah.subject.runtime.service_keys import (
+    CLUSTER_TRANSPORT_MANAGER,
+    DESIRED_STATE_STORE,
+    MANIFEST_STORE,
+    PROJECT_MANAGER,
+    TASK_MANAGER,
+    WORKSPACE_MANAGER,
+)
+from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
+from ghrah.subject.units._commands import PROJECT_COMMANDS
+
+__all__ = ["ProjectUnit"]
+
+logger = logging.getLogger(__name__)
+
+
+class ProjectUnit(SubjectUnit):
+    """Owns ProjectStore + ProjectManager and project command/event routes.
+
+    requires 中的 ``WORKSPACE_MANAGER``（具体 WorkspaceManager，非 WorkspaceService
+    Protocol）经 WorkspaceUnit 提供，供 ProjectManager 的 register_workspace /
+    list_records / get_record 使用。
+    """
+
+    def __init__(self, config: SubjectConfig) -> None:
+        self._config = config
+        self._ctx: SubjectContext | None = None
+        self._store: ProjectStore | None = None
+        self._desired_store: DesiredStateStore | None = None
+        self._manager: ProjectManager | None = None
+        self._meta = UnitMeta(
+            name="project",
+            requires=frozenset(
+                {
+                    WORKSPACE_MANAGER,
+                    TASK_MANAGER,
+                    CLUSTER_TRANSPORT_MANAGER,
+                    MANIFEST_STORE,
+                    DESIRED_STATE_STORE,
+                }
+            ),
+            provides=frozenset({PROJECT_MANAGER}),
+            routes=RouteSpec(commands=PROJECT_COMMANDS),
+        )
+
+    @property
+    def meta(self) -> UnitMeta:
+        return self._meta
+
+    @property
+    def service(self) -> ProjectManager:
+        if self._manager is None:
+            raise RuntimeError("ProjectUnit has not been initialized.")
+        return self._manager
+
+    async def init(self, ctx: SubjectContext) -> None:
+        self._ctx = ctx
+        self._store = ProjectStore(ctx.config.persistence.db_path)
+        self._desired_store = ctx.services.require(DESIRED_STATE_STORE)
+        workspace_mgr = ctx.services.require(WORKSPACE_MANAGER)
+        task_mgr = ctx.services.require(TASK_MANAGER)
+        cluster_transport = ctx.services.require(CLUSTER_TRANSPORT_MANAGER)
+        manifest_store = ctx.services.require(MANIFEST_STORE)
+        self._manager = ProjectManager(
+            self._store,
+            workspace_mgr,
+            task_mgr,
+            cluster_transport,
+            manifest_store,
+            on_event=self._emit_event,
+            default_workspace_locator=ctx.config.project.default_workspace_locator,
+            default_db_path_template=ctx.config.project.default_db_path_template,
+        )
+        ctx.services.set(PROJECT_MANAGER, self._manager)
+
+    async def start(self) -> None:
+        if self._store is not None:
+            await self._store.start()
+
+    async def stop(self) -> None:
+        if self._store is not None:
+            await self._store.stop()
+
+    async def handle_command(
+        self,
+        command: str,
+        payload: dict[str, Any],
+        cmd_ctx: CommandContext,
+    ) -> dict[str, Any]:
+        result = await self.service.handle_command(command, payload)
+        if result.get("success"):
+            await self._save_desired()
+        return result
+
+    async def _save_desired(self) -> None:
+        """命令成功后把全量 project 快照写入 DesiredStateStore（desired-state 唯一真相源）。"""
+        if self._store is None or self._desired_store is None or self._ctx is None:
+            return
+        try:
+            projects = await self._store.list()
+            await self._desired_store.save(
+                DesiredStateRecord(
+                    subject_id=self._ctx.config.recovery.subject_id,
+                    projects=projects,
+                )
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("ProjectUnit: save desired-state failed")
+
+    async def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        ctx = self._ctx
+        if ctx is None:
+            return
+        await ctx.event_bus.emit(
+            SUBJECT_CORE_EVENT_RECEIVED,
+            {"event_type": event_type, "payload": payload},
+        )

@@ -18,7 +18,7 @@ from ghrah.subject.runtime.capability import CapabilityRegistry
 from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.dependency import topological_sort
 from ghrah.subject.runtime.dispatcher import MessageDispatcher
-from ghrah.subject.runtime.service_keys import CAPABILITY_REGISTRY
+from ghrah.subject.runtime.service_keys import CAPABILITY_REGISTRY, RECONCILIATION_SERVICE
 from ghrah.subject.runtime.services import SubjectServices
 from ghrah.subject.unit.base import SubjectUnit, UnitState
 
@@ -197,6 +197,13 @@ class SubjectEngine:
             raise
 
         self._started = True
+
+        if self._config.recovery.enabled and self._config.recovery.reconcile_on_start:
+            try:
+                reconcile_service = self._context.services.require(RECONCILIATION_SERVICE)
+                await reconcile_service.reconcile()
+            except Exception:
+                logger.exception("reconcile on start failed (non-fatal)")
 
     async def dispatch_observer_command(
         self,

@@ -4,11 +4,18 @@
 
 """Subject transport contracts."""
 
+from ghrah.subject.transport.conn import (
+    CoreConnection,
+    WebSocketCoreConnection,
+    build_core_websocket_url,
+)
 from ghrah.subject.transport.core import (
     CoreMessage,
     CoreMessageHandler,
     CoreTransport,
     InProcessCoreTransport,
+    RawCoreMessageHandler,
+    WebSocketCoreTransport,
     _PendingRequestTracker,
 )
 from ghrah.subject.transport.observer import (
@@ -18,6 +25,7 @@ from ghrah.subject.transport.observer import (
 )
 
 __all__ = [
+    "CoreConnection",
     "CoreMessage",
     "CoreMessageHandler",
     "CoreTransport",
@@ -25,5 +33,9 @@ __all__ = [
     "ObserverCommandHandler",
     "ObserverEndpoint",
     "ObserverMessage",
+    "RawCoreMessageHandler",
+    "WebSocketCoreConnection",
+    "WebSocketCoreTransport",
     "_PendingRequestTracker",
+    "build_core_websocket_url",
 ]

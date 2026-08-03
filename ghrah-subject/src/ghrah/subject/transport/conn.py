@@ -2,7 +2,17 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""WebSocket Core transport built-in Subject unit."""
+"""Core connection layer: connection + reconnect + init_cluster handshake.
+
+D4 分层：``CoreConnection`` 仅管连接/重连/init_cluster 握手；request-response
+跟踪留给上层 :class:`ghrah.subject.transport.core.CoreTransport`。本模块提供
+``CoreConnection`` Protocol 与默认的 WebSocket 实现 ``WebSocketCoreConnection``
+（从原 ``units/websocket_core_transport.py`` 平移 WS 连接逻辑），并暴露
+``build_core_websocket_url`` / ``_decode_core_message`` 工具。
+
+入站消息经 ``RawCoreMessageHandler`` 回调交上层 transport；connection 不感知
+``source``，source 关联由 transport 层（持自身引用注入偏函数）完成（D1）。
+"""
 
 from __future__ import annotations
 
@@ -11,21 +21,18 @@ import json
 import logging
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, cast
+from typing import Any, Protocol, cast
 from urllib.parse import urlencode, urlparse, urlunparse
 
 import websockets
 
 from ghrah.protocol.types import generate_request_id  # type: ignore[import-untyped]
-from ghrah.subject.config import CoreTransportConfig, SubjectConfig
-from ghrah.subject.runtime.context import SubjectContext
-from ghrah.subject.runtime.service_keys import CORE_TRANSPORT
-from ghrah.subject.transport.core import CoreMessage, CoreMessageHandler, _PendingRequestTracker
-from ghrah.subject.unit.base import SubjectUnit, UnitMeta
+from ghrah.subject.config import CoreTransportConfig
+from ghrah.subject.transport.core import CoreMessage, RawCoreMessageHandler
 
 __all__ = [
-    "WebSocketCoreTransport",
-    "WebSocketCoreTransportUnit",
+    "CoreConnection",
+    "WebSocketCoreConnection",
     "build_core_websocket_url",
 ]
 
@@ -35,8 +42,40 @@ ConnectFactory = Callable[..., Awaitable[Any]]
 SleepCallable = Callable[[float], Awaitable[Any]]
 
 
-class WebSocketCoreTransport:
-    """Default WebSocket implementation of the CoreTransport protocol."""
+class CoreConnection(Protocol):
+    """连接层契约：建连 + 重连 + init_cluster 握手 + 原始消息回调。"""
+
+    @property
+    def cluster_id(self) -> str:
+        """该 connection 绑定的 Core cluster id。"""
+
+    @property
+    def is_connected(self) -> bool:
+        """连接是否处于已建立状态。"""
+
+    async def start(self, on_message: RawCoreMessageHandler) -> None:
+        """建 WS + 起 receive/reconnect 循环。
+
+        on_message 签名见 D1：``on_message(msg)``（connection 不感知 source；
+        source 由上层 transport 持有自身引用注入）。
+        """
+
+    async def stop(self) -> None:
+        """停止连接、关闭 socket、中断重连循环。"""
+
+    async def send(self, message: CoreMessage) -> None:
+        """发送一条 JSON 消息到 Core（要求已连接）。"""
+
+
+class WebSocketCoreConnection:
+    """WebSocket 实现 of :class:`CoreConnection`。
+
+    平移原 ``WebSocketCoreTransport`` 的 WS 连接 + 重连 + _send_init_cluster
+    逻辑；不含 _PendingRequestTracker（留给 transport 层）。
+
+    断线回调 ``on_disconnect``：构造期注入，断线时触发（供上层 transport
+    取消 pending request，符合 D4）。
+    """
 
     def __init__(
         self,
@@ -45,37 +84,34 @@ class WebSocketCoreTransport:
         client_id: str | None = None,
         connect_factory: ConnectFactory | None = None,
         sleep: SleepCallable = asyncio.sleep,
+        on_disconnect: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._config = config
         self._client_id = client_id or uuid.uuid4().hex[:16]
         self._connect: ConnectFactory = connect_factory or websockets.connect
         self._sleep = sleep
-        self._pending = _PendingRequestTracker()
+        self._on_disconnect = on_disconnect
         self._ws: Any = None
-        self._on_message: CoreMessageHandler | None = None
+        self._on_message: RawCoreMessageHandler | None = None
         self._running = False
         self._receive_task: asyncio.Task[None] | None = None
 
     @property
-    def is_connected(self) -> bool:
-        """Return whether a WebSocket is currently connected."""
+    def cluster_id(self) -> str:
+        return self._config.cluster_id
 
+    @property
+    def is_connected(self) -> bool:
         return self._running and self._ws is not None
 
     @property
-    def pending_count(self) -> int:
-        """Return the number of pending request futures."""
-
-        return self._pending.pending_count
-
-    @property
     def client_id(self) -> str:
-        """Return the stable client id used in the Core URL."""
+        """返回稳定 client id（Core URL 用）。"""
 
         return self._client_id
 
-    async def start(self, on_message: CoreMessageHandler) -> None:
-        """Connect once and start the background receive/reconnect loop."""
+    async def start(self, on_message: RawCoreMessageHandler) -> None:
+        """建连一次并启动后台 receive/reconnect 循环。"""
 
         if self._running:
             self._on_message = on_message
@@ -87,18 +123,17 @@ class WebSocketCoreTransport:
             await self._connect_once()
         except Exception:
             self._running = False
-            self._pending.cancel_all()
+            await self._notify_disconnect()
             raise
         self._receive_task = asyncio.create_task(
             self._receive_loop(),
-            name="subject-core-websocket-transport",
+            name="subject-core-websocket-connection",
         )
 
     async def stop(self) -> None:
-        """Stop the transport, close the socket, and cancel pending requests."""
+        """停止连接、关闭 socket、取消 receive 循环。"""
 
         self._running = False
-        self._pending.cancel_all()
 
         task = self._receive_task
         self._receive_task = None
@@ -110,46 +145,11 @@ class WebSocketCoreTransport:
         self._on_message = None
 
     async def send(self, message: CoreMessage) -> None:
-        """Send a JSON message to Core."""
+        """发送 JSON 消息到 Core（要求已连接）。"""
 
         if self._ws is None:
-            raise RuntimeError("Core transport is not connected.")
+            raise RuntimeError("Core connection is not connected.")
         await self._ws.send(json.dumps(message, ensure_ascii=False))
-
-    async def send_and_wait(
-        self,
-        message: CoreMessage,
-        timeout: float | None = None,
-    ) -> CoreMessage:
-        """Send a request and wait for a matching command_result payload."""
-
-        if self._ws is None:
-            raise RuntimeError("Core transport is not connected.")
-
-        request = dict(message)
-        request_id = request.get("request_id")
-        if not isinstance(request_id, str) or not request_id:
-            request_id = generate_request_id()
-            request["request_id"] = request_id
-
-        future = self._pending.register(request_id)
-        try:
-            await self.send(request)
-            return await asyncio.wait_for(future, timeout=timeout)
-        except TimeoutError:
-            self._pending.cancel(request_id)
-            raise
-        except asyncio.CancelledError:
-            self._pending.cancel(request_id)
-            raise
-        except Exception:
-            self._pending.cancel(request_id)
-            raise
-
-    def resolve_command_result(self, request_id: str, payload: CoreMessage) -> bool:
-        """Resolve a pending request future."""
-
-        return self._pending.resolve(request_id, payload)
 
     async def _connect_once(self) -> None:
         url = build_core_websocket_url(self._config.url, self._client_id)
@@ -158,11 +158,11 @@ class WebSocketCoreTransport:
             ping_interval=self._config.ping_interval,
             ping_timeout=10,
         )
-        logger.info("WebSocketCoreTransport connected to Core at %s", url)
+        logger.info("WebSocketCoreConnection connected to Core at %s", url)
         await self._send_init_cluster()
 
     async def _send_init_cluster(self) -> None:
-        """连接/重连成功后自动发 init_cluster（D-strict 必要适配，幂等重绑定）。
+        """连接/重连成功后自动发 init_cluster（幂等重绑定）。
 
         fire-and-forget：同一 WS 上消息有序，init 先于后续命令到达 Core；
         同 client_id 重连时 Core 侧 ConnectionManager 已 evict 旧 session（解绑），
@@ -178,13 +178,13 @@ class WebSocketCoreTransport:
             await self.send(message)
         except Exception:
             logger.warning(
-                "WebSocketCoreTransport failed to send init_cluster(cluster_id=%s); "
+                "WebSocketCoreConnection failed to send init_cluster(cluster_id=%s); "
                 "connection remains usable but agent commands may be rejected until retry.",
                 self._config.cluster_id,
             )
             return
         logger.info(
-            "WebSocketCoreTransport sent init_cluster(cluster_id=%s).",
+            "WebSocketCoreConnection sent init_cluster(cluster_id=%s).",
             self._config.cluster_id,
         )
 
@@ -195,7 +195,7 @@ class WebSocketCoreTransport:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("WebSocketCoreTransport receive loop failed.")
+                logger.exception("WebSocketCoreConnection receive loop failed.")
 
             await self._handle_disconnect()
             if not self._running:
@@ -216,13 +216,19 @@ class WebSocketCoreTransport:
             await on_message(_decode_core_message(raw))
 
     async def _handle_disconnect(self) -> None:
-        cancelled = self._pending.cancel_all()
-        if cancelled:
-            logger.warning(
-                "WebSocketCoreTransport cancelled %d pending request(s) after disconnect.",
-                cancelled,
-            )
         await self._close_current_websocket()
+        await self._notify_disconnect()
+
+    async def _notify_disconnect(self) -> None:
+        """断线回调（供上层 transport 取消 pending request）。"""
+
+        on_disconnect = self._on_disconnect
+        if on_disconnect is None:
+            return
+        try:
+            await on_disconnect()
+        except Exception:  # noqa: BLE001
+            logger.exception("on_disconnect callback failed.")
 
     async def _reconnect(self) -> bool:
         attempts = 0
@@ -230,7 +236,7 @@ class WebSocketCoreTransport:
             max_attempts = self._config.max_reconnect_attempts
             if max_attempts is not None and attempts >= max_attempts:
                 logger.error(
-                    "WebSocketCoreTransport exhausted %d reconnect attempt(s).",
+                    "WebSocketCoreConnection exhausted %d reconnect attempt(s).",
                     max_attempts,
                 )
                 self._running = False
@@ -244,7 +250,7 @@ class WebSocketCoreTransport:
                 raise
             except Exception as exc:
                 logger.warning(
-                    "WebSocketCoreTransport reconnect attempt %d failed: %s",
+                    "WebSocketCoreConnection reconnect attempt %d failed: %s",
                     attempts,
                     exc,
                 )
@@ -260,43 +266,6 @@ class WebSocketCoreTransport:
         close = getattr(ws, "close", None)
         if callable(close):
             await close()
-
-
-class WebSocketCoreTransportUnit(SubjectUnit):
-    """Unit wrapper that provides the CORE_TRANSPORT service."""
-
-    def __init__(self, config: SubjectConfig) -> None:
-        self._config = config
-        self._ctx: SubjectContext | None = None
-        self._transport: WebSocketCoreTransport | None = None
-        self._meta = UnitMeta(
-            name="websocket_core_transport",
-            provides=frozenset({CORE_TRANSPORT}),
-        )
-
-    @property
-    def meta(self) -> UnitMeta:
-        return self._meta
-
-    @property
-    def service(self) -> WebSocketCoreTransport:
-        if self._transport is None:
-            raise RuntimeError("WebSocketCoreTransportUnit has not been initialized.")
-        return self._transport
-
-    async def init(self, ctx: SubjectContext) -> None:
-        self._ctx = ctx
-        self._transport = WebSocketCoreTransport(ctx.config.core)
-        ctx.services.set(CORE_TRANSPORT, self._transport)
-
-    async def start(self) -> None:
-        if self._ctx is None:
-            raise RuntimeError("WebSocketCoreTransportUnit has not been initialized.")
-        await self.service.start(self._ctx.dispatcher.dispatch_core_message)
-
-    async def stop(self) -> None:
-        if self._transport is not None:
-            await self._transport.stop()
 
 
 def build_core_websocket_url(base_url: str, client_id: str) -> str:

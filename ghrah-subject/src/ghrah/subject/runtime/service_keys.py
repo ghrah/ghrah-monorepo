@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Generic, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Protocol, TypeVar
 
 from ghrah.manifest.types import PermissionFlags  # type: ignore[import-untyped]
 from ghrah.subject.hitl.notary import HITLNotary
@@ -18,16 +18,22 @@ from ghrah.subject.manifest_store.store import ManifestStore
 from ghrah.subject.persistence.service import SubjectPersistenceService
 from ghrah.subject.runtime.capability import CapabilityRegistry
 from ghrah.subject.sandbox.executor import SandboxExecutor
-from ghrah.subject.transport.core import CoreTransport
+from ghrah.subject.sandbox.workspace import WorkspaceManager
+from ghrah.subject.task.store import TaskStore
 from ghrah.subject.transport.observer import ObserverEndpoint
 from ghrah.subject.workspace.models import WorkspaceRecord
+
+if TYPE_CHECKING:
+    from ghrah.protocol.types import SpawnAgentPayload
+    from ghrah.subject.project.models import AgentSpec, ProjectRecord
 
 __all__ = [
     "ABILITY_EXECUTOR",
     "CAPABILITY_REGISTRY",
+    "CLUSTER_TRANSPORT_MANAGER",
     "COMMAND_BRIDGE",
     "COMMAND_RUNNER",
-    "CORE_TRANSPORT",
+    "DESIRED_STATE_STORE",
     "EVENT_BRIDGE",
     "HITL_POLICY",
     "HITL_NOTARY",
@@ -39,15 +45,22 @@ __all__ = [
     "OBSERVER_EVENT_BUS",
     "PERMISSION_SERVICE",
     "PERSISTENCE",
+    "PROJECT_MANAGER",
+    "RECONCILIATION_SERVICE",
     "SANDBOX_EXECUTOR",
     "SESSION_REGISTRY",
     "TASK_MANAGER",
+    "TASK_STORE",
+    "WORKSPACE_MANAGER",
     "WORKSPACE_SERVICE",
     "AbilityExecutor",
+    "ClusterHandle",
+    "ClusterTransportManager",
     "CommandRunner",
     "ManifestPermissionIndex",
     "ObserverEventBus",
     "PermissionService",
+    "ProjectManagerService",
     "SubjectServiceKey",
     "TaskManagerService",
     "WorkspaceService",
@@ -156,6 +169,69 @@ class TaskManagerService(Protocol):
         """Dispatch a task command. Returns a dispatcher-shape result dict."""
 
 
+class ProjectManagerService(Protocol):
+    """Project command orchestration contract exposed to runtime dispatch.
+
+    ``handle_command`` 透传 13 个 project 命令；``bootstrap_default_project`` /
+    ``adopt_existing_agents`` 为 S4.6 reconcile 首启 bootstrap 专用高层方法
+    （决策 2，避免 reconciler 直调底层 store）。
+    """
+
+    async def handle_command(
+        self, command: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Dispatch a project command. Returns a dispatcher-shape result dict."""
+
+    async def bootstrap_default_project(self) -> ProjectRecord:
+        """建 default project（default cluster + default workspace + init_cluster）
+        并 ProjectStore.upsert，返回记录。供 reconcile 首启 bootstrap。"""
+
+    async def adopt_existing_agents(
+        self, project_id: str, cluster_id: str
+    ) -> list[AgentSpec]:
+        """经 cluster_transport.list_agents 从 Core 取现有 agent，构造 AgentSpec
+        并加入 project.agents desired-state，返回列表。"""
+
+
+class ClusterHandle(Protocol):
+    """单 cluster 的 Core 接入转发契约（spawn/terminate/list_agents）。"""
+
+    @property
+    def is_connected(self) -> bool:
+        """该 handle 的 transport 是否已连接。"""
+
+    async def spawn_agent(self, payload: SpawnAgentPayload) -> dict[str, Any]:
+        """发 spawn_agent，返回 command_result dict。"""
+
+    async def list_agents(self) -> list[dict[str, Any]]:
+        """发 list_agents，返回 agent 信息列表。"""
+
+    async def terminate_agent(self, agent_name: str) -> dict[str, Any]:
+        """发 terminate_agent，返回 command_result dict。"""
+
+    async def shutdown(self) -> None:
+        """fire-and-forget 发 shutdown_cluster。"""
+
+
+class ClusterTransportManager(Protocol):
+    """per-cluster WS transport 句柄管理契约。"""
+
+    async def ensure_cluster(self, cluster_id: str) -> ClusterHandle:
+        """幂等建/取某 cluster 的 handle。"""
+
+    def get_handle(self, cluster_id: str) -> ClusterHandle:
+        """取已建 handle；不存在 raise KeyError。"""
+
+    def has_cluster(self, cluster_id: str) -> bool:
+        """某 cluster handle 是否已建。"""
+
+    async def shutdown_cluster(self, cluster_id: str) -> None:
+        """shutdown 某 cluster。"""
+
+    async def stop(self) -> None:
+        """关闭所有 handle 的 transport。"""
+
+
 class ObserverEventBus(Protocol):
     """Observer-facing event bridge contract."""
 
@@ -171,6 +247,7 @@ class _ReservedService(Protocol):
 
 
 WORKSPACE_SERVICE = SubjectServiceKey[WorkspaceService]("workspace_service")
+WORKSPACE_MANAGER = SubjectServiceKey[WorkspaceManager]("workspace_manager", WorkspaceManager)
 COMMAND_RUNNER = SubjectServiceKey[CommandRunner]("command_runner")
 PERSISTENCE = SubjectServiceKey[SubjectPersistenceService](
     "persistence",
@@ -185,7 +262,6 @@ MANIFEST_PERMISSION_INDEX = SubjectServiceKey[ManifestPermissionIndex](
 PERMISSION_SERVICE = SubjectServiceKey[PermissionService]("permission_service")
 HITL_POLICY = SubjectServiceKey[HITLPolicy]("hitl_policy", HITLPolicy)
 HITL_NOTARY = SubjectServiceKey[HITLNotary]("hitl_notary", HITLNotary)
-CORE_TRANSPORT = SubjectServiceKey[CoreTransport]("core_transport")
 OBSERVER_ENDPOINT = SubjectServiceKey[ObserverEndpoint]("observer_endpoint")
 OBSERVER_EVENT_BUS = SubjectServiceKey[ObserverEventBus]("observer_event_bus")
 CAPABILITY_REGISTRY = SubjectServiceKey[CapabilityRegistry](
@@ -194,6 +270,11 @@ CAPABILITY_REGISTRY = SubjectServiceKey[CapabilityRegistry](
 )
 ABILITY_EXECUTOR = SubjectServiceKey[AbilityExecutor]("ability_executor")
 TASK_MANAGER = SubjectServiceKey[TaskManagerService]("task_manager")
+TASK_STORE = SubjectServiceKey[TaskStore]("task_store", TaskStore)
+CLUSTER_TRANSPORT_MANAGER = SubjectServiceKey[ClusterTransportManager](
+    "cluster_transport_manager"
+)
+PROJECT_MANAGER = SubjectServiceKey[ProjectManagerService]("project_manager")
 
 # Reserved for Stage 3+ integrations. The keys are intentionally real so
 # dependency declarations can be written before the concrete services exist.
@@ -201,3 +282,23 @@ MCP_CLIENT_REGISTRY = SubjectServiceKey[_ReservedService]("mcp_client_registry")
 SESSION_REGISTRY = SubjectServiceKey[_ReservedService]("session_registry")
 COMMAND_BRIDGE = SubjectServiceKey[Callable[..., Awaitable[Any]]]("command_bridge")
 EVENT_BRIDGE = SubjectServiceKey[Callable[..., Awaitable[Any]]]("event_bridge")
+
+
+# recovery 服务键置于文件末尾：DesiredStateStore / ReconciliationService 为
+# Stage 4 新建具体类，置于末尾导入避免循环（recovery 模块本身不 import 本模块，
+# 经 unit 注入依赖）。`service_type` 传具体类供 mypy/运行期类型校验。
+from ghrah.subject.recovery.desired_state import (  # noqa: E402
+    DesiredStateStore,
+)
+from ghrah.subject.recovery.reconciler import (  # noqa: E402
+    ReconciliationService,
+)
+
+DESIRED_STATE_STORE = SubjectServiceKey[DesiredStateStore](
+    "desired_state_store",
+    DesiredStateStore,
+)
+RECONCILIATION_SERVICE = SubjectServiceKey[ReconciliationService](
+    "reconciliation_service",
+    ReconciliationService,
+)

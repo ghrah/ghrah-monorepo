@@ -13,7 +13,7 @@ from ghrah.subject.runtime.capability import CapabilityRegistry
 from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.dispatcher import MessageDispatcher
 from ghrah.subject.runtime.engine import SubjectEngine
-from ghrah.subject.runtime.service_keys import CAPABILITY_REGISTRY, CORE_TRANSPORT
+from ghrah.subject.runtime.service_keys import CAPABILITY_REGISTRY
 from ghrah.subject.runtime.services import SubjectServices
 from ghrah.subject.transport.core import InProcessCoreTransport
 from ghrah.subject.unit.base import (
@@ -77,7 +77,6 @@ class _Harness:
         self.transport = InProcessCoreTransport()
         self.event_bus = SubjectEventBus()
         self.services = SubjectServices()
-        self.services.set(CORE_TRANSPORT, self.transport)
         self.services.set(CAPABILITY_REGISTRY, CapabilityRegistry())
         self.created_tasks: list[asyncio.Task[Any]] = []
         self.ctx = SubjectContext(
@@ -107,7 +106,8 @@ async def test_core_command_routes_to_unit_and_sends_command_result() -> None:
     await harness.start_transport()
 
     await harness.dispatcher.dispatch_core_message(
-        {"type": "do_work", "payload": {"x": 1}, "request_id": "req-1"}
+        {"type": "do_work", "payload": {"x": 1}, "request_id": "req-1"},
+        source=harness.transport,
     )
 
     command, payload, cmd_ctx = unit.commands_seen[0]
@@ -128,7 +128,8 @@ async def test_long_running_core_command_uses_background_task() -> None:
     await harness.start_transport()
 
     await harness.dispatcher.dispatch_core_message(
-        {"type": "slow", "payload": {}, "request_id": "req-1"}
+        {"type": "slow", "payload": {}, "request_id": "req-1"},
+        source=harness.transport,
     )
 
     assert len(harness.created_tasks) == 1
@@ -168,7 +169,8 @@ async def test_core_event_multicasts_to_units_and_internal_event_bus() -> None:
     harness.event_bus.subscribe(SUBJECT_CORE_EVENT_RECEIVED, on_internal)
 
     await harness.dispatcher.dispatch_core_message(
-        {"type": "agent_spawned", "payload": {"name": "agent-a"}}
+        {"type": "agent_spawned", "payload": {"name": "agent-a"}},
+        source=harness.transport,
     )
 
     assert first.events_seen == [("agent_spawned", {"name": "agent-a"})]
@@ -192,7 +194,8 @@ async def test_event_handler_failure_is_isolated(caplog: Any) -> None:
 
     with caplog.at_level(logging.ERROR):
         await harness.dispatcher.dispatch_core_message(
-            {"type": "agent_spawned", "payload": {"name": "agent-a"}}
+            {"type": "agent_spawned", "payload": {"name": "agent-a"}},
+            source=harness.transport,
         )
 
     assert good.events_seen == [("agent_spawned", {"name": "agent-a"})]
@@ -211,7 +214,8 @@ async def test_command_handler_failure_sends_failure_result(caplog: Any) -> None
 
     with caplog.at_level(logging.ERROR):
         await harness.dispatcher.dispatch_core_message(
-            {"type": "do_work", "payload": {}, "request_id": "req-1"}
+            {"type": "do_work", "payload": {}, "request_id": "req-1"},
+            source=harness.transport,
         )
 
     sent = harness.transport.sent_messages[-1]
@@ -233,7 +237,8 @@ async def test_command_result_resolves_pending_transport_request() -> None:
     await asyncio.sleep(0)
 
     await harness.dispatcher.dispatch_core_message(
-        {"type": "command_result", "payload": {"success": True}, "request_id": "req-1"}
+        {"type": "command_result", "payload": {"success": True}, "request_id": "req-1"},
+        source=harness.transport,
     )
 
     assert await request_task == {"success": True}
@@ -243,7 +248,7 @@ async def test_ping_sends_pong() -> None:
     harness = _Harness([])
     await harness.start_transport()
 
-    await harness.dispatcher.dispatch_core_message({"type": "ping"})
+    await harness.dispatcher.dispatch_core_message({"type": "ping"}, source=harness.transport)
 
     assert harness.transport.sent_messages == [{"type": "pong"}]
 
@@ -260,6 +265,8 @@ async def test_unmatched_core_message_warns(caplog: Any) -> None:
     harness = _Harness([])
 
     with caplog.at_level(logging.WARNING):
-        await harness.dispatcher.dispatch_core_message({"type": "unknown"})
+        await harness.dispatcher.dispatch_core_message(
+            {"type": "unknown"}, source=harness.transport
+        )
 
     assert "No Subject runtime route" in caplog.text

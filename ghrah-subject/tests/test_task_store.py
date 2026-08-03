@@ -546,3 +546,57 @@ class TestProjectIdMigration:
             assert got.project_id == "proj-1"
         finally:
             await s2.stop()
+
+
+# ─── reassign_project_id（S0 补丁，S4.6 reconcile bootstrap 用） ───
+
+
+class TestReassignProjectId:
+    async def test_reassign_migrates_sentinel_tasks(self, store: TaskStore) -> None:
+        await store.upsert(_make(task_id="a" * 32, title="A", project_id=""))
+        await store.upsert(_make(task_id="b" * 32, title="B", project_id=""))
+        await store.upsert(_make(task_id="c" * 32, title="C", project_id="proj-1"))
+
+        migrated = await store.reassign_project_id("", "default")
+        assert migrated == 2
+
+        # sentinel 已迁移到 default
+        got_a = await store.get("a" * 32)
+        got_b = await store.get("b" * 32)
+        got_c = await store.get("c" * 32)
+        assert got_a is not None and got_a.project_id == "default"
+        assert got_b is not None and got_b.project_id == "default"
+        assert got_c is not None and got_c.project_id == "proj-1"  # 未迁移
+        # version 递增
+        assert got_a.version == 2
+
+    async def test_reassign_respects_include_terminal(self, store: TaskStore) -> None:
+        await store.upsert(
+            _make(task_id="a" * 32, title="A", project_id="", status=TaskStatus.COMPLETED)
+        )
+        await store.upsert(
+            _make(task_id="b" * 32, title="B", project_id="", status=TaskStatus.PENDING)
+        )
+
+        migrated = await store.reassign_project_id(
+            "", "default", include_terminal=False
+        )
+        assert migrated == 1
+        got_a = await store.get("a" * 32)
+        assert got_a is not None and got_a.project_id == ""  # 终态未迁移
+
+    async def test_reassign_respects_include_deleted(self, store: TaskStore) -> None:
+        await store.upsert(_make(task_id="a" * 32, title="A", project_id=""))
+        await store.soft_delete("a" * 32)
+
+        migrated = await store.reassign_project_id(
+            "", "default", include_deleted=False
+        )
+        assert migrated == 0
+        got_a = await store.get("a" * 32, include_deleted=True)
+        assert got_a is not None and got_a.project_id == ""  # 软删未迁移
+
+    async def test_reassign_no_matches_returns_zero(self, store: TaskStore) -> None:
+        await store.upsert(_make(task_id="c" * 32, title="C", project_id="proj-1"))
+        migrated = await store.reassign_project_id("", "default")
+        assert migrated == 0
