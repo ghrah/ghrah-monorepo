@@ -18,7 +18,10 @@ function makeRoom(overrides: Partial<RoomInfoPayload> = {}): RoomInfoPayload {
   };
 }
 
-function makeMember(subject: string, subject_type: RoomMember["subject_type"] = "agent"): RoomMember {
+function makeMember(
+  subject: string,
+  subject_type: RoomMember["subject_type"] = "agent",
+): RoomMember {
   return { subject, subject_type, joined_at: "" };
 }
 

@@ -48,7 +48,16 @@ describe("useProjectsStore", () => {
     const store = useProjectsStore();
     store.onProjectEvent({
       project: makeProject({
-        agents: [{ name: "agent-1", cluster_id: "c1", path_grants: [] }],
+        agents: [
+          {
+            name: "agent-1",
+            cluster_id: "c1",
+            manifest_ref: "",
+            instance_manifest_path: "",
+            system_prompt: "",
+            path_grants: [],
+          },
+        ],
       }),
       agent_name: "agent-1",
     });
@@ -67,13 +76,19 @@ describe("useProjectsStore", () => {
   it("setProjectsFromList replaces map", () => {
     const store = useProjectsStore();
     store.onProjectEvent({ project: makeProject({ project_id: "old" }) });
-    store.setProjectsFromList([makeProject({ project_id: "p1" }), makeProject({ project_id: "p2" })]);
+    store.setProjectsFromList([
+      makeProject({ project_id: "p1" }),
+      makeProject({ project_id: "p2" }),
+    ]);
     expect([...store.projects.keys()].sort()).toEqual(["p1", "p2"]);
   });
 
   it("activeProject follows activeProjectId", () => {
     const store = useProjectsStore();
-    store.setProjectsFromList([makeProject({ project_id: "p1" }), makeProject({ project_id: "p2", name: "two" })]);
+    store.setProjectsFromList([
+      makeProject({ project_id: "p1" }),
+      makeProject({ project_id: "p2", name: "two" }),
+    ]);
     store.setActiveProject("p2");
     expect(store.activeProject?.name).toBe("two");
   });

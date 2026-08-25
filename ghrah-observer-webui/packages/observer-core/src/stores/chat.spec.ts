@@ -127,7 +127,9 @@ describe("useChatStore (active room pending 乐观层)", () => {
     store.setCurrentAuthor("alice");
     store.addPendingEntry({ to: "r1", content: "hi", agentName: "", roomId: "r1" });
     expect(store.allEntries[0].from).toBe("alice");
-    store.onRoomLogAppended(makeRoomEntry({ author: DEFAULT_HUMAN_AUTHOR, data: { message: "hi" } }));
+    store.onRoomLogAppended(
+      makeRoomEntry({ author: DEFAULT_HUMAN_AUTHOR, data: { message: "hi" } }),
+    );
     expect(store.allEntries).toHaveLength(1);
     store.onRoomLogAppended(makeRoomEntry({ author: "alice", data: { message: "hi" } }));
     expect(store.allEntries).toHaveLength(0);

@@ -344,7 +344,16 @@ describe("connectStores", () => {
         EventType.PROJECT_AGENT_ADDED,
         makeMsg(EventType.PROJECT_AGENT_ADDED, {
           project: makeProject("p1", {
-            agents: [{ name: "agent-1", cluster_id: "c1", path_grants: [] }],
+            agents: [
+              {
+                name: "agent-1",
+                cluster_id: "c1",
+                manifest_ref: "",
+                instance_manifest_path: "",
+                system_prompt: "",
+                path_grants: [],
+              },
+            ],
           }),
           agent_name: "agent-1",
         }),
@@ -525,7 +534,6 @@ describe("connectStores", () => {
 
     it("reconnect replay dedup: same ACTION_CHAIN_UPDATED node dispatched twice = single entries", async () => {
       await connectClient();
-      const chatStore = useChatStore();
       const chainStore = useActionChainsStore();
       const changesStore = useChangesStore();
 
@@ -554,13 +562,37 @@ describe("connectStores", () => {
       );
 
       expect(chainStore.getChain("agent-1")).toHaveLength(1);
-      expect(chatStore.allEntries).toHaveLength(1);
       expect(changesStore.changes).toHaveLength(1);
     });
 
-    it("reconnect replay dedup across multiple agents: chat flat stream + chain buckets both deduped", async () => {
+    it("reconnect replay dedup: same ROOM_LOG_APPENDED entry dispatched twice = single log entry", async () => {
       await connectClient();
-      const chatStore = useChatStore();
+      const roomsStore = useRoomsStore();
+
+      const entry = {
+        id: "e1",
+        room_id: "r1",
+        seq: 1,
+        author: "agent-1",
+        author_type: "agent",
+        timestamp: 1750000000,
+        data: { message: "hi" },
+      };
+
+      internals(client)._dispatch(
+        EventType.ROOM_LOG_APPENDED,
+        makeMsg(EventType.ROOM_LOG_APPENDED, { entry }),
+      );
+      internals(client)._dispatch(
+        EventType.ROOM_LOG_APPENDED,
+        makeMsg(EventType.ROOM_LOG_APPENDED, { entry }),
+      );
+
+      expect(roomsStore.logs.get("r1")).toHaveLength(1);
+    });
+
+    it("reconnect replay dedup across multiple agents: chain buckets both deduped", async () => {
+      await connectClient();
       const chainStore = useActionChainsStore();
 
       const nodeA = {
@@ -601,9 +633,6 @@ describe("connectStores", () => {
       // chain 分桶：每 agent 1 条
       expect(chainStore.getChain("agent-A")).toHaveLength(1);
       expect(chainStore.getChain("agent-B")).toHaveLength(1);
-      // chat 扁平流：2 条（A+B 各一条，replay 不重复）
-      expect(chatStore.allEntries).toHaveLength(2);
-      expect(chatStore.allEntries.map((e) => e.agentName).sort()).toEqual(["agent-A", "agent-B"]);
     });
   });
 
@@ -630,6 +659,116 @@ describe("connectStores", () => {
       expect(agentsStore.agents.size).toBe(2);
       expect(agentsStore.agents.has("agent-1")).toBe(true);
       expect(agentsStore.agents.has("agent-2")).toBe(true);
+    });
+
+    it("sets rooms on room_list command_result", async () => {
+      await connectClient();
+      const roomsStore = useRoomsStore();
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "r1",
+          success: true,
+          original_command: CommandType.ROOM_LIST,
+          data: {
+            rooms: [
+              {
+                room_id: "r1",
+                project_id: "p1",
+                name: "general",
+                status: "active",
+                members: [],
+                seq_watermark: 0,
+                version: 1,
+                created_at: "",
+                updated_at: "",
+              },
+            ],
+            count: 1,
+          },
+        }),
+      );
+
+      expect(roomsStore.rooms.size).toBe(1);
+      expect(roomsStore.rooms.get("r1")?.name).toBe("general");
+    });
+
+    it("sets projects on project_list command_result", async () => {
+      await connectClient();
+      const projectsStore = useProjectsStore();
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "r1",
+          success: true,
+          original_command: CommandType.PROJECT_LIST,
+          data: {
+            projects: [
+              {
+                project_id: "p1",
+                name: "proj",
+                manifest_ref: "",
+                instance_manifest_dir: "",
+                cluster_ids: [],
+                workspaces: [],
+                db_path: "",
+                agents: [],
+                task_ids: [],
+                status: "active",
+                recovery: "resume",
+                version: 1,
+                created_at: "",
+                updated_at: "",
+              },
+            ],
+            count: 1,
+          },
+        }),
+      );
+
+      expect(projectsStore.projects.size).toBe(1);
+      expect(projectsStore.projects.get("p1")?.name).toBe("proj");
+    });
+
+    it("sets room log on room_get_log command_result (room_id from entries)", async () => {
+      await connectClient();
+      const roomsStore = useRoomsStore();
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "r1",
+          success: true,
+          original_command: CommandType.ROOM_GET_LOG,
+          data: {
+            entries: [
+              {
+                id: "e2",
+                room_id: "r1",
+                seq: 2,
+                author: "agent-1",
+                author_type: "agent",
+                timestamp: 1750000001,
+                data: { message: "second" },
+              },
+              {
+                id: "e1",
+                room_id: "r1",
+                seq: 1,
+                author: "user",
+                author_type: "human",
+                timestamp: 1750000000,
+                data: { message: "first" },
+              },
+            ],
+            count: 2,
+          },
+        }),
+      );
+
+      expect(roomsStore.logs.get("r1")?.map((e) => e.seq)).toEqual([1, 2]);
     });
 
     it("ignores non-agents command_result", async () => {
@@ -719,62 +858,77 @@ describe("connectStores", () => {
   describe("disconnect", () => {
     it("disconnect function stops event routing", async () => {
       await connectClient();
-      const chatStore = useChatStore();
+      const roomsStore = useRoomsStore();
 
       disconnect();
 
       internals(client)._dispatch(
-        EventType.ACTION_CHAIN_UPDATED,
-        makeMsg(EventType.ACTION_CHAIN_UPDATED, {
-          agent_name: "agent-1",
-          node: {
-            id: "node-1",
-            agent_name: "agent-1",
-            ability_names: ["conversation"],
-            messages_delta: [
-              { role: "ai", content_blocks: [{ type: "text", text: "Hello" }], metadata: {} },
-            ],
+        EventType.ROOM_LOG_APPENDED,
+        makeMsg(EventType.ROOM_LOG_APPENDED, {
+          entry: {
+            id: "e1",
+            room_id: "r1",
+            seq: 1,
+            author: "agent-1",
+            author_type: "agent",
+            timestamp: 1750000000,
+            data: { message: "hi" },
           },
         }),
       );
 
-      expect(chatStore.allEntries).toHaveLength(0);
+      expect(roomsStore.logs.size).toBe(0);
     });
   });
 
   describe("manifest agent sync on connect", () => {
-    it("runs _syncInitialState (listManifestAgents) on connect", async () => {
-      vi.spyOn(client, "listAgents").mockResolvedValue({
+    function mockSyncMethods(c: ObserverClient) {
+      vi.spyOn(c, "listAgents").mockResolvedValue({
         request_id: "r0",
         success: true,
         data: { agents: [] },
       } satisfies CommandResultPayload);
-      const listManifestSpy = vi.spyOn(client, "listManifestAgents").mockResolvedValue({
+      const listManifestSpy = vi.spyOn(c, "listManifestAgents").mockResolvedValue({
         request_id: "r1",
         success: true,
         data: { agents: [] },
       } satisfies CommandResultPayload);
+      const listProjectsSpy = vi.spyOn(c, "listProjects").mockResolvedValue({
+        request_id: "r2",
+        success: true,
+        data: { projects: [] },
+      } satisfies CommandResultPayload);
+      const listRoomsSpy = vi.spyOn(c, "listRooms").mockResolvedValue({
+        request_id: "r3",
+        success: true,
+        data: { rooms: [] },
+      } satisfies CommandResultPayload);
+      return { listManifestSpy, listProjectsSpy, listRoomsSpy };
+    }
+
+    it("runs _syncInitialState (listManifestAgents + listProjects + listRooms) on connect", async () => {
+      const { listManifestSpy, listProjectsSpy, listRoomsSpy } = mockSyncMethods(client);
 
       await connectClient({ skipSync: false });
 
       // _syncInitialState is the real sync path (not the onConnected callback,
-      // which only sets connection state). listManifestAgents is invoked by it.
+      // which only sets connection state).
       expect(listManifestSpy).toHaveBeenCalled();
-      listManifestSpy.mockRestore();
+      expect(listProjectsSpy).toHaveBeenCalled();
+      expect(listRoomsSpy).toHaveBeenCalled();
     });
 
     it("handles listManifestAgents failure gracefully", async () => {
       // 走真实 _syncInitialState 吞错路径（skipSync:false），listManifestAgents 的
       // mockRejectedValue 实际触发并被 try/catch 吞掉，connect 仍成功、store 为空。
-      vi.spyOn(client, "listAgents").mockResolvedValue({
-        request_id: "r0",
-        success: true,
-        data: { agents: [] },
-      } satisfies CommandResultPayload);
+      const { listProjectsSpy, listRoomsSpy } = mockSyncMethods(client);
       vi.spyOn(client, "listManifestAgents").mockRejectedValue(new Error("connection failed"));
 
       await connectClient({ skipSync: false });
 
+      // 后续同步项不受前项失败影响
+      expect(listProjectsSpy).toHaveBeenCalled();
+      expect(listRoomsSpy).toHaveBeenCalled();
       const manifestsStore = useManifestsStore();
       expect(manifestsStore.agents.size).toBe(0);
     });

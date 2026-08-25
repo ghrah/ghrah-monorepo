@@ -56,7 +56,12 @@ describe("useTasksStore", () => {
       makeTask({ task_id: "t2", project_id: "p2" }),
       makeTask({ task_id: "t3", project_id: "p1" }),
     ]);
-    expect(store.tasksByProject("p1").map((t) => t.task_id).sort()).toEqual(["t1", "t3"]);
+    expect(
+      store
+        .tasksByProject("p1")
+        .map((t) => t.task_id)
+        .sort(),
+    ).toEqual(["t1", "t3"]);
     expect(store.tasksByProject("p2")).toHaveLength(1);
     expect(store.tasksByProject("nope")).toEqual([]);
   });

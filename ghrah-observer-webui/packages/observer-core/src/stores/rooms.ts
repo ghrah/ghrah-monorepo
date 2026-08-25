@@ -108,7 +108,10 @@ export const useRoomsStore = defineStore("ghrah-rooms", () => {
 
   /** 替换式灌入（供 room_get_log 结果用）。 */
   function setRoomLog(roomId: string, entries: RoomLogEntryPayload[]) {
-    logs.value.set(roomId, [...entries].sort((a, b) => a.seq - b.seq));
+    logs.value.set(
+      roomId,
+      [...entries].sort((a, b) => a.seq - b.seq),
+    );
     touchLog(roomId);
   }
 
