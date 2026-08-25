@@ -335,6 +335,20 @@ export class MockState {
   }): CommandOutcome {
     const room = this.rooms.get(p.room_id);
     if (!room) return fail(`room not found: ${p.room_id}`);
+    // 写时校验：data.targets（{message, targets?} 约定）须 ⊆ 该 room 的 agent 成员；
+    // 缺省/空 = 整室广播。
+    const targets = p.data?.targets;
+    if (targets !== undefined) {
+      if (!Array.isArray(targets) || !targets.every((t) => typeof t === "string")) {
+        return fail("invalid targets: expected string[]");
+      }
+      for (const t of targets as string[]) {
+        const isMember = room.members.some(
+          (m) => m.subject === t && m.subject_type === "agent",
+        );
+        if (!isMember) return fail(`target not in room: ${t}`);
+      }
+    }
     const seq = room.seq_watermark + 1;
     room.seq_watermark = seq;
     room.updated_at = isoNow();

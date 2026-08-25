@@ -127,6 +127,7 @@ export const demoScenario: Scenario = {
           author_type: "agent",
           data: {
             message: "@frontend 前端按 Project → Room 三级导航拆分，chat 数据源走 RoomLog。",
+            targets: ["frontend"],
           },
         }),
     ],

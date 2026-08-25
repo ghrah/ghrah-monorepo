@@ -164,8 +164,13 @@ export function useObserver() {
   // ── Room / Project / 导航 ──
 
   /** 人类向 room 发消息（author 默认对齐 DEFAULT_HUMAN_AUTHOR）。 */
-  async function roomSend(roomId: string, content: string) {
-    return withClient((c) => c.roomSend(roomId, { message: content }));
+  async function roomSend(roomId: string, content: string, targets?: string[]) {
+    return withClient((c) =>
+      c.roomSend(roomId, {
+        message: content,
+        ...(targets && targets.length > 0 ? { targets } : {}),
+      }),
+    );
   }
 
   async function listRooms(projectId?: string | null) {

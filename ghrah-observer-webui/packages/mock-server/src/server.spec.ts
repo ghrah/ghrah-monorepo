@@ -142,6 +142,61 @@ describe("mock-server 协议层", () => {
     }
   }, 10_000);
 
+  it("room_send targets：透传 + 非成员 target 拒绝 + 空 targets 广播放行", async () => {
+    const client = await makeClient();
+    try {
+      const roomId = await setupRoom(client);
+      await request(client, CommandType.ROOM_JOIN, {
+        room_id: roomId,
+        subject: "frontend",
+        subject_type: "agent",
+      });
+
+      // 定向成员：透传 data.targets
+      const targeted = await request(client, CommandType.ROOM_SEND, {
+        room_id: roomId,
+        author: "human:user",
+        author_type: "human",
+        data: { message: "hi frontend", targets: ["frontend"] },
+      });
+      expect(targeted.success).toBe(true);
+      expect((targeted.data as { entry: RoomLogEntryPayload }).entry.data.targets).toEqual([
+        "frontend",
+      ]);
+
+      // 非成员 target：拒绝
+      const bad = await request(client, CommandType.ROOM_SEND, {
+        room_id: roomId,
+        author: "human:user",
+        author_type: "human",
+        data: { message: "hi stranger", targets: ["ghost"] },
+      });
+      expect(bad.success).toBe(false);
+      expect(bad.error).toContain("target not in room: ghost");
+
+      // targets 非 string[]：拒绝
+      const malformed = await request(client, CommandType.ROOM_SEND, {
+        room_id: roomId,
+        author: "human:user",
+        author_type: "human",
+        data: { message: "m", targets: "frontend" },
+      });
+      expect(malformed.success).toBe(false);
+      expect(malformed.error).toContain("invalid targets");
+
+      // 空 targets / 缺省：广播放行
+      const broadcast = await request(client, CommandType.ROOM_SEND, {
+        room_id: roomId,
+        author: "human:user",
+        author_type: "human",
+        data: { message: "to all", targets: [] },
+      });
+      expect(broadcast.success).toBe(true);
+    } finally {
+      await client.disconnect();
+    }
+  }, 10_000);
+
   it("订阅过滤：订阅指定 event_types 的连接只收该类事件", async () => {
     const subscribed = await makeClient();
     const sender = await makeClient();

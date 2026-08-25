@@ -122,6 +122,30 @@ async function main() {
   const seqs = (rooms.logs.get(arch.room_id) ?? []).map((e) => e.seq);
   check("room log seq strictly increasing", seqs.every((s, i) => i === 0 || s > seqs[i - 1]));
 
+  // ── 6.5 定向发信（data.targets 约定）──
+  const targetedRes = await client.roomSend(arch.room_id, {
+    message: "targeted smoke",
+    targets: ["architect"],
+  });
+  check(
+    "targeted room_send success + data.targets echoed",
+    targetedRes.success &&
+      JSON.stringify(targetedRes.data?.entry?.data?.targets) === '["architect"]',
+  );
+  const badTarget = await client.roomSend(arch.room_id, {
+    message: "to nobody",
+    targets: ["ghost"],
+  });
+  check("invalid target rejected", !badTarget.success && /target not in room/.test(badTarget.error ?? ""));
+  const scenarioTargeted = await waitFor(
+    "scenario targeted message in frontend room",
+    () =>
+      (rooms.logs.get(roomByName("frontend")?.room_id) ?? []).some(
+        (e) => Array.isArray(e.data?.targets) && e.data.targets.includes("frontend"),
+      ),
+  );
+  check("scenario targeted entry visible in room log", scenarioTargeted);
+
   // ── 7. per-agent ActionChain ──
   const chainOk = await waitFor(
     "action_chain_updated for architect",

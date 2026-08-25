@@ -33,11 +33,11 @@ const roomEntries = computed<ChatEntry[]>(() => {
 
 const canChat = computed(() => rooms.activeRoomId !== null && connection.state === "connected");
 
-async function handleSend(content: string) {
+async function handleSend(targets: string[], content: string) {
   const roomId = rooms.activeRoomId;
   if (!roomId || !content) return;
-  chat.addPendingEntry({ to: roomId, content, agentName: "", roomId });
-  roomSend(roomId, content)
+  chat.addPendingEntry({ to: roomId, content, agentName: "", roomId, targets });
+  roomSend(roomId, content, targets)
     .then((r) => {
       if (r === null) chat.markPendingError(roomId, content, "发送失败：未连接", roomId);
     })
@@ -74,11 +74,15 @@ function entryClass(entry: ChatEntry): string {
 }
 
 function entryHeader(entry: ChatEntry): string {
+  const targetSuffix =
+    entry.targets && entry.targets.length > 0
+      ? ` → ${entry.targets.map((t) => `@${t}`).join(" ")}`
+      : "";
   switch (entry.kind) {
     case "human_input":
-      return "you";
+      return `you${targetSuffix}`;
     case "conversation":
-      return `@${entry.from}`;
+      return `@${entry.from}${targetSuffix}`;
     case "send_message":
       return `@${entry.from} → @${entry.to}`;
     case "broadcast":

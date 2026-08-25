@@ -22,6 +22,7 @@ export const useChatStore = defineStore("ghrah-chat", () => {
     content: string;
     agentName: string;
     roomId?: string;
+    targets?: string[];
   }): ChatEntry {
     const seq = ++pendingSeq;
     const entry: ChatEntry = {
@@ -34,6 +35,7 @@ export const useChatStore = defineStore("ghrah-chat", () => {
       agentName: partial.agentName,
       childSeq: -seq,
       roomId: partial.roomId,
+      targets: partial.targets && partial.targets.length > 0 ? partial.targets : undefined,
       pending: true,
     };
     entries.value = [...entries.value, entry];

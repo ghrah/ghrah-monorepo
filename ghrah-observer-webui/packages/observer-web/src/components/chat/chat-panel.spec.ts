@@ -13,13 +13,17 @@ vi.mock("@/composables/useObserver", () => ({
 
 import ChatPanel from "./chat-panel.vue";
 
-function room(id: string, name: string): RoomInfoPayload {
+function room(id: string, name: string, agents: string[] = []): RoomInfoPayload {
   return {
     room_id: id,
     project_id: "p1",
     name,
     status: "active",
-    members: [],
+    members: agents.map((a) => ({
+      subject: a,
+      subject_type: "agent" as const,
+      joined_at: "",
+    })),
     seq_watermark: 0,
     version: 1,
     created_at: "",
@@ -33,6 +37,7 @@ function logEntry(
   author: string,
   authorType: "agent" | "human",
   message: string,
+  data: Record<string, unknown> = {},
 ): RoomLogEntryPayload {
   return {
     id: `${roomId}-${seq}`,
@@ -41,7 +46,7 @@ function logEntry(
     author,
     author_type: authorType,
     timestamp: 1767225600,
-    data: { message },
+    data: { message, ...data },
   };
 }
 
@@ -115,7 +120,7 @@ describe("ChatPanel", () => {
     await wrapper.vm.$nextTick();
     await wrapper.find('input[type="text"]').setValue("hello room");
     await wrapper.find("form").trigger("submit");
-    expect(roomSendMock).toHaveBeenCalledWith("r1", "hello room");
+    expect(roomSendMock).toHaveBeenCalledWith("r1", "hello room", []);
     const pending = chat.allEntries.find((e) => e.content === "hello room");
     expect(pending?.roomId).toBe("r1");
     expect(pending?.pending).toBe(true);
@@ -158,6 +163,34 @@ describe("ChatPanel", () => {
     expect(e?.roomId).toBe("r1");
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".chat-entry").classes()).toContain("entry-error");
+  });
+
+  it("targeted send: chip 选中后 roomSend 携带 targets", async () => {
+    const { rooms } = setup();
+    rooms.setRoomsFromList([room("r1", "arch", ["frontend", "backend"])]);
+    rooms.setActiveRoom("r1");
+    roomSendMock.mockResolvedValueOnce({ success: true });
+    const wrapper = mount(ChatPanel);
+    await wrapper.vm.$nextTick();
+    const chips = wrapper.findAll('button[type="button"]');
+    await chips[0].trigger("click"); // @frontend
+    await wrapper.find('input[type="text"]').setValue("please review");
+    await wrapper.find("form").trigger("submit");
+    expect(roomSendMock).toHaveBeenCalledWith("r1", "please review", ["frontend"]);
+  });
+
+  it("entry 带 targets 时 header 显示定向标记", async () => {
+    const { rooms } = setup();
+    rooms.setActiveRoom("r1");
+    rooms.setRoomLog("r1", [
+      logEntry("r1", 1, "architect", "agent", "targeted msg", { targets: ["frontend"] }),
+      logEntry("r1", 2, "architect", "agent", "broadcast msg"),
+    ]);
+    const wrapper = mount(ChatPanel);
+    await wrapper.vm.$nextTick();
+    const headers = wrapper.findAll(".entry-header");
+    expect(headers[0].text()).toContain("→ @frontend");
+    expect(headers[1].text()).not.toContain("→");
   });
 
   it("does not send when input is empty", async () => {

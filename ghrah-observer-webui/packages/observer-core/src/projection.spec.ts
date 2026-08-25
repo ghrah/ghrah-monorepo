@@ -253,6 +253,27 @@ describe("roomLogToChatEntries", () => {
     const e = roomLogToChatEntries(makeRoomEntry({ data: { foo: 1 } }));
     expect(e.content).toBe(JSON.stringify({ foo: 1 }));
   });
+
+  it("data.targets 为 string[] 时投影到 targets", () => {
+    const e = roomLogToChatEntries(
+      makeRoomEntry({ data: { message: "hi", targets: ["frontend", "backend"] } }),
+    );
+    expect(e.targets).toEqual(["frontend", "backend"]);
+  });
+
+  it("targets 缺省/空数组/非 string[] 时均为 undefined（广播）", () => {
+    expect(roomLogToChatEntries(makeRoomEntry()).targets).toBeUndefined();
+    expect(
+      roomLogToChatEntries(makeRoomEntry({ data: { message: "m", targets: [] } })).targets,
+    ).toBeUndefined();
+    expect(
+      roomLogToChatEntries(makeRoomEntry({ data: { message: "m", targets: "frontend" } }))
+        .targets,
+    ).toBeUndefined();
+    expect(
+      roomLogToChatEntries(makeRoomEntry({ data: { message: "m", targets: [1, 2] } })).targets,
+    ).toBeUndefined();
+  });
 });
 
 describe("projectNodeToFileChanges", () => {

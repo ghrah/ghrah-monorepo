@@ -18,6 +18,8 @@ export interface ChatEntry {
   agentName: string;
   childSeq: number;
   roomId?: string;
+  /** 定向发信目标（data.targets 约定）；缺省/空 = 整室广播。 */
+  targets?: string[];
   pending?: boolean;
   error?: string;
 }
@@ -53,12 +55,19 @@ function _blockArg(block: ContentBlock, key: string): string {
 
 /**
  * RoomLog entry → ChatEntry。chat 的按 Room 投影（数据源 = rooms store 的 logs）。
- * data.message（string）为 content；缺 message 时回退 JSON.stringify(data)。
+ * data 约定（map 信封，协议层不约束）：`{message: string, targets?: string[]}`——
+ * message 为 content（缺时回退 JSON.stringify(data)）；targets 非空 = 定向这些
+ * agent，缺省/空 = 整室广播。
  */
 export function roomLogToChatEntries(entry: RoomLogEntryPayload): ChatEntry {
   const data = entry.data ?? {};
   const message = data.message;
   const content = typeof message === "string" ? message : JSON.stringify(data);
+  const rawTargets = data.targets;
+  const targets =
+    Array.isArray(rawTargets) && rawTargets.every((t) => typeof t === "string")
+      ? (rawTargets as string[])
+      : undefined;
   return {
     from: entry.author,
     to: entry.room_id,
@@ -69,6 +78,7 @@ export function roomLogToChatEntries(entry: RoomLogEntryPayload): ChatEntry {
     agentName: entry.author_type === "agent" ? entry.author : "",
     childSeq: entry.seq,
     roomId: entry.room_id,
+    targets: targets && targets.length > 0 ? targets : undefined,
   };
 }
 
