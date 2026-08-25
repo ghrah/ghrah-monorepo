@@ -33,15 +33,10 @@ async def test_coexistence_assembly_all_fibers_active(tmp_path: Path) -> None:
         fibers = await mount_builtin_units(ctx, config, profile="coexistence")
         assert fibers
         assert set(fibers) == {
-            "persistence",
             "sandbox",
             "manifest_store",
             "ledger",
             "workspace",
-            "hitl_policy",
-            "permissions",
-            "hitl_notary",
-            "ability_runner",
             "task",
             "desired_state",
         }
@@ -50,17 +45,11 @@ async def test_coexistence_assembly_all_fibers_active(tmp_path: Path) -> None:
         for fiber in fibers.values():
             assert fiber.state is FiberState.ACTIVE
 
-        assert ctx.get("persistence") is not None
         assert ctx.get("sandbox_executor") is not None
         assert ctx.get("manifest_store") is not None
-        assert ctx.get("manifest_permission_index") is not None
         assert ctx.get("ledger") is not None
         assert ctx.get("workspace_service") is not None
         assert ctx.get("workspace_manager") is not None
-        assert ctx.get("hitl_policy") is not None
-        assert ctx.get("permission_service") is not None
-        assert ctx.get("hitl_notary") is not None
-        assert ctx.get("ability_executor") is not None
         assert ctx.get("task_manager") is not None
         assert ctx.get("task_store") is not None
         assert ctx.get("desired_state_store") is not None
@@ -73,15 +62,10 @@ async def test_full_assembly_all_fibers_active(
     async with Context() as ctx:
         fibers = await mount_builtin_units(ctx, config, profile="full")
         assert set(fibers) == {
-            "persistence",
             "sandbox",
             "manifest_store",
             "ledger",
             "workspace",
-            "hitl_policy",
-            "permissions",
-            "hitl_notary",
-            "ability_runner",
             "task",
             "desired_state",
             "websocket_observer_endpoint",

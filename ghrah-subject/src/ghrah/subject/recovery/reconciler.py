@@ -4,7 +4,7 @@
 
 """ReconciliationService：Subject 全栈 reconcile。
 
-在 ``SubjectEngine.start()`` 末尾触发（所有 unit start 后）：加载 desired-state →
+在装配层末尾触发（assemble_subject，所有 unit ACTIVE 后）：加载 desired-state →
 对每个 desired project 校验 workspace/cluster/agent/实例 manifest 一致性 →
 首次启动 bootstrap default project（建立 default cluster + default workspace + 迁移
 sentinel task + 归入现有 agent）→ 发送 ``subject_reconciled``/``reconcile_failed``
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
         ProjectManagerService,
     )
     from ghrah.subject.runtime.service_keys import (
-        ClusterTransportManager as ClusterTransportManagerProtocol,
+        CoreClusterRegistryService as ClusterRegistryProtocol,
     )
     from ghrah.subject.sandbox.workspace import WorkspaceManager
     from ghrah.subject.task.store import TaskStore
@@ -89,7 +89,7 @@ class ReconciliationService:
             adopt_existing_agents + 13 命令；reconcile 首启经其 bootstrap）。
         workspace_mgr: WorkspaceManager（列已登记 workspace + 注册/重建 default ws）。
         task_store: TaskStore（reassign_project_id 迁移 sentinel task）。
-        cluster_transport: ClusterTransportManager（ensure_cluster + get_handle）。
+        cluster_registry: CoreClusterRegistryService（ensure_cluster + get_handle）。
         manifest_store: ManifestStore（实例 manifest 校验，MVP 仅 os.path.exists）。
         subject_id: 对账归属 subject 标识。
         on_event: 事件回调（unit 注入，转 internal event_bus）。
@@ -102,7 +102,7 @@ class ReconciliationService:
         project_mgr: ProjectManagerService,
         workspace_mgr: WorkspaceManager,
         task_store: TaskStore,
-        cluster_transport: ClusterTransportManagerProtocol,
+        cluster_registry: ClusterRegistryProtocol,
         manifest_store: ManifestStore,
         *,
         subject_id: str,
@@ -113,7 +113,7 @@ class ReconciliationService:
         self._project_mgr = project_mgr
         self._workspace_mgr = workspace_mgr
         self._task_store = task_store
-        self._cluster_transport = cluster_transport
+        self._cluster_transport = cluster_registry
         self._manifest_store = manifest_store
         self._subject_id = subject_id
         self._on_event = on_event
@@ -164,9 +164,7 @@ class ReconciliationService:
         report.projects_reconciled += 1
         if project.cluster_ids:
             cluster_id = project.cluster_ids[0]
-            agents = await self._project_mgr.adopt_existing_agents(
-                project.project_id, cluster_id
-            )
+            agents = await self._project_mgr.adopt_existing_agents(project.project_id, cluster_id)
             report.agents_spawned += len(agents)
         migrated = await self._task_store.reassign_project_id(
             "", project.project_id, include_terminal=True, include_deleted=True
@@ -180,9 +178,7 @@ class ReconciliationService:
         ``project_mgr.handle_command("project_list", {})`` 返回 list 结果；
         为避免依赖 ProjectStore 直连，经 project_mgr 命令取。此处用 list 命令。
         """
-        result = await self._project_mgr.handle_command(
-            "project_list", {"include_deleted": False}
-        )
+        result = await self._project_mgr.handle_command("project_list", {"include_deleted": False})
         projects_data = result.get("data", {}).get("projects", []) if result.get("success") else []
         from ghrah.subject.project.models import ProjectRecord
 
@@ -193,9 +189,7 @@ class ReconciliationService:
 
     # ─── 单 project reconcile（父计划 §3.3 步骤 1-2） ───
 
-    async def _reconcile_project(
-        self, project: ProjectRecord, report: ReconcileReport
-    ) -> None:
+    async def _reconcile_project(self, project: ProjectRecord, report: ReconcileReport) -> None:
         """对账单个 project：workspace / cluster / 实例 manifest / agent。"""
         report.projects_reconciled += 1
         # workspace：经 WorkspaceManager 已登记记录比对（不重复扫描，复用 orphan adopt）
@@ -257,9 +251,7 @@ class ReconciliationService:
                 "RESUME rebuild requires locator (TODO manifest-instance)"
             )
 
-    async def _reconcile_agents(
-        self, project: ProjectRecord, report: ReconcileReport
-    ) -> None:
+    async def _reconcile_agents(self, project: ProjectRecord, report: ReconcileReport) -> None:
         """对账 agent：校验实例 manifest（os.path.exists）+ spawn 缺失 agent。"""
         for cluster_id in project.cluster_ids:
             try:
@@ -299,9 +291,7 @@ class ReconciliationService:
                 if spawned:
                     report.agents_spawned += 1
 
-    async def _spawn_agent(
-        self, handle: ClusterHandle, agent: AgentSpec
-    ) -> bool:
+    async def _spawn_agent(self, handle: ClusterHandle, agent: AgentSpec) -> bool:
         """spawn 单个 agent。返回是否成功 spawn。"""
         from ghrah.protocol.types import AgentConfigPayload, SpawnAgentPayload
 

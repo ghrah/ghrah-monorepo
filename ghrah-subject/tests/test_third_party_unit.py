@@ -1,120 +1,103 @@
-"""第三方 Subject Unit 发现与 allowlist 启用验收（定位文档 §原则9）。
+# SPDX-FileCopyrightText: 2026 chenxya <chenxya@ghrah.org>
+#
+# SPDX-License-Identifier: Apache-2.0
 
-验证三段：
-1. engine.discover() 经 entry_points group 发现候选（不启用）。
-2. 默认 enabled_third_party_units=[] → get_unit 为 None。
-3. allowlist 启用后 → 加载 + 事件路径可达。
+"""第三方 Subject Unit 发现与 allowlist 启用验收（Ouroboros 形态）。
 
-实现要点（核对后确认）：
-- CapabilityProvider Protocol（runtime/capability.py:47）方法：
-  list_abilities() / describe_permissions()。
-- SubjectEventBus.emit（event_bus.py:49）用 asyncio.gather 直接 await 所有订阅者，
-  非 fire-and-forget —— emit 返回时订阅者已完成，无需 asyncio.sleep。
-- AuditLogUnit 走 ctx.event_bus.subscribe 订阅路径（与 ManifestStoreUnit 一致）。
+验证三段（定位文档 §原则9 语义保留）：
+1. ``discover()`` 经 entry_points group 发现候选（不启用）。
+2. 默认 allowlist 空 → ``mount_third_party_units`` 挂载零 unit。
+3. allowlist 启用 → ``ctx.plugin(mount_unit(unit))`` 挂载 + 命令经
+   ctx.serial 路由可达。
 """
+
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from ouroboros import Context, FiberState  # type: ignore[import-untyped]
+
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
-from ghrah.subject.runtime.capability import (
-    AbilityContribution,
-    CapabilityProvider,
-    PermissionDescriptor,
+from ghrah.subject.runtime.ouroboros_bridge import bridge_command
+from ghrah.subject.runtime.third_party import (
+    discover,
+    mount_third_party_units,
+    resolve_discovered,
 )
-from ghrah.subject.runtime.context import SubjectContext
-from ghrah.subject.runtime.engine import SubjectEngine
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 
 
-class AuditLogUnit(SubjectUnit, CapabilityProvider):
-    """Fake 第三方 Unit：审计日志，订阅 SUBJECT_CORE_EVENT_RECEIVED 并记录。
-
-    同时实现 CapabilityProvider，验证第三方可声明能力贡献（接口预留）。
-    """
+class AuditLogUnit(SubjectUnit):
+    """Fake 第三方 Unit：审计日志，记录命令。"""
 
     def __init__(self) -> None:
-        self._ctx: SubjectContext | None = None
-        self._records: list[dict[str, Any]] = []
+        self.commands: list[tuple[str, dict[str, Any]]] = []
         self._meta = UnitMeta(
             name="audit_log",
             routes=RouteSpec(commands=frozenset({"audit_query"})),
-            provides_capabilities=True,
         )
 
     @property
     def meta(self) -> UnitMeta:
         return self._meta
 
-    async def init(self, ctx: SubjectContext) -> None:
-        self._ctx = ctx
-        # 订阅内部事件（与 ManifestStoreUnit 同路径）
-        ctx.event_bus.subscribe(SUBJECT_CORE_EVENT_RECEIVED, self._on_event)
-
-    async def _on_event(self, event_type: str, payload: Any) -> None:
-        self._records.append({"event_type": event_type, "payload": payload})
-
     async def handle_command(
         self, command: str, payload: dict[str, Any], cmd_ctx: CommandContext
     ) -> dict[str, Any]:
+        self.commands.append((command, dict(payload)))
         if command == "audit_query":
-            return {"success": True, "records": list(self._records)}
+            return {"success": True, "data": {"records": len(self.commands)}}
         return {"success": False, "error": f"Unknown: {command}"}
 
-    # —— CapabilityProvider（runtime/capability.py:47）——
-    def list_abilities(self) -> list[AbilityContribution]:
-        return []  # Stage 2 不强制实际贡献能力，仅验证可声明 Protocol
 
-    def describe_permissions(self) -> list[PermissionDescriptor]:
-        return []
-
-
-def test_discover_finds_third_party_candidate_but_not_enabled_by_default() -> None:
-    """§原则9：discover 发现为候选，默认 get_unit 为 None。"""
-    config = SubjectConfig(enabled_third_party_units=[])  # allowlist 空
-    engine = SubjectEngine(config)
-
-    # 直注 discovered（绕开真实 entry_points 安装；engine.py:43 self._discovered）
-    engine._discovered["audit_log"] = AuditLogUnit
-
-    # 模拟 enable_from_config：读 allowlist（空）→ 不注册
-    engine.enable_from_config()
-
-    assert engine.get_unit("audit_log") is None  # 默认未启用
-    assert "audit_log" in engine.discovered  # 但已被发现为候选
-
-
-async def test_allowlist_enables_third_party_unit_and_receives_event(tmp_path) -> None:
-    """§原则9：allowlist 启用后 Unit 加载 + 事件路径可达。"""
-    config = SubjectConfig(
+def _config(tmp_path: Path, *, allowlist: list[str]) -> SubjectConfig:
+    return SubjectConfig(
         workspace_root=str(tmp_path / "workspace"),
         db_path=str(tmp_path / "subject.db"),
         manifest_root=str(tmp_path / "manifests"),
-        enabled_third_party_units=["audit_log"],
+        enabled_third_party_units=allowlist,
     )
-    engine = SubjectEngine(config)
-    engine._discovered["audit_log"] = AuditLogUnit
 
-    engine.register_builtin_units(profile="coexistence")
-    engine.enable_from_config()
-    engine.validate()  # 依赖拓扑校验（audit_log 无 requires，应通过）
 
-    await engine.start()
-    try:
-        audit_unit = engine.get_unit("audit_log")
-        assert audit_unit is not None
-        assert isinstance(audit_unit, AuditLogUnit)
+def test_resolve_discovered_instantiates_and_validates() -> None:
+    unit = resolve_discovered("audit_log", AuditLogUnit)
+    assert isinstance(unit, AuditLogUnit)
 
-        # emit 直接 await 订阅者（event_bus.py:49 用 gather），返回时已完成
-        await engine.event_bus.emit(SUBJECT_CORE_EVENT_RECEIVED, {"event_type": "test"})
+    import pytest
 
-        query_result = await audit_unit.handle_command(
-            "audit_query", {}, CommandContext.observer("req-1", session_id=None)
-        )
-        records = query_result["records"]
-        assert query_result["success"] is True
-        assert len(records) == 1
-        assert records[0]["payload"]["event_type"] == "test"
-    finally:
-        await engine.stop()
+    with pytest.raises(TypeError):
+        resolve_discovered("bad", lambda: object())  # type: ignore[arg-type,return-value]
+
+
+def test_discover_returns_candidates_without_enabling() -> None:
+    candidates = discover()
+    # 本包 entry_points group 为空（内置 unit 显式挂载）；发现≠启用语义仍在
+    assert isinstance(candidates, dict)
+
+
+async def test_allowlist_empty_mounts_nothing(tmp_path: Path) -> None:
+    config = _config(tmp_path, allowlist=[])
+    async with Context() as ctx:
+        fibers = await mount_third_party_units(ctx, config, discovered={"audit_log": AuditLogUnit})
+        assert fibers == {}
+
+
+async def test_allowlist_enables_unit_and_command_routes(tmp_path: Path) -> None:
+    config = _config(tmp_path, allowlist=["audit_log"])
+    async with Context() as ctx:
+        fibers = await mount_third_party_units(ctx, config, discovered={"audit_log": AuditLogUnit})
+        assert set(fibers) == {"audit_log"}
+        assert fibers["audit_log"].state is FiberState.ACTIVE
+
+        # 命令经 ctx.serial 路由可达（bridge_command → command/audit_query）
+        result = await bridge_command(ctx, "audit_query", {})
+        assert result["success"] is True
+        assert result["data"]["records"] == 1
+
+
+async def test_allowlisted_but_not_discovered_warns_and_skips(tmp_path: Path) -> None:
+    config = _config(tmp_path, allowlist=["ghost"])
+    async with Context() as ctx:
+        fibers = await mount_third_party_units(ctx, config, discovered={})
+        assert fibers == {}

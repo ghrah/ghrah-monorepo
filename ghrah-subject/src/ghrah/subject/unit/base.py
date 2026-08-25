@@ -20,7 +20,6 @@ __all__ = [
     "SubjectServiceKey",
     "SubjectUnit",
     "UnitMeta",
-    "UnitState",
 ]
 
 
@@ -43,18 +42,6 @@ class UnitMeta:
     provides: frozenset[SubjectServiceKey[Any]] = field(default_factory=frozenset)
     routes: RouteSpec = field(default_factory=RouteSpec)
     provides_capabilities: bool = False
-
-
-class UnitState(StrEnum):
-    """Runtime lifecycle state of a Subject unit."""
-
-    REGISTERED = "registered"
-    INITIALIZED = "initialized"
-    STARTED = "started"
-    READY = "ready"
-    STOPPING = "stopping"
-    STOPPED = "stopped"
-    FAILED = "failed"
 
 
 class CommandSource(StrEnum):

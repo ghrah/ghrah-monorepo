@@ -12,11 +12,10 @@ from typing import Any
 from ghrah.manifest.builtins import load_all_builtin_manifests  # type: ignore[import-untyped]
 from ghrah.manifest.types import PermissionFlags  # type: ignore[import-untyped]
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.event_bus import SUBJECT_MANIFEST_PERMISSIONS_CHANGED
 from ghrah.subject.manifest_store.builtins import ensure_builtins
 from ghrah.subject.manifest_store.service import handle_manifest_command
 from ghrah.subject.manifest_store.store import ManifestStore
-from ghrah.subject.runtime.service_keys import MANIFEST_PERMISSION_INDEX, MANIFEST_STORE
+from ghrah.subject.runtime.service_keys import MANIFEST_STORE
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units._commands import MANIFEST_COMMANDS
 from ghrah.subject.units._helpers import (
@@ -83,7 +82,7 @@ class ManifestStoreUnit(SubjectUnit):
         self._meta = UnitMeta(
             name="manifest_store",
             routes=RouteSpec(commands=MANIFEST_COMMANDS),
-            provides=frozenset({MANIFEST_STORE, MANIFEST_PERMISSION_INDEX}),
+            provides=frozenset({MANIFEST_STORE}),
         )
 
     @property
@@ -109,7 +108,6 @@ class ManifestStoreUnit(SubjectUnit):
         ensure_builtins(self._store)
         self._index = _ManifestPermissionIndexImpl(self._store)
         ctx.provide(MANIFEST_STORE.name, self._store)
-        ctx.provide(MANIFEST_PERMISSION_INDEX.name, self._index)
 
     async def handle_command(
         self,
@@ -134,7 +132,6 @@ class ManifestStoreUnit(SubjectUnit):
             return
 
         self.refresh_permission_index()
-        ctx.emit(f"event/{SUBJECT_MANIFEST_PERMISSIONS_CHANGED}", {})
         ctx.emit(f"event/{event_type}", manifest_result_to_event_payload(result))
 
     def refresh_permission_index(self) -> None:

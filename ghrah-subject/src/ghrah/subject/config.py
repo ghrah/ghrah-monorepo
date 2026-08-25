@@ -4,7 +4,7 @@
 
 S2.0 配置拆分：把上帝配置对象拆为各 Unit 独立配置切片，`from_env()` 向后兼容。
 旧 flat 字段（workspace_root/db_path/manifest_root/hitl_policy/core/log_level）保留为兼容真相，
-新 slice（persistence/sandbox/manifest/hitl/ability_runner）由 flat 字段派生或可显式传入。
+新 slice（persistence/sandbox/manifest/hitl）由 flat 字段派生或可显式传入。
 """
 
 from __future__ import annotations
@@ -15,10 +15,6 @@ from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 
 from ghrah.protocol.types import RecoveryAction
-
-# AbilityRunnerConfig 已存在于 ability_runner.py（含 hitl_timeout），此处 re-export
-# 统一取用点。注意：ability_runner.py 不反向 import config.py，无循环依赖。
-from ghrah.subject.ability_runner import AbilityRunnerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +180,7 @@ class SubjectConfig:
     仍可被 SubjectConfig(workspace_root=...) 构造。Unit 经 ``config.<slice>`` 读自己那一片；
     ``__post_init__`` 负责在 slice 未显式传入时由 flat 字段派生。
 
-    Slice 字段（persistence/sandbox/manifest/hitl/ability_runner）通过 InitVar 传入，
+    Slice 字段（persistence/sandbox/manifest/hitl）通过 InitVar 传入，
     读期以只读 property 暴露为非 Optional 类型（mypy strict 友好）。
 
     Attributes:
@@ -211,7 +207,6 @@ class SubjectConfig:
     sandbox_slice: InitVar[SandboxUnitConfig | None] = None
     manifest_slice: InitVar[ManifestConfig | None] = None
     hitl_slice: InitVar[HITLPolicyConfig | None] = None
-    ability_runner_slice: InitVar[AbilityRunnerConfig | None] = None
     project_slice: InitVar[ProjectConfig | None] = None
     recovery_slice: InitVar[RecoveryConfig | None] = None
 
@@ -224,7 +219,6 @@ class SubjectConfig:
     _sandbox: SandboxUnitConfig = field(init=False)
     _manifest: ManifestConfig = field(init=False)
     _hitl: HITLPolicyConfig = field(init=False)
-    _ability_runner: AbilityRunnerConfig = field(init=False)
     _project: ProjectConfig = field(init=False)
     _recovery: RecoveryConfig = field(init=False)
 
@@ -234,7 +228,6 @@ class SubjectConfig:
         sandbox_slice: SandboxUnitConfig | None,
         manifest_slice: ManifestConfig | None,
         hitl_slice: HITLPolicyConfig | None,
-        ability_runner_slice: AbilityRunnerConfig | None,
         project_slice: ProjectConfig | None,
         recovery_slice: RecoveryConfig | None,
     ) -> None:
@@ -245,9 +238,6 @@ class SubjectConfig:
         )
         self._manifest = manifest_slice or ManifestConfig(manifest_root=self.manifest_root)
         self._hitl = hitl_slice or self.hitl_policy
-        self._ability_runner = ability_runner_slice or AbilityRunnerConfig(
-            hitl_timeout=self.core.command_timeout,
-        )
         # project slice：default_workspace_locator 为空时派生自 sandbox.workspace_root
         # + "/projects/default"（flat 兼容真相）。
         self._project = project_slice or ProjectConfig(
@@ -286,10 +276,6 @@ class SubjectConfig:
     @property
     def hitl(self) -> HITLPolicyConfig:
         return self._hitl
-
-    @property
-    def ability_runner(self) -> AbilityRunnerConfig:
-        return self._ability_runner
 
     @property
     def project(self) -> ProjectConfig:
@@ -374,17 +360,6 @@ class SubjectConfig:
         else:
             sandbox_default_timeout = core.command_timeout
 
-        # ability hitl_timeout：专用 env，未设置时回退到 core.command_timeout（向后兼容）
-        ability_hitl_timeout_env = os.environ.get("GHRAH_SUBJECT_ABILITY_HITL_TIMEOUT")
-        if ability_hitl_timeout_env:
-            ability_hitl_timeout = _safe_float(
-                ability_hitl_timeout_env,
-                core.command_timeout,
-                "GHRAH_SUBJECT_ABILITY_HITL_TIMEOUT",
-            )
-        else:
-            ability_hitl_timeout = core.command_timeout
-
         transport = TransportKindConfig(
             core=os.environ.get("GHRAH_SUBJECT_TRANSPORT_CORE_KIND", "websocket"),
             observer=os.environ.get("GHRAH_SUBJECT_TRANSPORT_OBSERVER_KIND", "websocket"),
@@ -457,7 +432,6 @@ class SubjectConfig:
                 workspace_root=workspace_root,
                 default_timeout=sandbox_default_timeout,
             ),
-            ability_runner_slice=AbilityRunnerConfig(hitl_timeout=ability_hitl_timeout),
             transport=transport,
             enabled_third_party_units=enabled_third_party_units,
             project_slice=project_slice,

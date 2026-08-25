@@ -15,7 +15,6 @@ import logging
 
 import pytest
 
-from ghrah.subject.ability_runner import AbilityRunnerConfig
 from ghrah.subject.config import (
     CoreConnectionConfig,
     CoreTransportConfig,
@@ -101,10 +100,6 @@ class TestSliceDerivation:
         # hitl slice 从 hitl_policy flat 字段派生（同一对象）
         assert config.hitl is policy
 
-    def test_ability_runner_slice_derived_from_core(self) -> None:
-        config = SubjectConfig(core=CoreTransportConfig(command_timeout=120.0))
-        assert config.ability_runner.hitl_timeout == 120.0
-
 
 class TestSliceExplicitOverride:
     """slice 可显式传入，覆盖 flat 派生。"""
@@ -146,13 +141,6 @@ class TestSliceExplicitOverride:
         # flat 字段不变
         assert config.hitl_policy is flat_policy
 
-    def test_ability_runner_slice_explicit(self) -> None:
-        config = SubjectConfig(
-            core=CoreTransportConfig(command_timeout=10.0),
-            ability_runner_slice=AbilityRunnerConfig(hitl_timeout=77.0),
-        )
-        assert config.ability_runner.hitl_timeout == 77.0
-
 
 class TestSliceNonOptional:
     """slice property 非 Optional（mypy strict 友好）。"""
@@ -172,10 +160,6 @@ class TestSliceNonOptional:
     def test_hitl_property_non_optional(self) -> None:
         config = SubjectConfig()
         assert type(config.hitl) is HITLPolicyConfig
-
-    def test_ability_runner_property_non_optional(self) -> None:
-        config = SubjectConfig()
-        assert type(config.ability_runner) is AbilityRunnerConfig
 
 
 class TestTransportKind:
@@ -263,32 +247,12 @@ class TestFromEnv:
         config = SubjectConfig.from_env()
         assert config.sandbox.default_timeout == 123.0
 
-    def test_from_env_sandbox_timeout_override(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_from_env_sandbox_timeout_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT", "123.0")
         monkeypatch.setenv("GHRAH_SUBJECT_SANDBOX_DEFAULT_TIMEOUT", "456.0")
 
         config = SubjectConfig.from_env()
         assert config.sandbox.default_timeout == 456.0
-
-    def test_from_env_ability_timeout_fallback_to_core(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT", "200.0")
-        monkeypatch.delenv("GHRAH_SUBJECT_ABILITY_HITL_TIMEOUT", raising=False)
-
-        config = SubjectConfig.from_env()
-        assert config.ability_runner.hitl_timeout == 200.0
-
-    def test_from_env_ability_timeout_override(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT", "200.0")
-        monkeypatch.setenv("GHRAH_SUBJECT_ABILITY_HITL_TIMEOUT", "500.0")
-
-        config = SubjectConfig.from_env()
-        assert config.ability_runner.hitl_timeout == 500.0
 
     def test_from_env_transport_kind(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GHRAH_SUBJECT_TRANSPORT_CORE_KIND", "grpc")
@@ -325,9 +289,7 @@ class TestFromEnv:
         # hitl slice 与 flat 字段一致（from_env 未显式传 hitl_slice，由 flat 派生）
         assert config.hitl is config.hitl_policy
 
-    def test_from_env_sandbox_workspace_derived(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_from_env_sandbox_workspace_derived(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("GHRAH_SUBJECT_WORKSPACE_ROOT", "/tmp/env-ws2")
 
         config = SubjectConfig.from_env()

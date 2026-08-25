@@ -7,7 +7,7 @@
     - ObserverServerConfig: 服务器配置
     - ConnectionManager: Observer 连接管理
     - EventBus: 事件发布与重放
-    - ObserverRouter: 命令路由（S2.3 后统一委派 SubjectEngine，subscribe/unsubscribe 本地处理）
+    - ObserverRouter: 命令路由（统一委派 ctx.serial 分发，subscribe/unsubscribe 本地处理）
     - ObserverServer: WebSocket 连接处理器
     - create_app: FastAPI 应用工厂（薄 facade，从 engine 取回 Unit 持有的 app）
 """

@@ -2,9 +2,10 @@
 
 解析 Observer WebSocket 消息类型，路由到对应的处理器。
 
-路由规则（S2.3 后，amendment A3/A6 + D3）：
-    - subscribe/unsubscribe → 本地 ConnectionManager（不进 engine）
+路由规则（Ouroboros 装配形态）：
+    - subscribe/unsubscribe → 本地 ConnectionManager（不进分发）
     - 其余所有 Observer 命令 → 统一委派 engine.dispatch_observer_command
+      （observer unit 的 _EngineDispatchAdapter → bridge_command/ctx.serial）
     - event → 本地 EventBus 发布（handle_event）
 """
 
@@ -29,7 +30,20 @@ from ghrah.subject.server.connection_manager import ConnectionManager
 from ghrah.subject.server.event_bus import EventBus
 
 if TYPE_CHECKING:
-    from ghrah.subject.runtime.engine import SubjectEngine
+    # duck-typed engine 形状：仅消费 dispatch_observer_command（实际传入
+    # observer unit 的 _EngineDispatchAdapter → bridge_command/ctx.serial）
+    from typing import Protocol
+
+    class SubjectEngine(Protocol):
+        async def dispatch_observer_command(
+            self,
+            command: str,
+            payload: dict[str, Any],
+            *,
+            request_id: str | None = None,
+            session_id: str | None = None,
+        ) -> dict[str, Any]: ...
+
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +129,9 @@ class ObserverRouter:
         agent_name = payload_agent_name(message.payload)
         logger.info(
             "handle_event: event_type=%s session_id=%s agent=%s publishing via EventBus",
-            event_type.value, session_id, agent_name,
+            event_type.value,
+            session_id,
+            agent_name,
         )
         await self._event_bus.publish(message)
 

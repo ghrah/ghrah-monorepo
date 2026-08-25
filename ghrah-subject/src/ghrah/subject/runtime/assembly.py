@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Subject 装配层（Ouroboros 形态）——取代旧 SubjectEngine 装配序列。
+"""Subject 装配层（Ouroboros 形态）。
 
 ``assemble_subject(ctx, config, profile)``：
 1. ``mount_builtin_units``（coexistence=11 / full=14，逐个挂载等 ACTIVE，

@@ -2,81 +2,86 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Subject runtime infrastructure."""
+"""Subject runtime（Ouroboros 装配形态）。
 
-from ghrah.subject.runtime.capability import (
-    AbilityContribution,
-    CapabilityProvider,
-    CapabilityRegistry,
-    PermissionDescriptor,
+装配入口 ``assemble_subject``；服务键表 ``service_keys``；挂载桥
+``ouroboros_bridge``；第三方发现 ``third_party``。旧基建
+（SubjectEngine/SubjectContext/SubjectServices/MessageDispatcher/
+topological_sort/CapabilityRegistry）已随聚合裁决删除。
+"""
+
+from ghrah.subject.runtime.assembly import assemble_subject
+from ghrah.subject.runtime.ouroboros_bridge import (
+    bridge_command,
+    mount_unit,
+    wait_active,
 )
-from ghrah.subject.runtime.context import SubjectContext
-from ghrah.subject.runtime.dependency import topological_sort
-from ghrah.subject.runtime.dispatcher import CommandRoute, MessageDispatcher
-from ghrah.subject.runtime.engine import SubjectEngine
 from ghrah.subject.runtime.service_keys import (
-    ABILITY_EXECUTOR,
-    CAPABILITY_REGISTRY,
     COMMAND_BRIDGE,
     COMMAND_RUNNER,
+    CORE_CLUSTER_REGISTRY,
+    DESIRED_STATE_STORE,
     EVENT_BRIDGE,
-    HITL_NOTARY,
-    HITL_POLICY,
     LEDGER,
-    MANIFEST_PERMISSION_INDEX,
     MANIFEST_STORE,
     MCP_CLIENT_REGISTRY,
     OBSERVER_ENDPOINT,
     OBSERVER_EVENT_BUS,
-    PERMISSION_SERVICE,
-    PERSISTENCE,
+    PROJECT_MANAGER,
+    RECONCILIATION_SERVICE,
     SANDBOX_EXECUTOR,
     SESSION_REGISTRY,
+    TASK_MANAGER,
+    TASK_STORE,
+    WORKSPACE_MANAGER,
     WORKSPACE_SERVICE,
-    AbilityExecutor,
+    ClusterHandle,
     CommandRunner,
-    ManifestPermissionIndex,
+    CoreClusterRegistryService,
     ObserverEventBus,
-    PermissionService,
+    ProjectManagerService,
     SubjectServiceKey,
+    TaskManagerService,
     WorkspaceService,
 )
-from ghrah.subject.runtime.services import SubjectServices
+from ghrah.subject.runtime.third_party import (
+    discover,
+    mount_third_party_units,
+    resolve_discovered,
+)
 
 __all__ = [
-    "ABILITY_EXECUTOR",
-    "CAPABILITY_REGISTRY",
     "COMMAND_BRIDGE",
     "COMMAND_RUNNER",
+    "CORE_CLUSTER_REGISTRY",
+    "DESIRED_STATE_STORE",
     "EVENT_BRIDGE",
-    "HITL_NOTARY",
-    "HITL_POLICY",
     "LEDGER",
-    "MANIFEST_PERMISSION_INDEX",
     "MANIFEST_STORE",
     "MCP_CLIENT_REGISTRY",
     "OBSERVER_ENDPOINT",
     "OBSERVER_EVENT_BUS",
-    "PERMISSION_SERVICE",
-    "PERSISTENCE",
+    "PROJECT_MANAGER",
+    "RECONCILIATION_SERVICE",
     "SANDBOX_EXECUTOR",
     "SESSION_REGISTRY",
+    "TASK_MANAGER",
+    "TASK_STORE",
+    "WORKSPACE_MANAGER",
     "WORKSPACE_SERVICE",
-    "AbilityContribution",
-    "AbilityExecutor",
-    "CapabilityProvider",
-    "CapabilityRegistry",
-    "CommandRoute",
+    "ClusterHandle",
     "CommandRunner",
-    "ManifestPermissionIndex",
-    "MessageDispatcher",
+    "CoreClusterRegistryService",
     "ObserverEventBus",
-    "PermissionDescriptor",
-    "PermissionService",
-    "SubjectContext",
-    "SubjectEngine",
+    "ProjectManagerService",
     "SubjectServiceKey",
-    "SubjectServices",
+    "TaskManagerService",
     "WorkspaceService",
-    "topological_sort",
+    "assemble_subject",
+    "bridge_command",
+    "discover",
+    "mount_third_party_units",
+    "mount_unit",
+    "resolve_discovered",
+    "wait_active",
 ]

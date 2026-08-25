@@ -5,7 +5,7 @@
 """Recovery built-in Subject unit.
 
 持有 :class:`ReconciliationService` 并提供 ``reconcile_now`` / ``reconcile_status``
-命令。reconcile 实际触发在 ``SubjectEngine.start()`` 末尾（由 engine 调），不在
+命令。reconcile 实际触发在装配层末尾（assemble_subject 显式调用），不在
 unit.start；本 unit 仅装配服务 + 透传 reconcile 命令。
 """
 

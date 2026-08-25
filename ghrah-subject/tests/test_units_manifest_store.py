@@ -7,9 +7,7 @@ from ouroboros import Context  # type: ignore[import-untyped]
 from ouroboros_testutil import wait_active
 
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.event_bus import SUBJECT_MANIFEST_PERMISSIONS_CHANGED
 from ghrah.subject.runtime.ouroboros_bridge import mount_unit
-from ghrah.subject.runtime.service_keys import MANIFEST_PERMISSION_INDEX
 from ghrah.subject.unit.base import CommandContext
 from ghrah.subject.units._helpers import (
     manifest_command_to_event,
@@ -84,17 +82,13 @@ async def test_manifest_store_unit_refreshes_permission_index_after_crud(
     async with Context() as ctx:
         # 同步 collector：ctx.emit 内联调用，命令返回后即完成
         ctx.on(
-            f"event/{SUBJECT_MANIFEST_PERMISSIONS_CHANGED}",
-            lambda payload: emitted.append((SUBJECT_MANIFEST_PERMISSIONS_CHANGED, payload)),
-        )
-        ctx.on(
             "event/manifest_ability_created",
             lambda payload: emitted.append(("manifest_ability_created", payload)),
         )
 
         fiber = ctx.plugin(mount_unit(unit))
         await wait_active(fiber)
-        permission_index = ctx.get(MANIFEST_PERMISSION_INDEX.name)
+        permission_index = unit.permission_index
 
         assert "custom_needs_hitl" not in permission_index.get_permissions()
 
@@ -107,10 +101,6 @@ async def test_manifest_store_unit_refreshes_permission_index_after_crud(
         permissions = permission_index.get_permissions()
         assert put_result["success"] is True
         assert permissions["custom_needs_hitl"].require_hitl is True
-        assert (
-            SUBJECT_MANIFEST_PERMISSIONS_CHANGED,
-            {},
-        ) in emitted
         assert (
             "manifest_ability_created",
             {

@@ -7,10 +7,10 @@
 - 透传 13 个 ``project_*`` 命令（乐观锁 + 状态流转 + workspace 挂载禁嵌套 +
   path_grants 不重叠 + 实例 manifest 协调）。
 - ``bootstrap_default_project`` / ``adopt_existing_agents``：S4.6 reconcile
-  首启 bootstrap 专用（决策 2），经 ClusterTransportManager + WorkspaceManager
+  首启 bootstrap 专用（决策 2），经 CoreClusterRegistry + WorkspaceManager
   建 default cluster + default workspace + 从 Core list_agents 归入现有 agent。
 
-依赖经构造注入：``cluster_transport`` 为 ``ClusterTransportManager``（Protocol），
+依赖经构造注入：``cluster_registry`` 为 ``CoreClusterRegistryService``（Protocol），
 ``workspace_mgr`` 为具体 ``WorkspaceManager``（位于 ``ghrah.subject.sandbox.workspace``，
 非 ``ghrah.subject.workspace.manager``，v1 误标）。不依赖 SubjectContext，便于独立单测。
 """
@@ -63,7 +63,7 @@ from ghrah.subject.workspace.providers.git import path_to_locator
 if TYPE_CHECKING:
     from ghrah.subject.manifest_store.store import ManifestStore
     from ghrah.subject.runtime.service_keys import (
-        ClusterTransportManager as ClusterTransportManagerProtocol,
+        CoreClusterRegistryService as ClusterRegistryProtocol,
     )
     from ghrah.subject.runtime.service_keys import (
         TaskManagerService,
@@ -99,7 +99,7 @@ class ProjectManager:
         store: ProjectStore（持久化 + 乐观锁）。
         workspace_mgr: WorkspaceManager（register/list_records/get_record）。
         task_mgr: TaskManagerService（经 task_get 命令校验 task 属本 project）。
-        cluster_transport: ClusterTransportManager（ensure_cluster + get_handle）。
+        cluster_registry: CoreClusterRegistryService（ensure_cluster + get_handle）。
         manifest_store: ManifestStore（实例 manifest 渲染协调，MVP 跳过）。
         on_event: 事件回调（unit 注入）。
         default_workspace_locator: 首启 bootstrap 用的 default workspace locator
@@ -112,7 +112,7 @@ class ProjectManager:
         store: ProjectStore,
         workspace_mgr: WorkspaceManager,
         task_mgr: TaskManagerService,
-        cluster_transport: ClusterTransportManagerProtocol,
+        cluster_registry: ClusterRegistryProtocol,
         manifest_store: ManifestStore,
         *,
         on_event: OnEvent | None = None,
@@ -122,15 +122,13 @@ class ProjectManager:
         self._store = store
         self._workspace_mgr = workspace_mgr
         self._task_mgr = task_mgr
-        self._cluster_transport = cluster_transport
+        self._cluster_transport = cluster_registry
         self._manifest_store = manifest_store
         self._on_event = on_event
         self._default_workspace_locator = default_workspace_locator
         self._default_db_path_template = default_db_path_template
 
-    async def handle_command(
-        self, command: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def handle_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         handler = _HANDLERS.get(command)
         if handler is None:
             return _err(f"unknown command: {command}")
@@ -153,14 +151,10 @@ class ProjectManager:
             return
         await self._on_event(event_type, {"project": record.to_wire()})
 
-    async def _emit_agent(
-        self, event_type: str, record: ProjectRecord, agent_name: str
-    ) -> None:
+    async def _emit_agent(self, event_type: str, record: ProjectRecord, agent_name: str) -> None:
         if self._on_event is None:
             return
-        await self._on_event(
-            event_type, {"project": record.to_wire(), "agent_name": agent_name}
-        )
+        await self._on_event(event_type, {"project": record.to_wire(), "agent_name": agent_name})
 
     def _db_path_for(self, project_id: str) -> str:
         return self._default_db_path_template.format(project_id=project_id)
@@ -168,9 +162,7 @@ class ProjectManager:
     def _validate_agent(self, agent: AgentSpec, project: ProjectRecord) -> None:
         """agent_name cluster 内唯一 + cluster_id 属本 project + path_grants 校验。"""
         if agent.cluster_id not in project.cluster_ids:
-            raise ValueError(
-                f"agent {agent.name!r} cluster_id {agent.cluster_id!r} not in project"
-            )
+            raise ValueError(f"agent {agent.name!r} cluster_id {agent.cluster_id!r} not in project")
         for existing in project.agents:
             if existing.name == agent.name and existing.cluster_id == agent.cluster_id:
                 raise ValueError(
@@ -194,9 +186,7 @@ class ProjectManager:
             instance_manifest_dir=p.instance_manifest_dir,
             db_path=self._db_path_for("default"),  # 占位，upsert 前替换
         )
-        record = record.model_copy(
-            update={"db_path": self._db_path_for(record.project_id)}
-        )
+        record = record.model_copy(update={"db_path": self._db_path_for(record.project_id)})
         cluster_id = uuid4().hex
         # workspace locator 跨 project 禁嵌套校验
         await self._check_locator_non_nested(locator)
@@ -213,9 +203,7 @@ class ProjectManager:
             update={
                 "cluster_ids": [cluster_id],
                 "workspaces": [mount],
-                "recovery": RecoverySpec(
-                    on_restart=RecoveryAction(p.recovery)
-                ),
+                "recovery": RecoverySpec(on_restart=RecoveryAction(p.recovery)),
             }
         )
         await self._store.upsert(record)
@@ -265,9 +253,7 @@ class ProjectManager:
 
     async def _handle_list(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectListPayload.model_validate(payload)
-        records = await self._store.list(
-            status=p.status, include_deleted=p.include_deleted
-        )
+        records = await self._store.list(status=p.status, include_deleted=p.include_deleted)
         return _ok(
             {
                 "projects": [r.to_wire() for r in records],
@@ -339,9 +325,7 @@ class ProjectManager:
         try:
             result = await handle.spawn_agent(spawn_payload)
             if not result.get("success"):
-                logger.warning(
-                    "add_agent: spawn %s rejected: %s", agent.name, result.get("error")
-                )
+                logger.warning("add_agent: spawn %s rejected: %s", agent.name, result.get("error"))
         except Exception as exc:  # noqa: BLE001
             logger.warning("add_agent: spawn %s failed: %s", agent.name, exc)
 
@@ -351,16 +335,12 @@ class ProjectManager:
         if existing is None:
             return _err(f"project not found: {p.project_id}")
         expected = p.expected_version if p.expected_version is not None else existing.version
-        target = next(
-            (a for a in existing.agents if a.name == p.agent_name), None
-        )
+        target = next((a for a in existing.agents if a.name == p.agent_name), None)
         if target is None:
             return _err(f"agent not found: {p.agent_name}")
 
         def mutator(r: ProjectRecord) -> ProjectRecord:
-            return r.model_copy(
-                update={"agents": [a for a in r.agents if a.name != p.agent_name]}
-            )
+            return r.model_copy(update={"agents": [a for a in r.agents if a.name != p.agent_name]})
 
         updated = await self._store.update(p.project_id, expected, mutator)
         # terminate agent
@@ -379,9 +359,7 @@ class ProjectManager:
     async def _handle_unlink_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._toggle_task_link(payload, link=False)
 
-    async def _toggle_task_link(
-        self, payload: dict[str, Any], *, link: bool
-    ) -> dict[str, Any]:
+    async def _toggle_task_link(self, payload: dict[str, Any], *, link: bool) -> dict[str, Any]:
         # 两种 payload 结构相同（project_id/task_id/expected_version）；各自 validate
         # 以校验入参，随后统一读 dict 字段避免 union 赋值类型冲突。
         if link:
@@ -420,9 +398,7 @@ class ProjectManager:
         expected = p.expected_version if p.expected_version is not None else existing.version
 
         def mutator(r: ProjectRecord) -> ProjectRecord:
-            return r.model_copy(
-                update={"recovery": RecoverySpec(on_restart=p.recovery)}
-            )
+            return r.model_copy(update={"recovery": RecoverySpec(on_restart=p.recovery)})
 
         updated = await self._store.update(p.project_id, expected, mutator)
         await self._emit("project_recovery_set", updated)
@@ -460,9 +436,7 @@ class ProjectManager:
         if existing is None:
             return _err(f"project not found: {p.project_id}")
         if not can_transition(existing.status, target):
-            return _err(
-                f"illegal transition: {existing.status.value} -> {target.value}"
-            )
+            return _err(f"illegal transition: {existing.status.value} -> {target.value}")
         updated = await self._store.update(
             p.project_id, existing.version, lambda r: r.model_copy(update={"status": target})
         )
@@ -495,9 +469,7 @@ class ProjectManager:
             instance_manifest_dir=".ghrah/agents",
             db_path=self._db_path_for("default"),
         )
-        record = record.model_copy(
-            update={"db_path": self._db_path_for(record.project_id)}
-        )
+        record = record.model_copy(update={"db_path": self._db_path_for(record.project_id)})
         cluster_id = "default"
         ws = await self._workspace_mgr.register_workspace(locator, name="default")
         mount = WorkspaceMount(
@@ -506,17 +478,13 @@ class ProjectManager:
             default_for_agents=True,
         )
         WorkspaceMount.validate_single_default([mount])
-        record = record.model_copy(
-            update={"cluster_ids": [cluster_id], "workspaces": [mount]}
-        )
+        record = record.model_copy(update={"cluster_ids": [cluster_id], "workspaces": [mount]})
         await self._store.upsert(record)
         await self._cluster_transport.ensure_cluster(cluster_id)
         await self._emit("project_created", record)
         return record
 
-    async def adopt_existing_agents(
-        self, project_id: str, cluster_id: str
-    ) -> list[AgentSpec]:
+    async def adopt_existing_agents(self, project_id: str, cluster_id: str) -> list[AgentSpec]:
         """经 ClusterHandle.list_agents 从 Core 取现有 agent，构造 AgentSpec 并加入 project。"""
         existing = await self._store.get(project_id)
         if existing is None:

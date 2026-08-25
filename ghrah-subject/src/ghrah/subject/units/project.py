@@ -5,7 +5,7 @@
 """Project built-in Subject unit.
 
 thin wrapper around :class:`ProjectManager`：注入依赖（ProjectStore /
-WorkspaceManager / TaskManagerService / ClusterTransportManager / ManifestStore /
+WorkspaceManager / TaskManagerService / CoreClusterRegistry / ManifestStore /
 DesiredStateStore），把 manager 的 ``on_event`` 回调桥到 internal event_bus，
 并在每次成功变更命令后把全量 project 快照写入 DesiredStateStore（desired-state
 唯一真相源，父计划 §3.3）。

@@ -4,7 +4,7 @@
 
 """第三方 Subject Unit 发现与 allowlist 启用（Ouroboros 形态）。
 
-保留旧 ``SubjectEngine.discover()/enable_from_config()`` 语义（定位文档
+保留旧 discover()/enable_from_config() 语义（定位文档
 §原则9：subject 是高权限 effect host，第三方默认不启用——发现≠启用，
 allowlist 显式列出才挂载），底层改为 ``ctx.plugin(mount_unit(unit))``
 启动期挂载（运行时动态挂载能力归 registry/热插拔 API）。

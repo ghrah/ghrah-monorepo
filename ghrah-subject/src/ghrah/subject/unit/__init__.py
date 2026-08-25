@@ -2,7 +2,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Subject runtime unit contracts."""
+"""Subject unit authoring contracts（单元编写模型）。
+
+聚合裁决后保留：SubjectUnit/UnitMeta/RouteSpec/CommandContext
+（mount_unit 桥契约来源）；``UnitState`` 已删（生命周期 = Ouroboros
+``FiberState``）。
+"""
 
 from ghrah.subject.unit.base import (
     CommandContext,
@@ -11,7 +16,6 @@ from ghrah.subject.unit.base import (
     SubjectServiceKey,
     SubjectUnit,
     UnitMeta,
-    UnitState,
 )
 
 __all__ = [
@@ -21,5 +25,4 @@ __all__ = [
     "SubjectServiceKey",
     "SubjectUnit",
     "UnitMeta",
-    "UnitState",
 ]

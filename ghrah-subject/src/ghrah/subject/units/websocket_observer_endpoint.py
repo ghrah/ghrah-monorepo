@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import FastAPI, WebSocket
 
-from ghrah.protocol.types import EventType, Message  # type: ignore[import-untyped]
+from ghrah.protocol.types import EventType, Message
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.runtime.ouroboros_bridge import bridge_command
 from ghrah.subject.runtime.service_keys import OBSERVER_ENDPOINT, OBSERVER_EVENT_BUS
@@ -21,7 +21,6 @@ from ghrah.subject.server.connection_manager import ConnectionManager
 from ghrah.subject.server.event_bus import EventBus
 from ghrah.subject.server.router import ObserverRouter
 from ghrah.subject.server.server import ObserverServer
-from ghrah.subject.transport.observer import ObserverCommandHandler
 from ghrah.subject.unit.base import SubjectUnit, UnitMeta
 
 __all__ = ["WebSocketObserverEndpointUnit"]
@@ -48,7 +47,7 @@ class _EngineDispatchAdapter:
     ObserverRouter 仅消费 ``dispatch_observer_command``；鸭子适配零改
     ``server/``。``request_id``/``session_id`` 以 payload 副本合并注入
     （不改原 dict；``setdefault`` 尊重 payload 已有值，unit 层
-    ``payload.get("request_id")`` 优先——ability_runner 先例）。
+    ``payload.get("request_id")`` 优先）。
     """
 
     def __init__(self, ctx: Any) -> None:
@@ -128,7 +127,7 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
         router = ObserverRouter(
             connection_manager,
             observer_event_bus,
-            engine=_EngineDispatchAdapter(ctx),  # type: ignore[arg-type]
+            engine=_EngineDispatchAdapter(ctx),
         )
         server = ObserverServer(config, connection_manager, router, observer_event_bus)
 
@@ -158,18 +157,13 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
 
         return forward
 
-    async def start(
-        self,
-        on_command: ObserverCommandHandler | None = None,
-    ) -> None:
+    async def start(self) -> None:
         """Start the Observer event bus.
 
-        ``on_command`` is accepted for the ObserverEndpoint protocol. The
-        WebSocket router is already bound to ``SubjectEngine`` callbacks during
-        ``init``.
+        WebSocket 命令路由已在 ``init`` 经 ``_EngineDispatchAdapter`` 绑定
+        到宿主 ctx（ctx.serial 分发）。
         """
 
-        del on_command
         await self.observer_event_bus.start()
 
     async def stop(self) -> None:
