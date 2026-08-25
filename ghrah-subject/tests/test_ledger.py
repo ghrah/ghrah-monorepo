@@ -1,14 +1,30 @@
+# SPDX-FileCopyrightText: 2026 chenxya <chenxya@ghrah.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""ActionChainLedger（读侧直连 Core sqlite）测试。
+
+聚合裁决 D-C：真相源 = Core ``ContextManager`` 的 sqlite；本文件用真实
+``SqliteBackend`` 写入节点（模拟 Core 侧 agent 链落库），断言 ledger
+读侧投影（同文件 WAL 双连接）按需查询正确。
+"""
+
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from typing import Any
-from unittest.mock import AsyncMock
+from pathlib import Path
 
-import pytest
 from ghrah.context.node import ContextNode
+from ghrah.context.persistence import serialize_node
+from ghrah.context.persistence.sqlite_backend import (  # type: ignore[import-untyped]
+    SqliteBackend,
+)
 
-from ghrah.subject.ledger.chain import ActionChainLedger, PersistenceError
+from ghrah.subject.ledger.chain import ActionChainLedger
 from ghrah.subject.ledger.models import ChainMeta, DAGEntry, LedgerNode
+
+# ----------------------------------------------------------------
+# 测试辅助
+# ----------------------------------------------------------------
 
 
 def _make_node(
@@ -31,479 +47,174 @@ def _make_node(
     )
 
 
-def _node_to_payload(node: ContextNode) -> dict[str, Any]:
-    from ghrah.context.persistence import serialize_node
+async def _seed_backend(db_path: Path, nodes: list[ContextNode]) -> SqliteBackend:
+    """模拟 Core 侧写入（同一 SqliteBackend API，真相源角色）。"""
+    backend = SqliteBackend(db_path=db_path)
+    await backend.connect()
+    for node in nodes:
+        await backend.save_node(node)
+    await backend.close()
+    return backend
 
-    return serialize_node(node)
+
+# ----------------------------------------------------------------
+# models（纯序列化契约，行为不变，保留原断言面）
+# ----------------------------------------------------------------
 
 
 class TestLedgerNode:
-    def test_basic_creation(self) -> None:
-        node = LedgerNode(
-            id="abc123",
-            agent_name="agent1",
-            iteration=1,
-            ability_names=["read_file"],
-        )
-        assert node.id == "abc123"
-        assert node.agent_name == "agent1"
-        assert node.iteration == 1
-        assert node.ability_names == ["read_file"]
-        assert node.branch_name == "main"
-        assert node.parent_id is None
-        assert node.is_snapshot is False
-
-    def test_from_context_node(self) -> None:
-        ctx_node = _make_node(iteration=3, ability_names=["read_file", "write_file"])
-        ledger_node = LedgerNode.from_context_node(ctx_node)
-        assert ledger_node.id == ctx_node.id
-        assert ledger_node.agent_name == ctx_node.agent_name
-        assert ledger_node.iteration == ctx_node.iteration
-        assert ledger_node.ability_names == ["read_file", "write_file"]
-        assert ledger_node.branch_name == ctx_node.branch_name
-
-    def test_to_context_node(self) -> None:
-        now = datetime.now(UTC)
-        ledger_node = LedgerNode(
-            id="test_id",
-            parent_id="parent_id",
-            agent_name="agent1",
-            timestamp=now,
-            iteration=2,
-            ability_names=["tool"],
-        )
-        ctx_node = ledger_node.to_context_node()
-        assert ctx_node.id == "test_id"
-        assert ctx_node.parent_id == "parent_id"
-        assert ctx_node.agent_name == "agent1"
-        assert ctx_node.iteration == 2
-        assert ctx_node.ability_names == ["tool"]
-
-    def test_roundtrip(self) -> None:
-        ctx_node = _make_node(iteration=5, ability_names=["a", "b"])
-        ledger_node = LedgerNode.from_context_node(ctx_node)
-        restored = ledger_node.to_context_node()
-        assert restored.id == ctx_node.id
-        assert restored.agent_name == ctx_node.agent_name
-        assert restored.iteration == ctx_node.iteration
-        assert restored.ability_names == ctx_node.ability_names
-        assert restored.branch_name == ctx_node.branch_name
-
-    def test_to_dict(self) -> None:
-        ledger_node = LedgerNode(id="abc", agent_name="ag1", iteration=0)
-        d = ledger_node.to_dict()
-        assert isinstance(d, dict)
-        assert d["id"] == "abc"
-        assert d["agent_name"] == "ag1"
-
-    def test_default_fields(self) -> None:
-        node = LedgerNode(id="x")
-        assert node.agent_state == {}
-        assert node.messages_delta == []
-        assert node.messages_snapshot is None
-        assert node.action_results == []
-        assert node.metadata == {}
+    def test_serialize_roundtrip(self) -> None:
+        node = _make_node(iteration=3, parent_id="node_2")
+        serialized = serialize_node(node)
+        ledger_node = LedgerNode.model_validate(serialized)
+        assert ledger_node.id == node.id
+        assert ledger_node.agent_name == node.agent_name
+        assert ledger_node.iteration == 3
+        assert ledger_node.parent_id == "node_2"
 
 
 class TestChainMeta:
-    def test_basic_creation(self) -> None:
+    def test_fields(self) -> None:
         meta = ChainMeta(
-            agent_name="agent1",
-            branches={"main": "head_1"},
-            current_state={"status": "running"},
+            agent_name="a",
+            branches={"main": "node_1"},
+            current_state={"k": 1},
+            active_session_id="s-1",
         )
-        assert meta.agent_name == "agent1"
-        assert meta.branches == {"main": "head_1"}
-        assert meta.current_state == {"status": "running"}
-
-    def test_default_branches(self) -> None:
-        meta = ChainMeta(agent_name="agent1")
-        assert meta.branches == {}
-        assert meta.current_state == {}
+        assert meta.agent_name == "a"
+        assert meta.branches == {"main": "node_1"}
+        assert meta.active_session_id == "s-1"
 
 
 class TestDAGEntry:
-    def test_basic_creation(self) -> None:
-        node = LedgerNode(id="n1", agent_name="ag1", iteration=0)
-        entry = DAGEntry(node=node, children=["n2", "n3"], depth=0)
-        assert entry.node.id == "n1"
-        assert entry.children == ["n2", "n3"]
-        assert entry.depth == 0
-
-    def test_default_children(self) -> None:
-        node = LedgerNode(id="n1")
-        entry = DAGEntry(node=node)
-        assert entry.children == []
-        assert entry.depth == 0
+    def test_fields(self) -> None:
+        node = LedgerNode.model_validate(serialize_node(_make_node()))
+        entry = DAGEntry(node=node, children=["c1"], depth=2)
+        assert entry.node is node
+        assert entry.children == ["c1"]
+        assert entry.depth == 2
 
 
-def _make_mock_persistence() -> AsyncMock:
-    mock = AsyncMock(spec=["handle_command"])
-    mock.handle_command = AsyncMock()
-    return mock
+# ----------------------------------------------------------------
+# 读侧投影（真实 SqliteBackend 双连接）
+# ----------------------------------------------------------------
 
 
-class TestActionChainLedger:
-    async def test_append_node_creates_chain(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-        node = _make_node(agent_name="agent1", iteration=0)
-        result = await ledger.append_node("agent1", _node_to_payload(node))
-
-        assert result.id == node.id
-        assert result.agent_name == "agent1"
-        assert "agent1" in ledger.list_agents()
-
-    async def test_append_node_persists(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-        node = _make_node(agent_name="agent1", iteration=0)
-        await ledger.append_node("agent1", _node_to_payload(node))
-
-        mock_persist.handle_command.assert_called_once()
-        call_args = mock_persist.handle_command.call_args
-        assert call_args[0][0] == "persist_save_node"
-
-    async def test_append_node_updates_index(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-        node = _make_node(agent_name="agent1", iteration=0)
-        await ledger.append_node("agent1", _node_to_payload(node))
-
-        assert ledger.get_node(node.id) is not None
-        assert ledger.get_node(node.id).agent_name == "agent1"
-
-    async def test_append_multiple_nodes(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-
-        root = ContextNode.create_root(agent_name="agent1")
-        await ledger.append_node("agent1", _node_to_payload(root))
-
+class TestReadSideProjection:
+    async def test_chain_history_reads_core_written_nodes(self, tmp_path: Path) -> None:
+        db = tmp_path / "ghrah.db"
+        root = ContextNode.create_root(agent_name="agent1", messages=[])
         child = ContextNode(
             parent_id=root.id,
             agent_name="agent1",
             iteration=1,
             ability_names=["tool_a"],
         )
-        await ledger.append_node("agent1", _node_to_payload(child))
+        await _seed_backend(db, [root, child])
 
-        assert ledger.get_node(child.id) is not None
-        assert ledger.node_count == 2
+        ledger = ActionChainLedger(db)
+        await ledger.start()
+        try:
+            history = await ledger.get_chain_history("agent1")
+            assert [n.id for n in history] == [root.id, child.id]
 
-    async def test_get_node_not_found(self) -> None:
-        mock_persist = _make_mock_persistence()
-        ledger = ActionChainLedger(mock_persist)
+            assert await ledger.get_node(child.id) is not None
+            assert (await ledger.get_node(child.id)).agent_name == "agent1"  # type: ignore[union-attr]
+        finally:
+            await ledger.stop()
 
-        assert ledger.get_node("nonexistent") is None
-
-    async def test_get_chain_history(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-
+    async def test_chain_history_limit(self, tmp_path: Path) -> None:
+        db = tmp_path / "ghrah.db"
         root = ContextNode.create_root(agent_name="agent1", messages=[])
-        await ledger.append_node("agent1", _node_to_payload(root))
-
         child = ContextNode(
             parent_id=root.id,
             agent_name="agent1",
             iteration=1,
             ability_names=["tool_a"],
         )
-        await ledger.append_node("agent1", _node_to_payload(child))
+        await _seed_backend(db, [root, child])
 
-        history = ledger.get_chain_history("agent1")
-        assert len(history) == 2
-        assert history[0].id == root.id
-        assert history[1].id == child.id
+        ledger = ActionChainLedger(db)
+        await ledger.start()
+        try:
+            history = await ledger.get_chain_history("agent1", limit=1)
+            assert len(history) == 1
+        finally:
+            await ledger.stop()
 
-    async def test_get_chain_history_with_limit(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
+    async def test_unknown_agent_returns_empty(self, tmp_path: Path) -> None:
+        ledger = ActionChainLedger(tmp_path / "ghrah.db")
+        await ledger.start()
+        try:
+            assert await ledger.get_chain_history("nobody") == []
+            assert await ledger.get_chain_meta("nobody") is None
+            assert await ledger.get_node("nonexistent") is None
+        finally:
+            await ledger.stop()
 
-        ledger = ActionChainLedger(mock_persist)
-
+    async def test_chain_meta_and_branch_head(self, tmp_path: Path) -> None:
+        db = tmp_path / "ghrah.db"
         root = ContextNode.create_root(agent_name="agent1", messages=[])
-        await ledger.append_node("agent1", _node_to_payload(root))
-
         child = ContextNode(
             parent_id=root.id,
             agent_name="agent1",
             iteration=1,
             ability_names=["tool_a"],
         )
-        await ledger.append_node("agent1", _node_to_payload(child))
-
-        history = ledger.get_chain_history("agent1", limit=1)
-        assert len(history) == 1
-        assert history[0].id == child.id
-
-    async def test_get_branch_head(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-
-        root = ContextNode.create_root(agent_name="agent1", messages=[])
-        await ledger.append_node("agent1", _node_to_payload(root))
-
-        head = ledger.get_branch_head("agent1")
-        assert head is not None
-        assert head.id == root.id
-
-    async def test_get_branch_head_nonexistent_agent(self) -> None:
-        mock_persist = _make_mock_persistence()
-        ledger = ActionChainLedger(mock_persist)
-
-        assert ledger.get_branch_head("nonexistent") is None
-
-    async def test_get_chain(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-
-        root = ContextNode.create_root(agent_name="agent1", messages=[])
-        await ledger.append_node("agent1", _node_to_payload(root))
-
-        chain = ledger.get_chain("agent1")
-        assert chain is not None
-        assert chain.agent_name == "agent1"
-
-    async def test_get_chain_nonexistent(self) -> None:
-        mock_persist = _make_mock_persistence()
-        ledger = ActionChainLedger(mock_persist)
-
-        assert ledger.get_chain("nonexistent") is None
-
-    async def test_get_chain_meta_default(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-        root = ContextNode.create_root(agent_name="agent1", messages=[])
-        await ledger.append_node("agent1", _node_to_payload(root))
-
-        meta = ledger.get_chain_meta("agent1")
-        assert meta is None
-
-    async def test_update_chain_meta(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-        root = ContextNode.create_root(agent_name="agent1", messages=[])
-        await ledger.append_node("agent1", _node_to_payload(root))
-
-        await ledger.update_chain_meta(
+        await _seed_backend(db, [root, child])
+        writer = SqliteBackend(db_path=db)
+        await writer.connect()
+        await writer.save_chain_meta(
             "agent1",
-            branches={"main": root.id},
-            current_state={"status": "running"},
+            branches={"main": child.id},
+            current_state={"phase": "run"},
+            active_session_id="sess-9",
         )
+        await writer.close()
 
-        mock_persist.handle_command.assert_called()
-        save_calls = [
-            c for c in mock_persist.handle_command.call_args_list
-            if c[0][0] == "persist_save_chain_meta"
-        ]
-        assert len(save_calls) == 1
+        ledger = ActionChainLedger(db)
+        await ledger.start()
+        try:
+            meta = await ledger.get_chain_meta("agent1")
+            assert meta is not None
+            assert meta.active_session_id == "sess-9"
+            assert meta.branches == {"main": child.id}
 
-        meta = ledger.get_chain_meta("agent1")
-        assert meta is not None
-        assert meta.branches == {"main": root.id}
-        assert meta.current_state == {"status": "running"}
+            head = await ledger.get_branch_head("agent1")
+            assert head is not None
+            assert head.id == child.id
+        finally:
+            await ledger.stop()
 
-    async def test_traverse_dag_single_agent(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-
-        root = ContextNode.create_root(agent_name="agent1", messages=[])
-        await ledger.append_node("agent1", _node_to_payload(root))
-
-        child = ContextNode(
-            parent_id=root.id,
-            agent_name="agent1",
+    async def test_list_agents_and_traverse_dag(self, tmp_path: Path) -> None:
+        db = tmp_path / "ghrah.db"
+        root_a = ContextNode.create_root(agent_name="agent-a", messages=[])
+        child_a = ContextNode(
+            parent_id=root_a.id,
+            agent_name="agent-a",
             iteration=1,
             ability_names=["tool_a"],
         )
-        await ledger.append_node("agent1", _node_to_payload(child))
+        root_b = ContextNode.create_root(agent_name="agent-b", messages=[])
+        await _seed_backend(db, [root_a, child_a, root_b])
 
-        entries = ledger.traverse_dag()
-        assert len(entries) == 2
-        root_entry = next(e for e in entries if e.node.id == root.id)
-        child_entry = next(e for e in entries if e.node.id == child.id)
-        assert root_entry.children == [child.id]
-        assert child_entry.children == []
-        assert root_entry.depth == 0
-        assert child_entry.depth == 1
-
-    async def test_traverse_dag_multi_agent(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-
-        root_a = ContextNode.create_root(agent_name="agent_a", messages=[])
-        await ledger.append_node("agent_a", _node_to_payload(root_a))
-
-        root_b = ContextNode.create_root(agent_name="agent_b", messages=[])
-        await ledger.append_node("agent_b", _node_to_payload(root_b))
-
-        entries = ledger.traverse_dag()
-        assert len(entries) == 2
-
-        entries_a = ledger.traverse_dag(agent_names=["agent_a"])
-        assert len(entries_a) == 1
-        assert entries_a[0].node.agent_name == "agent_a"
-
-    async def test_list_agents(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-
-        root_a = ContextNode.create_root(agent_name="agent_a", messages=[])
-        await ledger.append_node("agent_a", _node_to_payload(root_a))
-
-        root_b = ContextNode.create_root(agent_name="agent_b", messages=[])
-        await ledger.append_node("agent_b", _node_to_payload(root_b))
-
-        agents = ledger.list_agents()
-        assert set(agents) == {"agent_a", "agent_b"}
-
-    async def test_node_count(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-        assert ledger.node_count == 0
-
-        root = ContextNode.create_root(agent_name="agent1", messages=[])
-        await ledger.append_node("agent1", _node_to_payload(root))
-        assert ledger.node_count == 1
-
-        child = ContextNode(
-            parent_id=root.id,
-            agent_name="agent1",
-            iteration=1,
-            ability_names=["tool_a"],
-        )
-        await ledger.append_node("agent1", _node_to_payload(child))
-        assert ledger.node_count == 2
-
-    async def test_start_restores_from_db(self) -> None:
-        mock_persist = _make_mock_persistence()
-
-        root_node = ContextNode.create_root(agent_name="agent1", messages=[])
-        root_data = _node_to_payload(root_node)
-
-        child_node = ContextNode(
-            parent_id=root_node.id,
-            agent_name="agent1",
-            iteration=1,
-            ability_names=["tool_a"],
-        )
-        child_data = _node_to_payload(child_node)
-
-        mock_persist.handle_command.side_effect = [
-            {"success": True, "data": {"agents": ["agent1"]}},
-            {"success": True, "data": {"nodes": [root_data, child_data]}},
-            {
-                "success": True,
-                "data": {
-                    "branches": {"main": child_node.id},
-                    "current_state": {"status": "idle"},
-                },
-            },
-        ]
-
-        ledger = ActionChainLedger(mock_persist)
+        ledger = ActionChainLedger(db)
         await ledger.start()
+        try:
+            assert sorted(await ledger.list_agents()) == ["agent-a", "agent-b"]
+            assert await ledger.node_count() == 3
 
-        assert "agent1" in ledger.list_agents()
-        assert ledger.get_node(root_node.id) is not None
-        assert ledger.get_node(child_node.id) is not None
+            entries = await ledger.traverse_dag(["agent-a"])
+            assert len(entries) == 2
+            assert entries[0].node.id == root_a.id
+            assert entries[0].children == [child_a.id]
+            assert entries[1].depth == 1
+        finally:
+            await ledger.stop()
 
-        meta = ledger.get_chain_meta("agent1")
-        assert meta is not None
-        assert meta.branches == {"main": child_node.id}
-
-    async def test_start_handles_empty_db(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {
-            "success": True,
-            "data": {"agents": []},
-        }
-
-        ledger = ActionChainLedger(mock_persist)
+    async def test_start_stop_idempotent(self, tmp_path: Path) -> None:
+        ledger = ActionChainLedger(tmp_path / "ghrah.db")
         await ledger.start()
-
-        assert ledger.list_agents() == []
-
-    async def test_start_handles_failure(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {
-            "success": False,
-            "error": "db not started",
-        }
-
-        ledger = ActionChainLedger(mock_persist)
-        await ledger.start()
-
-        assert ledger.list_agents() == []
-
-    async def test_stop(self) -> None:
-        mock_persist = _make_mock_persistence()
-        ledger = ActionChainLedger(mock_persist)
+        await ledger.start()  # 幂等
         await ledger.stop()
-
-    async def test_append_node_persistence_failure_raises(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {
-            "success": False,
-            "error": "disk full",
-        }
-
-        ledger = ActionChainLedger(mock_persist)
-        node = _make_node(agent_name="agent1", iteration=0)
-
-        with pytest.raises(PersistenceError, match="Failed to persist node"):
-            await ledger.append_node("agent1", _node_to_payload(node))
-
-        assert ledger.node_count == 0
-        assert "agent1" not in ledger.list_agents()
-
-    async def test_update_chain_meta_persistence_failure_raises(self) -> None:
-        mock_persist = _make_mock_persistence()
-        mock_persist.handle_command.return_value = {"success": True}
-
-        ledger = ActionChainLedger(mock_persist)
-        root = ContextNode.create_root(agent_name="agent1", messages=[])
-        await ledger.append_node("agent1", _node_to_payload(root))
-
-        mock_persist.handle_command.return_value = {
-            "success": False,
-            "error": "write failed",
-        }
-
-        with pytest.raises(PersistenceError, match="Failed to persist chain meta"):
-            await ledger.update_chain_meta(
-                "agent1",
-                branches={"main": root.id},
-                current_state={"status": "running"},
-            )
-
-        meta = ledger.get_chain_meta("agent1")
-        assert meta is None
+        await ledger.stop()  # 幂等

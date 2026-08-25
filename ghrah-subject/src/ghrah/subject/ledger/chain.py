@@ -1,220 +1,144 @@
-"""ActionChain 分类账：追加写入的不可变账本。
+# SPDX-FileCopyrightText: 2026 chenxya <chenxya@ghrah.org>
+#
+# SPDX-License-Identifier: Apache-2.0
 
-接收 Core 的 ACTION_CHAIN_UPDATED 事件（经 Core Server），持久化节点数据到 SQLite，
-维护内存中的 ActionChain 索引用于快速查询，支持跨 Agent DAG 遍历。
+"""ActionChain 读侧投影（Core sqlite 直连，只读）。
 
-关键设计：
-- 追加写入：只允许 append_node，不允许修改或删除已写入的节点
-- SubjectPersistenceService 是唯一的持久化入口
-- 内存缓存 ActionChain + _node_index 加速查询
-- 启动时从数据库恢复缓存
-- 持久化失败时抛出异常，不更新内存状态
-- 所有写操作通过 asyncio.Lock 保护并发安全
+聚合裁决 D-C：存储真相源 = Core ``ContextManager`` 的 sqlite（per-agent
+链/chain_meta/messages 全在 Core 内建 backend）；本模块退化为 ``chain_history``
+读命令的薄投影——经 Core ``SqliteBackend`` 的 ``load_chain``/
+``load_chain_meta``/``load_node``/``list_agents`` API 按需查询（同一 db
+文件的第二个 WAL 连接），不再持有内存全量缓存，也不再写侧落库
+（旧事件驱动 ``append_node``/``update_chain_meta`` 面已死，随删）。
+
+DB 路径经 ``SubjectConfig.core_db_path`` 派生（与 registry 构造 CoreUnit
+的 persistence_factory 同源，保证读写同一文件）。
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections import deque
-from typing import Any
+from pathlib import Path
 
-from ghrah.context.chain import ActionChain
-from ghrah.context.node import ContextNode
-from ghrah.context.persistence import deserialize_node, serialize_node
+from ghrah.context.chain import ActionChain  # type: ignore[import-untyped]
+from ghrah.context.node import ContextNode  # type: ignore[import-untyped]
+from ghrah.context.persistence import serialize_node  # type: ignore[import-untyped]
+from ghrah.context.persistence.sqlite_backend import (  # type: ignore[import-untyped]
+    SqliteBackend,
+)
 from ghrah.subject.ledger.models import ChainMeta, DAGEntry, LedgerNode
-from ghrah.subject.persistence.service import SubjectPersistenceService
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["ActionChainLedger"]
 
 
-class PersistenceError(Exception):
-    pass
-
-
 class ActionChainLedger:
-    def __init__(self, persistence: SubjectPersistenceService) -> None:
-        self._persistence = persistence
-        self._chains: dict[str, ActionChain] = {}
-        self._node_index: dict[str, ContextNode] = {}
-        self._chain_metas: dict[str, ChainMeta] = {}
-        self._lock = asyncio.Lock()
+    """Core sqlite 只读投影（chain_history 命令面）。
+
+    Args:
+        db_path: Core sqlite 文件路径（None → SqliteBackend 默认派生）。
+    """
+
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        self._backend = SqliteBackend(db_path=db_path)
+        self._started = False
+
+    @property
+    def db_path(self) -> Path:
+        return Path(self._backend.db_path)
 
     async def start(self) -> None:
-        try:
-            result = await self._persistence.handle_command("persist_list_agents", {})
-        except Exception:
-            logger.warning("Failed to load agents during ledger start")
+        """打开只读连接（同文件 WAL 双连接；文件/schema 懒建无妨）。"""
+        if self._started:
             return
-
-        if not result.get("success", False):
-            logger.warning("Failed to list agents: %s", result.get("error"))
-            return
-
-        agent_names: list[str] = result.get("data", {}).get("agents", [])
-        for agent_name in agent_names:
-            await self._load_agent_chain(agent_name)
-
-    async def _load_agent_chain(self, agent_name: str) -> None:
-        chain_result = await self._persistence.handle_command(
-            "persist_load_chain", {"agent_name": agent_name}
-        )
-        if not chain_result.get("success", False):
-            logger.warning("Failed to load chain for agent %s", agent_name)
-            return
-
-        nodes_data: list[dict[str, Any]] = chain_result.get("data", {}).get("nodes", [])
-        if not nodes_data:
-            return
-
-        nodes = [deserialize_node(nd) for nd in nodes_data]
-        chain = ActionChain.rebuild_from_nodes(agent_name, nodes)
-        for node in nodes:
-            self._node_index[node.id] = node
-
-        self._chains[agent_name] = chain
-
-        meta_result = await self._persistence.handle_command(
-            "persist_load_chain_meta", {"agent_name": agent_name}
-        )
-        if meta_result.get("success", False) and meta_result.get("data") is not None:
-            data = meta_result["data"]
-            self._chain_metas[agent_name] = ChainMeta(
-                agent_name=agent_name,
-                branches=data.get("branches", {}),
-                current_state=data.get("current_state", {}),
-                active_session_id=data.get("active_session_id", ""),
-            )
-        else:
-            self._chain_metas[agent_name] = ChainMeta(
-                agent_name=agent_name,
-                branches=dict(chain.branches),
-            )
-
-        logger.info("Loaded chain for agent %s (%d nodes)", agent_name, chain.node_count)
+        await self._backend.connect()
+        self._started = True
+        logger.info("ActionChainLedger started (read-side, db=%s)", self.db_path)
 
     async def stop(self) -> None:
+        if not self._started:
+            return
+        await self._backend.close()
+        self._started = False
         logger.info("ActionChainLedger stopped")
 
-    async def append_node(self, agent_name: str, node_data: dict[str, Any]) -> ContextNode:
-        node = deserialize_node(node_data)
+    # ─── 读 API（按需查询 Core backend） ───
 
-        result = await self._persistence.handle_command(
-            "persist_save_node", {"node": node_data}
-        )
-        if not result.get("success", False):
-            raise PersistenceError(
-                f"Failed to persist node {node.id}: {result.get('error', 'unknown')}"
-            )
+    async def get_node(self, node_id: str) -> ContextNode | None:
+        return await self._backend.load_node(node_id)
 
-        async with self._lock:
-            if agent_name not in self._chains:
-                chain = ActionChain(agent_name)
-                chain.ingest_node(node)
-                self._chains[agent_name] = chain
-            else:
-                self._chains[agent_name].ingest_node(node)
-
-            self._node_index[node.id] = node
-
-        logger.info(
-            "Appended node %s to chain %s (iteration %d)",
-            node.id,
-            agent_name,
-            node.iteration,
-        )
-        return node
-
-    async def update_chain_meta(
-        self,
-        agent_name: str,
-        branches: dict[str, str],
-        current_state: dict[str, Any],
-        active_session_id: str = "",
-    ) -> None:
-        result = await self._persistence.handle_command(
-            "persist_save_chain_meta",
-            {
-                "agent_name": agent_name,
-                "branches": branches,
-                "current_state": current_state,
-                "active_session_id": active_session_id,
-            },
-        )
-        if not result.get("success", False):
-            raise PersistenceError(
-                f"Failed to persist chain meta for {agent_name}: "
-                f"{result.get('error', 'unknown')}"
-            )
-
-        async with self._lock:
-            self._chain_metas[agent_name] = ChainMeta(
-                agent_name=agent_name,
-                branches=branches,
-                current_state=current_state,
-                active_session_id=active_session_id,
-            )
-
-            if agent_name in self._chains:
-                chain = self._chains[agent_name]
-                for branch_name, head_id in branches.items():
-                    chain.update_branch(branch_name, head_id)
-
-    def get_node(self, node_id: str) -> ContextNode | None:
-        return self._node_index.get(node_id)
-
-    def get_chain(self, agent_name: str) -> ActionChain | None:
-        return self._chains.get(agent_name)
-
-    def get_chain_history(
+    async def get_chain_history(
         self, agent_name: str, branch: str = "main", limit: int = -1
     ) -> list[ContextNode]:
-        chain = self._chains.get(agent_name)
+        chain = await self._build_chain(agent_name)
         if chain is None:
             return []
         return chain.get_history(branch, limit)  # type: ignore[no-any-return]
 
-    def get_branch_head(
-        self, agent_name: str, branch: str = "main"
-    ) -> ContextNode | None:
-        chain = self._chains.get(agent_name)
+    async def get_branch_head(self, agent_name: str, branch: str = "main") -> ContextNode | None:
+        chain = await self._build_chain(agent_name)
         if chain is None:
             return None
         return chain.get_branch_head(branch)
 
-    def get_chain_meta(self, agent_name: str) -> ChainMeta | None:
-        return self._chain_metas.get(agent_name)
+    async def get_chain_meta(self, agent_name: str) -> ChainMeta | None:
+        loaded = await self._backend.load_chain_meta(agent_name)
+        if loaded is None:
+            return None
+        branches, active_session_id, current_state = loaded
+        return ChainMeta(
+            agent_name=agent_name,
+            branches=branches,
+            current_state=current_state,
+            active_session_id=active_session_id,
+        )
 
-    def traverse_dag(
-        self, agent_names: list[str] | None = None
-    ) -> list[DAGEntry]:
+    async def traverse_dag(self, agent_names: list[str] | None = None) -> list[DAGEntry]:
+        targets = agent_names if agent_names is not None else await self.list_agents()
+
+        node_index: dict[str, ContextNode] = {}
+        for agent_name in targets:
+            for node in await self._backend.load_chain(agent_name):
+                node_index[node.id] = node
+
         children_map: dict[str, list[str]] = {}
-        for node_id, node in self._node_index.items():
+        for node_id, node in node_index.items():
             if node.parent_id is not None:
                 children_map.setdefault(node.parent_id, []).append(node_id)
 
-        target_agents = agent_names if agent_names is not None else list(self._chains.keys())
         entries: list[DAGEntry] = []
-
         seen: set[str] = set()
-
-        for agent_name in target_agents:
-            chain = self._chains.get(agent_name)
+        for agent_name in targets:
+            chain = await self._build_chain(agent_name)
             if chain is None:
                 continue
-
             for node in chain.get_history("main"):
                 if node.parent_id is None:
-                    self._traverse_bfs(node.id, children_map, 0, seen, entries)
+                    self._traverse_bfs(node.id, node_index, children_map, 0, seen, entries)
                     break
-
         return entries
+
+    async def list_agents(self) -> list[str]:
+        return [str(name) for name in await self._backend.list_agents()]
+
+    async def node_count(self) -> int:
+        total = 0
+        for agent_name in await self.list_agents():
+            total += len(await self._backend.load_chain(agent_name))
+        return total
+
+    async def _build_chain(self, agent_name: str) -> ActionChain | None:
+        nodes = await self._backend.load_chain(agent_name)
+        if not nodes:
+            return None
+        return ActionChain.rebuild_from_nodes(agent_name, nodes)
 
     def _traverse_bfs(
         self,
         start_id: str,
+        node_index: dict[str, ContextNode],
         children_map: dict[str, list[str]],
         start_depth: int,
         seen: set[str],
@@ -227,7 +151,7 @@ class ActionChainLedger:
                 continue
             seen.add(node_id)
 
-            node = self._node_index.get(node_id)
+            node = node_index.get(node_id)
             if node is None:
                 continue
 
@@ -239,10 +163,3 @@ class ActionChainLedger:
             for child_id in children:
                 if child_id not in seen:
                     queue.append((child_id, depth + 1))
-
-    def list_agents(self) -> list[str]:
-        return list(self._chains.keys())
-
-    @property
-    def node_count(self) -> int:
-        return len(self._node_index)

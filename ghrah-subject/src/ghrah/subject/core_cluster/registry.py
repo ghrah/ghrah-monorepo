@@ -206,17 +206,30 @@ class CoreClusterRegistry:
 
 
 def default_core_unit_factory(config: SubjectConfig) -> Callable[[str], Any]:
-    """生产工厂：cluster_id → CoreUnit（CoreUnitConfig 从 SubjectConfig 派生）。"""
+    """生产工厂：cluster_id → CoreUnit（CoreUnitConfig 从 SubjectConfig 派生）。
+
+    persistence_factory 注入 Core sqlite（``core_db_path``，与 ledger 读侧
+    同源派生）——agent 链真相源落 Core 内建 backend（聚合裁决 D-C）。
+    """
+    from ghrah.context.persistence.sqlite_backend import (  # type: ignore[import-untyped]
+        SqliteBackend,
+    )
     from ghrah.core.unit import (  # type: ignore[import-untyped]
         CoreUnitConfig,
         create_core_unit,
     )
+
+    core_db_path = config.core_db_path
+
+    def persistence_factory(agent_config: Any) -> Any:
+        return SqliteBackend(db_path=core_db_path)
 
     def factory(cluster_id: str) -> Any:
         core_config = CoreUnitConfig(
             cluster_id=cluster_id,
             hitl_timeout=config.core.command_timeout,
             workspace_root=config.workspace_root,
+            persistence_factory=persistence_factory,
         )
         return create_core_unit(core_config)
 

@@ -2,7 +2,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Action-chain ledger built-in Subject unit."""
+"""Action-chain ledger built-in Subject unit（读侧直连 Core sqlite）。
+
+聚合裁决 D-C：``chain_history`` 读命令经 :class:`ActionChainLedger`
+（Core ``SqliteBackend`` 同文件 WAL 双连接）直读真相源；无写侧
+（旧 ``event/action_chain_updated`` 事件驱动落库面已死，删除）。
+"""
 
 from __future__ import annotations
 
@@ -12,8 +17,7 @@ from typing import Any
 from ghrah.context.persistence import serialize_node  # type: ignore[import-untyped]
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.ledger.chain import ActionChainLedger
-from ghrah.subject.persistence.service import SubjectPersistenceService
-from ghrah.subject.runtime.service_keys import LEDGER, PERSISTENCE
+from ghrah.subject.runtime.service_keys import LEDGER
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units._commands import CHAIN_HISTORY_COMMANDS
 
@@ -23,19 +27,15 @@ logger = logging.getLogger(__name__)
 
 
 class LedgerUnit(SubjectUnit):
-    """Owns ActionChainLedger and action-chain command/event routes."""
+    """Owns the read-side ActionChainLedger (Core sqlite projection)."""
 
     def __init__(self, config: SubjectConfig) -> None:
         self._config = config
         self._ledger: ActionChainLedger | None = None
         self._meta = UnitMeta(
             name="ledger",
-            requires=frozenset({PERSISTENCE}),
             provides=frozenset({LEDGER}),
-            routes=RouteSpec(
-                commands=CHAIN_HISTORY_COMMANDS,
-                events=frozenset({"action_chain_updated"}),
-            ),
+            routes=RouteSpec(commands=CHAIN_HISTORY_COMMANDS),
         )
 
     @property
@@ -49,10 +49,9 @@ class LedgerUnit(SubjectUnit):
         return self._ledger
 
     async def init(self, ctx: Any) -> None:
-        persistence = ctx.get(PERSISTENCE.name)
-        if not isinstance(persistence, SubjectPersistenceService):
-            raise TypeError("PERSISTENCE service must be SubjectPersistenceService.")
-        self._ledger = ActionChainLedger(persistence)
+        # 读侧直连：db 路径从 SubjectConfig.core_db_path 派生（与 registry
+        # 构造 CoreUnit 的 persistence_factory 同源），无 requires。
+        self._ledger = ActionChainLedger(self._config.core_db_path)
         ctx.provide(LEDGER.name, self._ledger)
 
     async def start(self) -> None:
@@ -70,18 +69,9 @@ class LedgerUnit(SubjectUnit):
     ) -> dict[str, Any]:
         if command not in CHAIN_HISTORY_COMMANDS:
             return {"success": False, "error": f"Unknown ledger command: {command}"}
-        return self._handle_chain_history(payload)
+        return await self._handle_chain_history(payload)
 
-    async def handle_event(self, event_type: str, payload: dict[str, Any]) -> None:
-        if event_type != "action_chain_updated":
-            return
-        agent_name = payload.get("agent_name", "")
-        node_data = payload.get("node", {})
-        if not agent_name:
-            return
-        await self.service.append_node(agent_name, node_data)
-
-    def _handle_chain_history(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _handle_chain_history(self, payload: dict[str, Any]) -> dict[str, Any]:
         agent_name = payload.get("agent_name", "")
         branch_name = payload.get("branch_name", "main")
         limit = payload.get("limit", -1)
@@ -90,14 +80,14 @@ class LedgerUnit(SubjectUnit):
             return {"success": False, "error": "agent_name is required"}
 
         try:
-            nodes = self.service.get_chain_history(
+            nodes = await self.service.get_chain_history(
                 agent_name,
                 branch=branch_name,
                 limit=limit,
             )
             serialized = [serialize_node(node) for node in nodes]
             active_session_id = ""
-            meta = self.service.get_chain_meta(agent_name)
+            meta = await self.service.get_chain_meta(agent_name)
             if meta is not None:
                 active_session_id = meta.active_session_id
             return {

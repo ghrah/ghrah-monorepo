@@ -27,7 +27,6 @@ from ghrah.subject.ledger import (
     ChainMeta,
     DAGEntry,
     LedgerNode,
-    PersistenceError,
 )
 from ghrah.subject.manifest_store import ManifestStore
 from ghrah.subject.permission_checker import (
@@ -86,7 +85,6 @@ __all__ = [
     "HITLVerdict",
     "LedgerNode",
     "ManifestStore",
-    "PersistenceError",
     "PermissionChecker",
     "PermissionDecision",
     "PermissionVerdict",

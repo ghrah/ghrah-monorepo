@@ -1,10 +1,10 @@
-"""ActionChain 分类账：追加写入的不可变账本。
+"""ActionChain 读侧投影（Core sqlite 直连只读）。
 
-接收 Core 的 ACTION_CHAIN_UPDATED 事件，持久化到 SQLite，
-维护内存索引支持快速查询和跨 Agent DAG 遍历。
+聚合裁决 D-C：存储真相源 = Core ``ContextManager`` sqlite；本模块是
+``chain_history`` 读命令的薄投影（同文件 WAL 双连接按需查询）。
 """
 
-from ghrah.subject.ledger.chain import ActionChainLedger, PersistenceError
+from ghrah.subject.ledger.chain import ActionChainLedger
 from ghrah.subject.ledger.models import ChainMeta, DAGEntry, LedgerNode
 
-__all__ = ["ActionChainLedger", "PersistenceError", "LedgerNode", "ChainMeta", "DAGEntry"]
+__all__ = ["ActionChainLedger", "LedgerNode", "ChainMeta", "DAGEntry"]

@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import InitVar, dataclass, field
+from pathlib import Path
 
 from ghrah.protocol.types import RecoveryAction
 
@@ -265,6 +266,16 @@ class SubjectConfig:
         return self._persistence
 
     @property
+    def core_db_path(self) -> str:
+        """Core agent 链 sqlite 路径（聚合裁决 D-C：真相源在 Core 内建 backend）。
+
+        与 subject 自身 db 同目录独立文件（``ghrah.db``）。registry 构造
+        CoreUnit 的 persistence_factory 与 ledger 读侧投影共用本派生，
+        保证读写同一文件。
+        """
+        return str(Path(self._persistence.db_path).parent / "ghrah.db")
+
+    @property
     def sandbox(self) -> SandboxUnitConfig:
         return self._sandbox
 
@@ -321,9 +332,7 @@ class SubjectConfig:
                 "GHRAH_SUBJECT_HITL_REQUIRE_APPROVAL", "true"
             ).lower()
             in ("true", "1", "yes"),
-            allowed_paths=os.environ.get(
-                "GHRAH_SUBJECT_HITL_ALLOWED_PATHS", ""
-            ).split(";")
+            allowed_paths=os.environ.get("GHRAH_SUBJECT_HITL_ALLOWED_PATHS", "").split(";")
             if os.environ.get("GHRAH_SUBJECT_HITL_ALLOWED_PATHS")
             else [],
             workspace_root=os.environ.get("GHRAH_SUBJECT_HITL_WORKSPACE_ROOT"),

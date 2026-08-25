@@ -17,11 +17,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+from ghrah.protocol.types import AgentConfigPayload, SpawnAgentPayload
 from ouroboros import Context  # type: ignore[import-untyped]
 
 from ghrah.subject.config import RecoveryConfig, SubjectConfig
 from ghrah.subject.runtime.assembly import assemble_subject
-from ghrah.subject.runtime.service_keys import RECONCILIATION_SERVICE
+from ghrah.subject.runtime.service_keys import LEDGER, RECONCILIATION_SERVICE
 from ghrah.subject.server.app import create_app
 
 
@@ -91,6 +92,27 @@ class TestAssembleSubject:
             handle = registry.get_handle("default")
             assert handle.is_connected
             assert ctx.get("supervisor", strict=False) is not None
+
+            # 聚合裁决 D-C：spawn 的 agent 链落 Core sqlite（core_db_path），
+            # 与 ledger 读侧投影同源（persistence_factory 注入验证）
+            config = _config(tmp_path)
+            spawn = await handle.spawn_agent(
+                SpawnAgentPayload(
+                    config=AgentConfigPayload(name="ledger-probe", system_prompt="x"),
+                )
+            )
+            assert spawn["success"], spawn.get("error")
+            supervisor = ctx.get("supervisor")
+            actor = supervisor._registry.get_info("ledger-probe").actor_handle
+            assert actor._context_manager.persistence is not None
+            assert str(actor._context_manager.persistence.db_path) == config.core_db_path
+
+            # ledger 读侧直连连通（同文件 WAL 双连接；新 agent 无迭代 → 空链。
+            # agents 表登记发生在首次 save_node；有迭代落库的端到端归任务 7 冒烟）
+            ledger = ctx.get(LEDGER.name)
+            await ledger.start()
+            assert await ledger.get_chain_history("ledger-probe") == []
+            await ledger.stop()
 
     async def test_reconcile_disabled_leaves_no_report(self, tmp_path: Path) -> None:
         async with _assemble(
