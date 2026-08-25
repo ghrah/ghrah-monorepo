@@ -9,9 +9,79 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ghrah.subject.runtime.engine import SubjectEngine
+    from ouroboros import Context, Fiber  # type: ignore[import-untyped]
 
-__all__ = ["register_builtin_units"]
+    from ghrah.subject.config import SubjectConfig
+    from ghrah.subject.runtime.engine import SubjectEngine
+    from ghrah.subject.unit.base import SubjectUnit
+
+__all__ = ["mount_builtin_units", "register_builtin_units"]
+
+
+async def mount_builtin_units(
+    ctx: Context,
+    config: SubjectConfig,
+    *,
+    profile: str = "coexistence",
+) -> dict[str, Fiber]:
+    """Mount migrated built-in units as Ouroboros plugins (阶段 2 增长中).
+
+    与 ``register_builtin_units`` 对称；只挂已原生化（Ouroboros）的 unit，
+    返回 ``{unit.meta.name: fiber}``。**逐个挂载并等 ACTIVE**（对齐旧
+    engine 顺序 start 语义；实测并发挂载会让多个 store 同时打开同一
+    SQLite 文件触发 ``database is locked``）。``full`` 分支**不含**
+    cluster_transport（归 MVP 项① Core Unit；transport kind 校验随之归项①）。
+    """
+
+    if profile not in {"coexistence", "full"}:
+        raise ValueError(f"Unknown built-in Subject unit profile: {profile}")
+
+    from ghrah.subject.runtime.ouroboros_bridge import mount_unit, wait_active
+    from ghrah.subject.units.ability_runner import AbilityRunnerUnit
+    from ghrah.subject.units.hitl_notary import HITLNotaryUnit
+    from ghrah.subject.units.hitl_policy import HITLPolicyUnit
+    from ghrah.subject.units.ledger import LedgerUnit
+    from ghrah.subject.units.manifest_store import ManifestStoreUnit
+    from ghrah.subject.units.permissions import PermissionsUnit
+    from ghrah.subject.units.persistence import PersistenceUnit
+    from ghrah.subject.units.recovery import DesiredStateUnit
+    from ghrah.subject.units.sandbox import SandboxUnit
+    from ghrah.subject.units.task import TaskUnit
+    from ghrah.subject.units.workspace import WorkspaceUnit
+
+    units: list[SubjectUnit] = [
+        PersistenceUnit(config),
+        SandboxUnit(config),
+        ManifestStoreUnit(config),
+        LedgerUnit(config),
+        WorkspaceUnit(config),
+        HITLPolicyUnit(config),
+        PermissionsUnit(config),
+        HITLNotaryUnit(config),
+        AbilityRunnerUnit(config),
+        TaskUnit(config),
+        DesiredStateUnit(config),
+    ]
+
+    if profile == "full":
+        from ghrah.subject.units.project import ProjectUnit
+        from ghrah.subject.units.recovery import RecoveryUnit
+        from ghrah.subject.units.websocket_observer_endpoint import (
+            WebSocketObserverEndpointUnit,
+        )
+
+        units.extend([
+            WebSocketObserverEndpointUnit(config),
+            ProjectUnit(config),
+            RecoveryUnit(config),
+        ])
+
+    fibers: dict[str, Fiber] = {}
+    for unit in units:
+        fiber = ctx.plugin(mount_unit(unit))
+        await wait_active(fiber, timeout=10.0)
+        fibers[unit.meta.name] = fiber
+    return fibers
 
 
 def register_builtin_units(

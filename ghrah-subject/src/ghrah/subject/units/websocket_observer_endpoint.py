@@ -18,7 +18,7 @@ from ghrah.subject.event_bus import (
     SUBJECT_CORE_EVENT_RECEIVED,
     SUBJECT_HITL_REQUEST_CREATED,
 )
-from ghrah.subject.runtime.context import SubjectContext
+from ghrah.subject.runtime.ouroboros_bridge import bridge_command
 from ghrah.subject.runtime.service_keys import OBSERVER_ENDPOINT, OBSERVER_EVENT_BUS
 from ghrah.subject.server.config import ObserverServerConfig
 from ghrah.subject.server.connection_manager import ConnectionManager
@@ -46,6 +46,27 @@ class _ObserverEventBusAdapter:
 
     def subscribe(self, *args: Any, **kwargs: Any) -> Any:
         return self._event_bus.subscribe(*args, **kwargs)
+
+
+class _EngineDispatchAdapter:
+    """Minimal engine-shaped adapter: routes Observer commands via Ouroboros.
+
+    ObserverRouter 仅消费 ``dispatch_observer_command``；鸭子适配零改
+    ``server/``。正式管道（request_id/session_id 透传）归阶段 3.2。
+    """
+
+    def __init__(self, ctx: Any) -> None:
+        self._ctx = ctx
+
+    async def dispatch_observer_command(
+        self,
+        command: str,
+        payload: dict[str, Any],
+        request_id: str | None = None,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        del request_id, session_id  # 占位（阶段 3.2 装配层透传）
+        return await bridge_command(self._ctx, command, payload)
 
 
 class WebSocketObserverEndpointUnit(SubjectUnit):
@@ -97,8 +118,10 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
             raise RuntimeError("WebSocketObserverEndpointUnit has not been initialized.")
         return self._router
 
-    async def init(self, ctx: SubjectContext) -> None:
-        config = self._observer_config or ObserverServerConfig(log_level=ctx.config.log_level)
+    async def init(self, ctx: Any) -> None:
+        config = self._observer_config or ObserverServerConfig(
+            log_level=self._config.log_level
+        )
         connection_manager = ConnectionManager()
         observer_event_bus = EventBus(
             connection_manager,
@@ -107,7 +130,7 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
         router = ObserverRouter(
             connection_manager,
             observer_event_bus,
-            engine=ctx.engine,
+            engine=_EngineDispatchAdapter(ctx),  # type: ignore[arg-type]
         )
         server = ObserverServer(config, connection_manager, router, observer_event_bus)
 
@@ -118,10 +141,10 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
         self._server = server
         self._app = _create_observer_app(config, server, connection_manager)
 
-        ctx.services.set(OBSERVER_ENDPOINT, self)
-        ctx.services.set(OBSERVER_EVENT_BUS, self._observer_event_bus_adapter)
-        ctx.event_bus.subscribe(SUBJECT_CORE_EVENT_RECEIVED, self._forward_core_event)
-        ctx.event_bus.subscribe(SUBJECT_HITL_REQUEST_CREATED, self._forward_hitl_request)
+        ctx.provide(OBSERVER_ENDPOINT.name, self)
+        ctx.provide(OBSERVER_EVENT_BUS.name, self._observer_event_bus_adapter)
+        ctx.on(f"event/{SUBJECT_CORE_EVENT_RECEIVED}", self._forward_core_event)
+        ctx.on(f"event/{SUBJECT_HITL_REQUEST_CREATED}", self._forward_hitl_request)
 
     async def start(
         self,
@@ -147,8 +170,7 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
     async def broadcast(self, message: dict[str, Any]) -> int:
         return await self.connection_manager.broadcast(message)
 
-    async def _forward_core_event(self, subject_event_type: str, payload: Any) -> None:
-        del subject_event_type
+    async def _forward_core_event(self, payload: Any) -> None:
         if not isinstance(payload, Mapping):
             logger.warning("Ignoring malformed core event payload: %r", payload)
             return
@@ -163,8 +185,7 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
             )
         )
 
-    async def _forward_hitl_request(self, subject_event_type: str, payload: Any) -> None:
-        del subject_event_type
+    async def _forward_hitl_request(self, payload: Any) -> None:
         await self.observer_event_bus.emit_core_event(
             Message(
                 type=EventType.HITL_REQUEST.value,

@@ -2,146 +2,77 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Ouroboros adapter bridge for legacy Subject units.
+"""Ouroboros mounting helpers for migrated Subject units (Phase 2).
 
-试点期（上位计划 `1787015082781` 阶段 1）桥接层：把 ghrah 风格
-``SubjectUnit``（``init``/``start``/``stop`` 生命周期 + ``meta.routes`` 声明）
-包装为 Ouroboros plugin，在 Ouroboros ``Context`` 上挂载、提供服务、路由命令，
-并在 fiber dispose 后自动撤销服务与路由。
+阶段 2 过渡挂载助手（阶段 3.2/4 随装配层定形后精简）：
 
-本桥为「试点一次性桥」：不继承、不全实现 ``SubjectContext``，仅实现 workspace /
-sandbox 试点 unit 触达的子集（``config`` / ``services`` / ``event_bus``）。
-阶段 2 改各 unit 类本体直接用 ``ctx.provide`` / ``ctx.on`` 时，本桥即拆除。
+- ``mount_unit(unit)`` 把已原生化（``ctx.provide``/``ctx.get``/``ctx.emit``/
+  ``ctx.on``）的 ``SubjectUnit`` 包装为 Ouroboros plugin：``inject`` 从
+  ``unit.meta.requires`` 派生；apply 内 init → 路由注册 → start；disposer
+  触发 ``await unit.stop()``，服务/路由随 fiber dispose 自动撤销。
+- ``bridge_command`` 经 ``ctx.serial`` 路由命令，零 handler 时返回
+  ``Unknown command`` 兜底（对齐 ``MessageDispatcher`` 文案）。
+- ``wait_active`` 等 fiber 收敛且 state 达 ACTIVE：``fiber.await_()`` 只等
+  lifecycle task 结束，state 迁移可能在随后一个事件循环 tick 生效（实测
+  2026-08-25），故 ACTIVE 判定前需轮询。
+
+事件命名约定（emit 与 on 两端一致）：命令 ``command/<name>``、事件
+``event/<常量>``。listener 签名为 ``(payload)`` 单参（试点实测结论）。
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+import asyncio
+from collections.abc import Awaitable, Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
-from ghrah.subject.config import SubjectConfig
-from ghrah.subject.runtime.service_keys import SubjectServiceKey
+from ouroboros import FiberState  # type: ignore[import-untyped]
+
 from ghrah.subject.unit.base import CommandContext, SubjectUnit
 
 if TYPE_CHECKING:
-    from ouroboros import Context  # type: ignore[import-untyped]
+    from ouroboros import Context, Fiber
 
 __all__ = [
-    "BridgeSubjectContext",
     "bridge_command",
-    "unit_to_plugin",
+    "mount_unit",
+    "wait_active",
 ]
 
 
-class _BridgeServices:
-    """Minimal ``SubjectServices``-shaped adapter backed by Ouroboros provide/get.
+async def wait_active(fiber: Fiber, *, timeout: float = 2.0) -> None:
+    """Await a fiber and poll until it reports ACTIVE (or fail).
 
-    ``set(key, v)`` → ``ctx.provide(key.name, v)``（plugin fiber 内有效，随
-    fiber dispose 撤销）。
-    ``require(key)`` → ``ctx.get(key.name, strict=True)``，捕获 Ouroboros
-    ``AttributeError`` 并转 ``RuntimeError`` 以对齐 ``SubjectServices.require``
-    文案。
+    统一 ``asyncio.wait_for`` 超时——inject 名单错导致 PENDING 死等时表现为
+    失败而非挂起。
     """
 
-    def __init__(self, ctx: Context) -> None:
-        self._ctx = ctx
-
-    def set(self, key: SubjectServiceKey[Any], value: Any) -> None:
-        self._ctx.provide(key.name, value)
-
-    def get(self, key: SubjectServiceKey[Any], default: Any = None) -> Any:
-        return self._ctx.get(key.name, strict=False) or default
-
-    def require(self, key: SubjectServiceKey[Any]) -> Any:
-        try:
-            return self._ctx.get(key.name, strict=True)
-        except AttributeError as error:  # Ouroboros 缺服务抛 AttributeError
-            raise RuntimeError(
-                f"Required subject service '{key.name}' is not set."
-            ) from error
+    await asyncio.wait_for(fiber.await_(), timeout=timeout)
+    deadline = asyncio.get_running_loop().time() + timeout
+    while fiber.state is not FiberState.ACTIVE:
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError(f"fiber did not reach ACTIVE within {timeout}s: {fiber.state}")
+        await asyncio.sleep(0.01)
 
 
-class _BridgeEventBus:
-    """Minimal ``SubjectEventBus``-shaped adapter backed by Ouroboros ``emit``.
-
-    Ouroboros ``ctx.emit`` 是同步的；本桥的 ``emit`` 保留 async 签名以兼容
-    ``SubjectEventBus.emit``（调用方 ``await ctx.event_bus.emit(...)``），实现
-    内同步转发。``subscribe`` 等 workspace/sandbox 试点不触达的面抛
-    NotImplementedError，阶段 2 按 unit 增量补全或随类本体改造拆除。
-    """
-
-    def __init__(self, ctx: Context) -> None:
-        self._ctx = ctx
-
-    async def emit(self, event_type: str, payload: Any) -> None:
-        self._ctx.emit(event_type, payload)
-
-    def subscribe(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError(
-            "BridgeEventBus.subscribe is not supported in the Ouroboros pilot; "
-            "the unit under migration must not require it."
-        )
-
-
-class BridgeSubjectContext:
-    """Duck-typed minimal SubjectContext for the Ouroboros pilot.
-
-    仅实现 workspace/sandbox 试点 unit 触达的面：``config``、``services``、
-    ``event_bus``。不实现 ``engine``/``dispatcher``/``units``/``get_unit``/
-    ``create_task``/``observer_endpoint``/``capability_registry``——试点 unit
-    不触达，触达即 NotImplementedError 显式暴露（阶段 2 增量处理）。
-    """
-
-    def __init__(self, ctx: Context, config: SubjectConfig) -> None:
-        self._ctx = ctx
-        self._config = config
-        self._services = _BridgeServices(ctx)
-        self._event_bus = _BridgeEventBus(ctx)
-
-    @property
-    def config(self) -> SubjectConfig:
-        return self._config
-
-    @property
-    def services(self) -> _BridgeServices:
-        return self._services
-
-    @property
-    def event_bus(self) -> _BridgeEventBus:
-        return self._event_bus
-
-
-def unit_to_plugin(
+def mount_unit(
     unit: SubjectUnit,
     *,
-    inject: Sequence[str] | Mapping[str, Any] | None = None,
+    inject: Sequence[str] | None = None,
 ) -> Callable[..., Awaitable[Callable[[], Awaitable[None]]]]:
-    """Wrap a legacy SubjectUnit as an Ouroboros plugin (apply function).
+    """Wrap an Ouroboros-native SubjectUnit as an Ouroboros plugin (apply).
 
     ``inject`` 默认从 ``unit.meta.requires`` 派生（``[key.name for key in
-    requires]``）；可显式覆盖。空 requires → 空 inject（无依赖，立即 ACTIVE）。
-
-    apply 内：构造 ``BridgeSubjectContext`` → ``await unit.init(bridge)`` →
-    按声明路由注册 ``ctx.on("command/<c>", ...)`` / ``ctx.on("event/<e>", ...)``
-    → ``await unit.start()`` → 返回 async disposer（``await unit.stop()``），
-    随 fiber dispose 触发，停止 unit 并撤销其 provide/on 注册。
+    requires]``）；空 requires → 空 inject（无依赖，立即 ACTIVE）。apply 内
+    配置不透传——原生 unit 的配置在构造期注入（``unit._config``）。
     """
 
     if inject is None:
         inject = [key.name for key in unit.meta.requires]
 
     async def apply(ctx: Context, config: Any) -> Callable[[], Awaitable[None]]:
-        subject_config = config if isinstance(config, SubjectConfig) else getattr(
-            unit, "_config", None
-        )
-        if subject_config is None:
-            raise TypeError(
-                "unit_to_plugin requires a SubjectConfig via plugin config or "
-                "unit._config; neither was available."
-            )
-        bridge = BridgeSubjectContext(ctx, subject_config)
-
-        await unit.init(bridge)
+        del config  # 原生 unit 的配置在构造期注入（unit._config）
+        await unit.init(ctx)
         _register_routes(ctx, unit)
         await unit.start()
 
@@ -150,17 +81,17 @@ def unit_to_plugin(
 
         return disposer
 
-    apply.inject = inject  # type: ignore[attr-defined]
+    apply.inject = list(inject)  # type: ignore[attr-defined]
     return apply
 
 
 def _register_routes(ctx: Context, unit: SubjectUnit) -> None:
     """Bind a unit's declared routes onto the Ouroboros event system.
 
-    命令 handler 签名为 ``(payload)`` 单参（实测 2026-08-24：双参会抛
-    TypeError）。试点期用固定 ``CommandContext.internal()`` 占位；``request_id``
-    /``session_id`` 透传归阶段 3 装配层。事件 handler 同为单参 ``(payload)``。
-    长跑命令在试点合并为普通命令处理，优化留阶段 2/3。
+    命令/事件 handler 签名均为 ``(payload)`` 单参（试点实测 2026-08-24：
+    双参会抛 TypeError）。试点期用固定 ``CommandContext.internal()`` 占位；
+    ``request_id``/``session_id`` 透传归阶段 3 装配层。长跑命令合并为普通
+    命令处理，优化留阶段 2/3。
     """
 
     routes = unit.meta.routes
@@ -212,11 +143,11 @@ async def bridge_command(
 ) -> dict[str, Any]:
     """Route a command via Ouroboros ``ctx.serial`` with Unknown fallback.
 
-    ``cmd_ctx`` 在试点期仅作占位透传（Ouroboros listener 单参签名不携带元数据）；
-    正式的 ``request_id``/``session_id`` 透传在阶段 3 装配层实现。零 handler 时
-    ``ctx.serial`` 返回 None（实测），本助手转 ``{"success": False, "error":
-    f"Unknown command: {name}"}`` 对齐 ``MessageDispatcher.dispatch_observer_command``
-    的兜底文案。
+    ``cmd_ctx`` 在阶段 2 仅作占位透传（Ouroboros listener 单参签名不携带
+    元数据）；正式的 ``request_id``/``session_id`` 透传在阶段 3 装配层实现。
+    零 handler 时 ``ctx.serial`` 返回 None（实测），本助手转
+    ``{"success": False, "error": f"Unknown command: {name}"}`` 对齐
+    ``MessageDispatcher.dispatch_observer_command`` 的兜底文案。
     """
 
     result = await ctx.serial(f"command/{name}", payload)

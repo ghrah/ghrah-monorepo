@@ -19,7 +19,6 @@ from ghrah.subject.event_bus import (
 from ghrah.subject.manifest_store.builtins import ensure_builtins
 from ghrah.subject.manifest_store.service import handle_manifest_command
 from ghrah.subject.manifest_store.store import ManifestStore
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import MANIFEST_PERMISSION_INDEX, MANIFEST_STORE
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units._commands import MANIFEST_COMMANDS
@@ -81,7 +80,7 @@ class ManifestStoreUnit(SubjectUnit):
 
     def __init__(self, config: SubjectConfig) -> None:
         self._config = config
-        self._ctx: SubjectContext | None = None
+        self._ctx: Any | None = None
         self._store: ManifestStore | None = None
         self._index: _ManifestPermissionIndexImpl | None = None
         self._meta = UnitMeta(
@@ -106,14 +105,14 @@ class ManifestStoreUnit(SubjectUnit):
             raise RuntimeError("ManifestStoreUnit has not been initialized.")
         return self._index
 
-    async def init(self, ctx: SubjectContext) -> None:
+    async def init(self, ctx: Any) -> None:
         self._ctx = ctx
-        self._store = ManifestStore(ctx.config.manifest.manifest_root)
+        self._store = ManifestStore(self._config.manifest.manifest_root)
         self._store.ensure_dirs()
         ensure_builtins(self._store)
         self._index = _ManifestPermissionIndexImpl(self._store)
-        ctx.services.set(MANIFEST_STORE, self._store)
-        ctx.services.set(MANIFEST_PERMISSION_INDEX, self._index)
+        ctx.provide(MANIFEST_STORE.name, self._store)
+        ctx.provide(MANIFEST_PERMISSION_INDEX.name, self._index)
 
     async def handle_command(
         self,
@@ -138,9 +137,9 @@ class ManifestStoreUnit(SubjectUnit):
             return
 
         self.refresh_permission_index()
-        await ctx.event_bus.emit(SUBJECT_MANIFEST_PERMISSIONS_CHANGED, {})
-        await ctx.event_bus.emit(
-            SUBJECT_CORE_EVENT_RECEIVED,
+        ctx.emit(f"event/{SUBJECT_MANIFEST_PERMISSIONS_CHANGED}", {})
+        ctx.emit(
+            f"event/{SUBJECT_CORE_EVENT_RECEIVED}",
             {
                 "event_type": event_type,
                 "payload": manifest_result_to_event_payload(result),
@@ -150,7 +149,7 @@ class ManifestStoreUnit(SubjectUnit):
     def refresh_permission_index(self) -> None:
         self.permission_index.rebuild()
 
-    def _require_context(self) -> SubjectContext:
+    def _require_context(self) -> Any:
         if self._ctx is None:
             raise RuntimeError("ManifestStoreUnit has not been initialized.")
         return self._ctx

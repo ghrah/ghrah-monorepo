@@ -10,7 +10,6 @@ from typing import Any
 
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.persistence.service import SubjectPersistenceService
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import PERSISTENCE
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units._commands import PERSIST_COMMANDS
@@ -40,9 +39,9 @@ class PersistenceUnit(SubjectUnit):
             raise RuntimeError("PersistenceUnit has not been initialized.")
         return self._service
 
-    async def init(self, ctx: SubjectContext) -> None:
-        self._service = SubjectPersistenceService(db_path=ctx.config.persistence.db_path)
-        ctx.services.set(PERSISTENCE, self._service)
+    async def init(self, ctx: Any) -> None:
+        self._service = SubjectPersistenceService(db_path=self._config.persistence.db_path)
+        ctx.provide(PERSISTENCE.name, self._service)
 
     async def start(self) -> None:
         await self.service.start()

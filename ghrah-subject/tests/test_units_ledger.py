@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from ghrah.context.node import ContextNode
 from ghrah.context.persistence import serialize_node
+from ouroboros import Context  # type: ignore[import-untyped]
+from ouroboros_testutil import wait_active
 
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.runtime.engine import SubjectEngine
+from ghrah.subject.runtime.ouroboros_bridge import bridge_command, mount_unit
 from ghrah.subject.runtime.service_keys import LEDGER
-from ghrah.subject.unit.base import CommandContext
 from ghrah.subject.units.ledger import LedgerUnit
+from ghrah.subject.units.persistence import PersistenceUnit
 
 
 def _config(tmp_path: Path) -> SubjectConfig:
@@ -24,35 +27,31 @@ async def test_ledger_unit_registers_service_and_handles_history(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
-    engine = SubjectEngine(config)
-    engine.register_builtin_units(profile="coexistence")
+    persistence = PersistenceUnit(config)
+    ledger = LedgerUnit(config)
 
-    await engine.start()
-    try:
-        unit = engine.get_unit("ledger")
-        assert isinstance(unit, LedgerUnit)
-        assert engine.context.services.require(LEDGER) is unit.service
+    async with Context() as ctx:
+        ctx.plugin(mount_unit(persistence))
+        ledger_fiber = ctx.plugin(mount_unit(ledger))
+        await wait_active(ledger_fiber)
 
-        missing_agent = await unit.handle_command(
-            "get_chain_history",
-            {},
-            CommandContext.observer("req-1", session_id=None),
-        )
+        assert ctx.get(LEDGER.name) is ledger.service
+
+        missing_agent = await bridge_command(ctx, "get_chain_history", {})
         assert missing_agent == {"success": False, "error": "agent_name is required"}
 
         node = ContextNode.create_root(agent_name="agent-a", messages=[])
-        await unit.handle_event(
-            "action_chain_updated",
+        ctx.emit(
+            "event/action_chain_updated",
             {"agent_name": "agent-a", "node": serialize_node(node)},
         )
-        result = await unit.handle_command(
-            "get_chain_history",
-            {"agent_name": "agent-a"},
-            CommandContext.observer("req-2", session_id=None),
-        )
+        # emit 将 async listener 调度为后台任务，轮询至节点落账
+        for _ in range(200):
+            result = await bridge_command(ctx, "get_chain_history", {"agent_name": "agent-a"})
+            if result.get("success") and result.get("data", {}).get("nodes"):
+                break
+            await asyncio.sleep(0.01)
 
         assert result["success"] is True
         assert result["data"]["agent_name"] == "agent-a"
         assert result["data"]["nodes"][0]["id"] == node.id
-    finally:
-        await engine.stop()

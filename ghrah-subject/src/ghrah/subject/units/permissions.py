@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.permission_checker import PermissionChecker
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import (
     MANIFEST_PERMISSION_INDEX,
     PERMISSION_SERVICE,
@@ -41,13 +42,13 @@ class PermissionsUnit(SubjectUnit):
             raise RuntimeError("PermissionsUnit has not been initialized.")
         return self._checker
 
-    async def init(self, ctx: SubjectContext) -> None:
-        manifest_index = ctx.services.require(MANIFEST_PERMISSION_INDEX)
+    async def init(self, ctx: Any) -> None:
+        manifest_index = ctx.get(MANIFEST_PERMISSION_INDEX.name)
         self._checker = PermissionChecker(
-            allowed_paths=ctx.config.hitl.allowed_paths or None,
-            workspace_root=ctx.config.hitl.workspace_root
-            or ctx.config.sandbox.workspace_root,
-            require_approval=ctx.config.hitl.require_approval_by_default,
+            allowed_paths=self._config.hitl.allowed_paths or None,
+            workspace_root=self._config.hitl.workspace_root
+            or self._config.sandbox.workspace_root,
+            require_approval=self._config.hitl.require_approval_by_default,
             manifest_permission_index=manifest_index,
         )
-        ctx.services.set(PERMISSION_SERVICE, self._checker)
+        ctx.provide(PERMISSION_SERVICE.name, self._checker)

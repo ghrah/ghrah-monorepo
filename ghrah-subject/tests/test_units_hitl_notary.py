@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ouroboros import Context  # type: ignore[import-untyped]
+from ouroboros_testutil import wait_active
+
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.runtime.engine import SubjectEngine
+from ghrah.subject.runtime.ouroboros_bridge import bridge_command, mount_unit
 from ghrah.subject.runtime.service_keys import HITL_NOTARY
-from ghrah.subject.unit.base import CommandContext
 from ghrah.subject.units.hitl_notary import HITLNotaryUnit
+from ghrah.subject.units.hitl_policy import HITLPolicyUnit
+from ghrah.subject.units.manifest_store import ManifestStoreUnit
 
 
 def _config(tmp_path: Path) -> SubjectConfig:
@@ -21,19 +25,21 @@ async def test_hitl_notary_unit_response_success_and_unknown_false(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
-    engine = SubjectEngine(config)
-    engine.register_builtin_units(profile="coexistence")
+    unit = HITLNotaryUnit(config)
 
-    await engine.start()
-    try:
-        unit = engine.get_unit("hitl_notary")
-        assert isinstance(unit, HITLNotaryUnit)
-        assert engine.context.services.require(HITL_NOTARY) is unit.service
+    async with Context() as ctx:
+        # 依赖链：manifest_store → hitl_policy → hitl_notary
+        ctx.plugin(mount_unit(ManifestStoreUnit(config)))
+        ctx.plugin(mount_unit(HITLPolicyUnit(config)))
+        fiber = ctx.plugin(mount_unit(unit))
+        await wait_active(fiber)
 
-        unknown = await unit.handle_command(
+        assert ctx.get(HITL_NOTARY.name) is unit.service
+
+        unknown = await bridge_command(
+            ctx,
             "hitl_response",
             {"promise_id": "missing", "approved": True},
-            CommandContext.observer("req-1", session_id=None),
         )
         assert unknown == {
             "success": False,
@@ -45,14 +51,14 @@ async def test_hitl_notary_unit_response_success_and_unknown_false(
             "write_file",
             {"file_path": "a.txt"},
         )
-        resolved = await unit.handle_command(
+        resolved = await bridge_command(
+            ctx,
             "hitl_response",
             {
                 "promise_id": promise.promise_id,
                 "approved": True,
                 "reason": "ok",
             },
-            CommandContext.observer("req-2", session_id=None),
         )
 
         assert resolved == {
@@ -61,5 +67,3 @@ async def test_hitl_notary_unit_response_success_and_unknown_false(
         }
         assert promise.future.result().approved is True
         assert promise.future.result().reason == "ok"
-    finally:
-        await engine.stop()

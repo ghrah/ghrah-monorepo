@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+import asyncio
+import os
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from ouroboros import Context  # type: ignore[import-untyped]
+from ouroboros_testutil import wait_active
 
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.runtime.engine import SubjectEngine
-from ghrah.subject.runtime.service_keys import WORKSPACE_SERVICE
-from ghrah.subject.unit.base import CommandContext
+from ghrah.subject.runtime.ouroboros_bridge import bridge_command, mount_unit
+from ghrah.subject.runtime.service_keys import (
+    WORKSPACE_MANAGER,
+    WORKSPACE_SERVICE,
+)
+from ghrah.subject.sandbox.executor import SandboxExecutor
+from ghrah.subject.units.sandbox import SandboxUnit
 from ghrah.subject.units.workspace import WorkspaceUnit
+from ghrah.subject.workspace import path_to_locator
+
+if TYPE_CHECKING:
+    from ouroboros import Fiber  # type: ignore[import-untyped]
 
 
 def _config(tmp_path: Path) -> SubjectConfig:
@@ -17,19 +31,25 @@ def _config(tmp_path: Path) -> SubjectConfig:
     )
 
 
+def _mount(ctx: Context, config: SubjectConfig) -> tuple[WorkspaceUnit, Fiber]:
+    """挂 sandbox（依赖）+ workspace，返回 (unit, fiber)。"""
+
+    ctx.plugin(mount_unit(SandboxUnit(config)))
+    unit = WorkspaceUnit(config)
+    fiber = ctx.plugin(mount_unit(unit))
+    return unit, fiber
+
+
 async def test_workspace_unit_registers_typed_service_and_missing_workspace_result(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
-    engine = SubjectEngine(config)
-    engine.register_builtin_units(profile="coexistence")
 
-    await engine.start()
-    try:
-        unit = engine.get_unit("workspace")
-        assert isinstance(unit, WorkspaceUnit)
+    async with Context() as ctx:
+        unit, fiber = _mount(ctx, config)
+        await wait_active(fiber)
 
-        service = engine.context.services.require(WORKSPACE_SERVICE)
+        service = ctx.get(WORKSPACE_SERVICE.name)
         existing_path = Path(service.root_path) / "agent-existing"
         existing_path.mkdir()
 
@@ -37,89 +57,99 @@ async def test_workspace_unit_registers_typed_service_and_missing_workspace_resu
         assert service.resolve_agent_path("agent-existing") == str(existing_path)
         assert service.resolve_agent_path("missing") is None
 
-        result = await unit.handle_command(
-            "workspace_status",
-            {"agent_name": "missing"},
-            CommandContext.observer("req-1", session_id=None),
-        )
+        result = await bridge_command(ctx, "workspace_status", {"agent_name": "missing"})
         assert result == {
             "success": False,
             "error": "Workspace not found for agent 'missing'",
         }
-    finally:
-        await engine.stop()
 
 
 async def test_workspace_register_get_list_commands(tmp_path: Path) -> None:
     """workspace_register/get/list 3 新命令（W6）。"""
-    from ghrah.subject.workspace import path_to_locator
 
     config = _config(tmp_path)
-    engine = SubjectEngine(config)
-    engine.register_builtin_units(profile="coexistence")
 
-    await engine.start()
-    try:
-        unit = engine.get_unit("workspace")
-        assert isinstance(unit, WorkspaceUnit)
+    async with Context() as ctx:
+        _, fiber = _mount(ctx, config)
+        await wait_active(fiber)
 
-        # 先建一个 agent 默认 workspace，使其出现在 list 中
-        created = await unit.handle_command(
-            "create_workspace",
-            {"agent_name": "agent-a"},
-            CommandContext.observer("req-1", session_id=None),
-        )
+        created = await bridge_command(ctx, "create_workspace", {"agent_name": "agent-a"})
         assert created["success"] is True
 
         # register：把一个已存在的目录登记为 plain workspace
-        import os
-
         data_dir = os.path.join(config.sandbox.workspace_root, "data-dir")
         os.makedirs(data_dir)
-        reg = await unit.handle_command(
+        reg = await bridge_command(
+            ctx,
             "workspace_register",
             {"locator": path_to_locator(data_dir), "name": "data", "provider_type": "plain"},
-            CommandContext.observer("req-2", session_id=None),
         )
         assert reg["success"] is True
         wid = reg["data"]["workspace_id"]
         assert reg["data"]["provider_type"] == "plain"
 
         # get：按 workspace_id 取记录
-        got = await unit.handle_command(
-            "workspace_get",
-            {"workspace_id": wid},
-            CommandContext.observer("req-3", session_id=None),
-        )
+        got = await bridge_command(ctx, "workspace_get", {"workspace_id": wid})
         assert got["success"] is True
         assert got["data"]["workspace_id"] == wid
         assert got["data"]["name"] == "data"
 
         # get：未知 workspace_id 失败
-        miss = await unit.handle_command(
-            "workspace_get",
-            {"workspace_id": "nope"},
-            CommandContext.observer("req-4", session_id=None),
-        )
+        miss = await bridge_command(ctx, "workspace_get", {"workspace_id": "nope"})
         assert miss["success"] is False
 
         # list：无过滤含 agent-a 与 data
-        lst = await unit.handle_command(
-            "workspace_list",
-            {},
-            CommandContext.observer("req-5", session_id=None),
-        )
+        lst = await bridge_command(ctx, "workspace_list", {})
         assert lst["success"] is True
         ids = {w["workspace_id"] for w in lst["data"]["workspaces"]}
         assert wid in ids
 
         # list：按 plain 过滤只剩 data
-        lst_plain = await unit.handle_command(
-            "workspace_list",
-            {"provider_type": "plain"},
-            CommandContext.observer("req-6", session_id=None),
-        )
+        lst_plain = await bridge_command(ctx, "workspace_list", {"provider_type": "plain"})
         plain_ids = {w["workspace_id"] for w in lst_plain["data"]["workspaces"]}
         assert plain_ids == {wid}
-    finally:
-        await engine.stop()
+
+
+async def test_workspace_on_ouroboros_mount_route_dispose_remount(
+    tmp_path: Path,
+) -> None:
+    """试点场景并入：挂载/服务可见/命令路由/卸载回退/重挂恢复闭环。"""
+
+    config = _config(tmp_path)
+
+    async with Context() as ctx:
+        sandbox_fiber = ctx.plugin(mount_unit(SandboxUnit(config)))
+        await wait_active(sandbox_fiber)
+        assert isinstance(ctx.get("sandbox_executor"), SandboxExecutor)
+
+        ws_fiber = ctx.plugin(mount_unit(WorkspaceUnit(config)))
+        await wait_active(ws_fiber)
+
+        assert ctx.get(WORKSPACE_SERVICE.name) is not None
+        assert ctx.get(WORKSPACE_MANAGER.name) is not None
+
+        created = await bridge_command(ctx, "create_workspace", {"agent_name": "agent-a"})
+        assert created["success"] is True
+        assert created["data"]["agent_name"] == "agent-a"
+        assert "path" in created["data"]
+
+        await ws_fiber.dispose()
+        await asyncio.sleep(0.05)
+
+        assert ctx.get(WORKSPACE_SERVICE.name, strict=False) is None
+        assert ctx.get(WORKSPACE_MANAGER.name, strict=False) is None
+
+        gone = await bridge_command(ctx, "workspace_status", {"agent_name": "missing"})
+        assert gone == {"success": False, "error": "Unknown command: workspace_status"}
+
+        ws_fiber2 = ctx.plugin(mount_unit(WorkspaceUnit(config)))
+        await wait_active(ws_fiber2)
+
+        assert ctx.get(WORKSPACE_SERVICE.name) is not None
+        recovered = await bridge_command(ctx, "workspace_status", {"agent_name": "missing"})
+        assert recovered == {
+            "success": False,
+            "error": "Workspace not found for agent 'missing'",
+        }
+
+        await ws_fiber2.dispose()

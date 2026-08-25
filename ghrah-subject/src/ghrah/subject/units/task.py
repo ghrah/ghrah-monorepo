@@ -10,7 +10,6 @@ from typing import Any
 
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import TASK_MANAGER, TASK_STORE
 from ghrah.subject.task import TaskManager, TaskStore
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
@@ -30,7 +29,7 @@ class TaskUnit(SubjectUnit):
 
     def __init__(self, config: SubjectConfig) -> None:
         self._config = config
-        self._ctx: SubjectContext | None = None
+        self._ctx: Any | None = None
         self._store: TaskStore | None = None
         self._manager: TaskManager | None = None
         self._meta = UnitMeta(
@@ -49,12 +48,12 @@ class TaskUnit(SubjectUnit):
             raise RuntimeError("TaskUnit has not been initialized.")
         return self._manager
 
-    async def init(self, ctx: SubjectContext) -> None:
+    async def init(self, ctx: Any) -> None:
         self._ctx = ctx
-        self._store = TaskStore(ctx.config.persistence.db_path)
+        self._store = TaskStore(self._config.persistence.db_path)
         self._manager = TaskManager(self._store, on_event=self._emit_event)
-        ctx.services.set(TASK_MANAGER, self._manager)
-        ctx.services.set(TASK_STORE, self._store)
+        ctx.provide(TASK_MANAGER.name, self._manager)
+        ctx.provide(TASK_STORE.name, self._store)
 
     async def start(self) -> None:
         if self._store is not None:
@@ -75,10 +74,12 @@ class TaskUnit(SubjectUnit):
     async def _emit_event(
         self, event_type: str, payload: dict[str, Any]
     ) -> None:
+        """TaskManager 的 ``on_event`` 回调：保留 async 签名，体内同步 ctx.emit。"""
+
         ctx = self._ctx
         if ctx is None:
             return
-        await ctx.event_bus.emit(
-            SUBJECT_CORE_EVENT_RECEIVED,
+        ctx.emit(
+            f"event/{SUBJECT_CORE_EVENT_RECEIVED}",
             {"event_type": event_type, "payload": payload},
         )

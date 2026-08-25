@@ -17,7 +17,6 @@ from ghrah.subject.config import SubjectConfig
 from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
 from ghrah.subject.recovery.desired_state import DesiredStateStore
 from ghrah.subject.recovery.reconciler import ReconciliationService
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import (
     CLUSTER_TRANSPORT_MANAGER,
     DESIRED_STATE_STORE,
@@ -59,9 +58,9 @@ class DesiredStateUnit(SubjectUnit):
             raise RuntimeError("DesiredStateUnit has not been initialized.")
         return self._store
 
-    async def init(self, ctx: SubjectContext) -> None:
-        self._store = DesiredStateStore(ctx.config.persistence.db_path)
-        ctx.services.set(DESIRED_STATE_STORE, self._store)
+    async def init(self, ctx: Any) -> None:
+        self._store = DesiredStateStore(self._config.persistence.db_path)
+        ctx.provide(DESIRED_STATE_STORE.name, self._store)
 
     async def start(self) -> None:
         if self._store is not None:
@@ -90,7 +89,7 @@ class RecoveryUnit(SubjectUnit):
 
     def __init__(self, config: SubjectConfig) -> None:
         self._config = config
-        self._ctx: SubjectContext | None = None
+        self._ctx: Any | None = None
         self._service: ReconciliationService | None = None
         self._meta = UnitMeta(
             name="recovery",
@@ -118,14 +117,14 @@ class RecoveryUnit(SubjectUnit):
             raise RuntimeError("RecoveryUnit has not been initialized.")
         return self._service
 
-    async def init(self, ctx: SubjectContext) -> None:
+    async def init(self, ctx: Any) -> None:
         self._ctx = ctx
-        desired_store = ctx.services.require(DESIRED_STATE_STORE)
-        project_mgr = ctx.services.require(PROJECT_MANAGER)
-        workspace_mgr = ctx.services.require(WORKSPACE_MANAGER)
-        task_store = ctx.services.require(TASK_STORE)
-        cluster_transport = ctx.services.require(CLUSTER_TRANSPORT_MANAGER)
-        manifest_store = ctx.services.require(MANIFEST_STORE)
+        desired_store = ctx.get(DESIRED_STATE_STORE.name)
+        project_mgr = ctx.get(PROJECT_MANAGER.name)
+        workspace_mgr = ctx.get(WORKSPACE_MANAGER.name)
+        task_store = ctx.get(TASK_STORE.name)
+        cluster_transport = ctx.get(CLUSTER_TRANSPORT_MANAGER.name)
+        manifest_store = ctx.get(MANIFEST_STORE.name)
         self._service = ReconciliationService(
             desired_store,
             project_mgr,
@@ -133,11 +132,11 @@ class RecoveryUnit(SubjectUnit):
             task_store,
             cluster_transport,
             manifest_store,
-            subject_id=ctx.config.recovery.subject_id,
+            subject_id=self._config.recovery.subject_id,
             on_event=self._emit_event,
-            config=ctx.config.recovery,
+            config=self._config.recovery,
         )
-        ctx.services.set(RECONCILIATION_SERVICE, self._service)
+        ctx.provide(RECONCILIATION_SERVICE.name, self._service)
 
     async def start(self) -> None:
         # DesiredStateStore 由 DesiredStateUnit 管理；reconcile 由 engine.start 触发。
@@ -163,10 +162,12 @@ class RecoveryUnit(SubjectUnit):
         return {"success": False, "data": None, "error": f"unknown command: {command}"}
 
     async def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        """ReconciliationService 的 ``on_event`` 回调：保留 async 签名，体内同步 ctx.emit。"""
+
         ctx = self._ctx
         if ctx is None:
             return
-        await ctx.event_bus.emit(
-            SUBJECT_CORE_EVENT_RECEIVED,
+        ctx.emit(
+            f"event/{SUBJECT_CORE_EVENT_RECEIVED}",
             {"event_type": event_type, "payload": payload},
         )

@@ -6,8 +6,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import SANDBOX_EXECUTOR
 from ghrah.subject.sandbox.executor import SandboxExecutor, SandboxExecutorConfig
 from ghrah.subject.unit.base import RouteSpec, SubjectUnit, UnitMeta
@@ -37,15 +38,15 @@ class SandboxUnit(SubjectUnit):
             raise RuntimeError("SandboxUnit has not been initialized.")
         return self._service
 
-    async def init(self, ctx: SubjectContext) -> None:
+    async def init(self, ctx: Any) -> None:
         sandbox_config = SandboxExecutorConfig(
-            default_timeout=ctx.config.sandbox.default_timeout,
+            default_timeout=self._config.sandbox.default_timeout,
         )
         self._service = SandboxExecutor(
-            workspace_root=ctx.config.sandbox.workspace_root,
+            workspace_root=self._config.sandbox.workspace_root,
             config=sandbox_config,
         )
-        ctx.services.set(SANDBOX_EXECUTOR, self._service)
+        ctx.provide(SANDBOX_EXECUTOR.name, self._service)
 
     async def start(self) -> None:
         await self.service.start()

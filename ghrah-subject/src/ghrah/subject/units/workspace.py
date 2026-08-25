@@ -11,7 +11,6 @@ import os
 from typing import Any
 
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import (
     SANDBOX_EXECUTOR,
     WORKSPACE_MANAGER,
@@ -93,20 +92,20 @@ class WorkspaceUnit(SubjectUnit):
             raise RuntimeError("WorkspaceUnit has not been initialized.")
         return self._service
 
-    async def init(self, ctx: SubjectContext) -> None:
-        sandbox = ctx.services.require(SANDBOX_EXECUTOR)
+    async def init(self, ctx: Any) -> None:
+        sandbox = ctx.get(SANDBOX_EXECUTOR.name)
         if not isinstance(sandbox, SandboxExecutor):
             raise TypeError("SANDBOX_EXECUTOR service must be SandboxExecutor.")
         self._manager = WorkspaceManager(
-            root_path=ctx.config.sandbox.workspace_root,
+            root_path=self._config.sandbox.workspace_root,
             sandbox=sandbox,
             owns_sandbox=False,
-            db_path=ctx.config.persistence.db_path,
+            db_path=self._config.persistence.db_path,
             subject_id="default",
         )
         self._service = _WorkspaceServiceAdapter(self._manager)
-        ctx.services.set(WORKSPACE_SERVICE, self._service)
-        ctx.services.set(WORKSPACE_MANAGER, self._manager)
+        ctx.provide(WORKSPACE_SERVICE.name, self._service)
+        ctx.provide(WORKSPACE_MANAGER.name, self._manager)
 
     async def start(self) -> None:
         await self.manager.start()

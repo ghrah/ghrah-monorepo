@@ -11,7 +11,6 @@ from typing import Any
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.hitl.notary import HITLNotary
 from ghrah.subject.hitl.policy import HITLPolicy, HITLVerdict
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import HITL_NOTARY, HITL_POLICY
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 
@@ -44,12 +43,12 @@ class HITLNotaryUnit(SubjectUnit):
             raise RuntimeError("HITLNotaryUnit has not been initialized.")
         return self._notary
 
-    async def init(self, ctx: SubjectContext) -> None:
-        policy = ctx.services.require(HITL_POLICY)
+    async def init(self, ctx: Any) -> None:
+        policy = ctx.get(HITL_POLICY.name)
         if not isinstance(policy, HITLPolicy):
             raise TypeError("HITL_POLICY service must be HITLPolicy.")
         self._notary = HITLNotary(policy)
-        ctx.services.set(HITL_NOTARY, self._notary)
+        ctx.provide(HITL_NOTARY.name, self._notary)
 
     async def stop(self) -> None:
         if self._notary is not None:

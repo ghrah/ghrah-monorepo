@@ -21,7 +21,6 @@ from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
 from ghrah.subject.project.manager import ProjectManager
 from ghrah.subject.project.store import ProjectStore
 from ghrah.subject.recovery.desired_state import DesiredStateRecord, DesiredStateStore
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import (
     CLUSTER_TRANSPORT_MANAGER,
     DESIRED_STATE_STORE,
@@ -48,7 +47,7 @@ class ProjectUnit(SubjectUnit):
 
     def __init__(self, config: SubjectConfig) -> None:
         self._config = config
-        self._ctx: SubjectContext | None = None
+        self._ctx: Any | None = None
         self._store: ProjectStore | None = None
         self._desired_store: DesiredStateStore | None = None
         self._manager: ProjectManager | None = None
@@ -77,14 +76,14 @@ class ProjectUnit(SubjectUnit):
             raise RuntimeError("ProjectUnit has not been initialized.")
         return self._manager
 
-    async def init(self, ctx: SubjectContext) -> None:
+    async def init(self, ctx: Any) -> None:
         self._ctx = ctx
-        self._store = ProjectStore(ctx.config.persistence.db_path)
-        self._desired_store = ctx.services.require(DESIRED_STATE_STORE)
-        workspace_mgr = ctx.services.require(WORKSPACE_MANAGER)
-        task_mgr = ctx.services.require(TASK_MANAGER)
-        cluster_transport = ctx.services.require(CLUSTER_TRANSPORT_MANAGER)
-        manifest_store = ctx.services.require(MANIFEST_STORE)
+        self._store = ProjectStore(self._config.persistence.db_path)
+        self._desired_store = ctx.get(DESIRED_STATE_STORE.name)
+        workspace_mgr = ctx.get(WORKSPACE_MANAGER.name)
+        task_mgr = ctx.get(TASK_MANAGER.name)
+        cluster_transport = ctx.get(CLUSTER_TRANSPORT_MANAGER.name)
+        manifest_store = ctx.get(MANIFEST_STORE.name)
         self._manager = ProjectManager(
             self._store,
             workspace_mgr,
@@ -92,10 +91,10 @@ class ProjectUnit(SubjectUnit):
             cluster_transport,
             manifest_store,
             on_event=self._emit_event,
-            default_workspace_locator=ctx.config.project.default_workspace_locator,
-            default_db_path_template=ctx.config.project.default_db_path_template,
+            default_workspace_locator=self._config.project.default_workspace_locator,
+            default_db_path_template=self._config.project.default_db_path_template,
         )
-        ctx.services.set(PROJECT_MANAGER, self._manager)
+        ctx.provide(PROJECT_MANAGER.name, self._manager)
 
     async def start(self) -> None:
         if self._store is not None:
@@ -124,7 +123,7 @@ class ProjectUnit(SubjectUnit):
             projects = await self._store.list()
             await self._desired_store.save(
                 DesiredStateRecord(
-                    subject_id=self._ctx.config.recovery.subject_id,
+                    subject_id=self._config.recovery.subject_id,
                     projects=projects,
                 )
             )
@@ -132,10 +131,12 @@ class ProjectUnit(SubjectUnit):
             logger.exception("ProjectUnit: save desired-state failed")
 
     async def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        """ProjectManager 的 ``on_event`` 回调：保留 async 签名，体内同步 ctx.emit。"""
+
         ctx = self._ctx
         if ctx is None:
             return
-        await ctx.event_bus.emit(
-            SUBJECT_CORE_EVENT_RECEIVED,
+        ctx.emit(
+            f"event/{SUBJECT_CORE_EVENT_RECEIVED}",
             {"event_type": event_type, "payload": payload},
         )

@@ -20,7 +20,6 @@ from ghrah.abilities import ActionOutcome
 from ghrah.subject.ability_runner import AbilityRunner, AbilityRunnerConfig
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.permission_checker import PermissionChecker
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import (
     ABILITY_EXECUTOR,
     HITL_NOTARY,
@@ -34,6 +33,20 @@ from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, Unit
 __all__ = ["AbilityRunnerUnit"]
 
 logger = logging.getLogger(__name__)
+
+
+class _CtxEventBusAdapter:
+    """``SubjectEventBus``-shaped adapter backed by Ouroboros ``ctx.emit``.
+
+    ``emit`` 保留 async 签名（AbilityRunner ``await self._event_bus.emit``），
+    体内同步转发到 ``ctx.emit(f"event/{type}", payload)``。
+    """
+
+    def __init__(self, ctx: Any) -> None:
+        self._ctx = ctx
+
+    async def emit(self, event_type: str, payload: Any) -> None:
+        self._ctx.emit(f"event/{event_type}", payload)
 
 
 class AbilityRunnerUnit(SubjectUnit):
@@ -65,11 +78,11 @@ class AbilityRunnerUnit(SubjectUnit):
             raise RuntimeError("AbilityRunnerUnit has not been initialized.")
         return self._runner
 
-    async def init(self, ctx: SubjectContext) -> None:
-        notary = ctx.services.require(HITL_NOTARY)
-        permission_service = ctx.services.require(PERMISSION_SERVICE)
-        workspace = ctx.services.require(WORKSPACE_SERVICE)
-        sandbox = ctx.services.require(SANDBOX_EXECUTOR)
+    async def init(self, ctx: Any) -> None:
+        notary = ctx.get(HITL_NOTARY.name)
+        permission_service = ctx.get(PERMISSION_SERVICE.name)
+        workspace = ctx.get(WORKSPACE_SERVICE.name)
+        sandbox = ctx.get(SANDBOX_EXECUTOR.name)
 
         if not isinstance(sandbox, SandboxExecutor):
             raise TypeError("SANDBOX_EXECUTOR service must be SandboxExecutor.")
@@ -87,7 +100,8 @@ class AbilityRunnerUnit(SubjectUnit):
             config=runner_config,
             sandbox_executor=sandbox,
             workspace=workspace,
-            event_bus=ctx.event_bus,
+            # 鸭子适配：AbilityRunner 期望 SubjectEventBus（await emit），本体零改动
+            event_bus=_CtxEventBusAdapter(ctx),  # type: ignore[arg-type]
         )
         # AbilityExecutor Protocol declares execute_ability → dict[str, Any],
         # but the concrete AbilityRunner returns ActionResult. The unit's
@@ -95,7 +109,7 @@ class AbilityRunnerUnit(SubjectUnit):
         # to the dispatcher, so the wire contract is satisfied. Consumers
         # requiring the Protocol should call through the unit (dispatch path)
         # rather than .execute_ability() directly. S2.3/S2.4 may unify this.
-        ctx.services.set(ABILITY_EXECUTOR, self._runner)  # type: ignore[misc]
+        ctx.provide(ABILITY_EXECUTOR.name, self._runner)
 
     async def stop(self) -> None:
         # AbilityRunner 本身不持有需显式停止的资源（HITLNotary 归 hitl_notary unit）。

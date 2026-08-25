@@ -13,7 +13,6 @@ from ghrah.context.persistence import serialize_node  # type: ignore[import-unty
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.ledger.chain import ActionChainLedger
 from ghrah.subject.persistence.service import SubjectPersistenceService
-from ghrah.subject.runtime.context import SubjectContext
 from ghrah.subject.runtime.service_keys import LEDGER, PERSISTENCE
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units._commands import CHAIN_HISTORY_COMMANDS
@@ -49,12 +48,12 @@ class LedgerUnit(SubjectUnit):
             raise RuntimeError("LedgerUnit has not been initialized.")
         return self._ledger
 
-    async def init(self, ctx: SubjectContext) -> None:
-        persistence = ctx.services.require(PERSISTENCE)
+    async def init(self, ctx: Any) -> None:
+        persistence = ctx.get(PERSISTENCE.name)
         if not isinstance(persistence, SubjectPersistenceService):
             raise TypeError("PERSISTENCE service must be SubjectPersistenceService.")
         self._ledger = ActionChainLedger(persistence)
-        ctx.services.set(LEDGER, self._ledger)
+        ctx.provide(LEDGER.name, self._ledger)
 
     async def start(self) -> None:
         await self.service.start()
