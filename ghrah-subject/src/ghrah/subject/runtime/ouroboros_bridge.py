@@ -35,7 +35,9 @@ if TYPE_CHECKING:
 
 __all__ = [
     "bridge_command",
+    "mount_dynamic_unit",
     "mount_unit",
+    "unmount_unit",
     "wait_active",
 ]
 
@@ -161,3 +163,48 @@ async def bridge_command(
     if not isinstance(result, dict):
         return {"success": False, "error": f"Unexpected command result for {name}"}
     return dict(result)
+
+
+# ----------------------------------------------------------------
+# 动态挂载/卸载 API（任务 6：热插拔正式面）
+# ----------------------------------------------------------------
+
+
+async def mount_dynamic_unit(
+    ctx: Context,
+    unit: SubjectUnit,
+    fibers: dict[str, Fiber],
+    name: str | None = None,
+    *,
+    timeout: float = 10.0,
+) -> Fiber:
+    """运行时挂载一个 unit（热插拔），登记到 ``fibers`` 表。
+
+    映射 ``ctx.plugin(mount_unit(unit))`` + ``wait_active``；首个真实
+    消费者 = CoreClusterRegistry.ensure_cluster（cluster = CoreUnit 实例）。
+    ``name`` 默认取 ``unit.meta.name``。
+
+    Raises:
+        ValueError: 同名 fiber 已登记（重复挂载须先 unmount）。
+    """
+    unit_name = name or unit.meta.name
+    if unit_name in fibers:
+        raise ValueError(f"unit '{unit_name}' is already mounted (unmount first).")
+    fiber = ctx.plugin(mount_unit(unit))
+    await wait_active(fiber, timeout=timeout)
+    fibers[unit_name] = fiber
+    return fiber
+
+
+async def unmount_unit(
+    fibers: dict[str, Fiber],
+    name: str,
+) -> None:
+    """卸载并注销一个已挂载 unit（服务/路由随 fiber dispose 撤销）。
+
+    未知 name 静默返回（幂等，对齐 registry.shutdown_cluster 语义）。
+    """
+    fiber = fibers.pop(name, None)
+    if fiber is None:
+        return
+    await fiber.dispose()

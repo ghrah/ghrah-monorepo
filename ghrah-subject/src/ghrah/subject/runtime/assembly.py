@@ -20,12 +20,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from ouroboros import FiberState  # type: ignore[import-untyped]
+
 from ghrah.subject.runtime.service_keys import RECONCILIATION_SERVICE
 from ghrah.subject.runtime.third_party import mount_third_party_units
 from ghrah.subject.units import mount_builtin_units
 
 if TYPE_CHECKING:
-    from ouroboros import Context, Fiber  # type: ignore[import-untyped]
+    from ouroboros import Context, Fiber
 
     from ghrah.subject.config import SubjectConfig
 
@@ -59,4 +61,15 @@ async def assemble_subject(
             )
 
     logger.info("Subject assembled (profile=%s, units=%d)", profile, len(fibers))
+
+    # 启动期健康检查：非 root fiber 停留 PENDING = inject 名单错/依赖缺失
+    # （承接旧 topological_sort「启动即发现配置错误」语义；registry 懒挂载
+    # 的 CoreUnit fiber 不在 fibers 表内，不受此检查影响）
+    pending = [name for name, fiber in fibers.items() if fiber.state is FiberState.PENDING]
+    if pending:
+        logger.warning(
+            "startup health check: %d fiber(s) still PENDING after mount: %s",
+            len(pending),
+            ", ".join(sorted(pending)),
+        )
     return fibers
