@@ -46,8 +46,7 @@ class PermissionsUnit(SubjectUnit):
         manifest_index = ctx.get(MANIFEST_PERMISSION_INDEX.name)
         self._checker = PermissionChecker(
             allowed_paths=self._config.hitl.allowed_paths or None,
-            workspace_root=self._config.hitl.workspace_root
-            or self._config.sandbox.workspace_root,
+            workspace_root=self._config.hitl.workspace_root or self._config.sandbox.workspace_root,
             require_approval=self._config.hitl.require_approval_by_default,
             manifest_permission_index=manifest_index,
         )

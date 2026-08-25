@@ -8,10 +8,6 @@ from ouroboros import Context  # type: ignore[import-untyped]
 from ouroboros_testutil import wait_active
 
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.event_bus import (
-    SUBJECT_CORE_EVENT_RECEIVED,
-    SUBJECT_HITL_REQUEST_CREATED,
-)
 from ghrah.subject.runtime.ouroboros_bridge import mount_unit
 from ghrah.subject.runtime.service_keys import (
     OBSERVER_ENDPOINT,
@@ -45,7 +41,7 @@ async def test_observer_endpoint_composes_existing_server_components() -> None:
         assert any(getattr(route, "path", None) == "/observer" for route in unit.app.routes)
 
 
-async def test_internal_core_and_hitl_events_forward_to_observer_event_bus() -> None:
+async def test_unified_events_forward_to_observer_event_bus() -> None:
     config = SubjectConfig()
     unit = WebSocketObserverEndpointUnit(config)
 
@@ -53,15 +49,11 @@ async def test_internal_core_and_hitl_events_forward_to_observer_event_bus() -> 
         fiber = ctx.plugin(mount_unit(unit))
         await wait_active(fiber)
 
+        # 事件统一：core 域（core:{type}）与 subject 域（event/{type}）双前缀直发
+        ctx.emit("core:agent_spawned", {"name": "agent-a"})
+        ctx.emit("event/task_created", {"task_id": "t-1"})
         ctx.emit(
-            f"event/{SUBJECT_CORE_EVENT_RECEIVED}",
-            {
-                "event_type": "agent_spawned",
-                "payload": {"name": "agent-a"},
-            },
-        )
-        ctx.emit(
-            f"event/{SUBJECT_HITL_REQUEST_CREATED}",
+            f"core:{EventType.HITL_REQUEST.value}",
             {
                 "promise_id": "promise-1",
                 "agent_name": "agent-a",
@@ -70,19 +62,21 @@ async def test_internal_core_and_hitl_events_forward_to_observer_event_bus() -> 
             },
         )
 
-        # emit 将 async forward 回调调度为后台任务，轮询至两条事件落库
+        # emit 将 async forward 回调调度为后台任务，轮询至三条事件落库
         events: list[dict[str, Any]] = []
         for _ in range(200):
             events = unit.observer_event_bus.event_store.replay_since(0)
-            if len(events) >= 2:
+            if len(events) >= 3:
                 break
             await asyncio.sleep(0.01)
 
         assert events[0]["type"] == "agent_spawned"
         assert events[0]["payload"] == {"name": "agent-a", "agent_name": "agent-a"}
-        assert events[1]["type"] == EventType.HITL_REQUEST.value
-        assert events[1]["payload"]["promise_id"] == "promise-1"
-        assert events[1]["payload"]["agent_name"] == "agent-a"
+        assert events[1]["type"] == "task_created"
+        assert events[1]["payload"]["task_id"] == "t-1"
+        assert events[2]["type"] == EventType.HITL_REQUEST.value
+        assert events[2]["payload"]["promise_id"] == "promise-1"
+        assert events[2]["payload"]["agent_name"] == "agent-a"
 
 
 async def test_observer_event_bus_service_adapter_publishes_wire_event() -> None:

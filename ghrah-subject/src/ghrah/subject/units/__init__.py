@@ -71,12 +71,14 @@ async def mount_builtin_units(
             WebSocketObserverEndpointUnit,
         )
 
-        units.extend([
-            WebSocketObserverEndpointUnit(config),
-            CoreClusterRegistryUnit(config),
-            ProjectUnit(config),
-            RecoveryUnit(config),
-        ])
+        units.extend(
+            [
+                WebSocketObserverEndpointUnit(config),
+                CoreClusterRegistryUnit(config),
+                ProjectUnit(config),
+                RecoveryUnit(config),
+            ]
+        )
 
     fibers: dict[str, Fiber] = {}
     for unit in units:
@@ -139,12 +141,14 @@ def register_builtin_units(
                 f"Unsupported observer transport kind: {cfg.transport.observer!r} "
                 "(Stage 2 only implements 'websocket'; ipc/grpc/http reserved)."
             )
-        units.extend([
-            WebSocketObserverEndpointUnit(engine.config),
-            ClusterTransportUnit(engine.config),
-            ProjectUnit(engine.config),
-            RecoveryUnit(engine.config),
-        ])
+        units.extend(
+            [
+                WebSocketObserverEndpointUnit(engine.config),
+                ClusterTransportUnit(engine.config),
+                ProjectUnit(engine.config),
+                RecoveryUnit(engine.config),
+            ]
+        )
 
     for unit in units:
         engine.register_unit(unit)

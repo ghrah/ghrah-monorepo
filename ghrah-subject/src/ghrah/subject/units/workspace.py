@@ -157,9 +157,7 @@ class WorkspaceUnit(SubjectUnit):
                 snapshot_workspace = self.manager.get_workspace(agent_name)
                 if snapshot_workspace is None:
                     return self._workspace_not_found(agent_name)
-                commit_hash = await snapshot_workspace.snapshot(
-                    message=payload.get("message", "")
-                )
+                commit_hash = await snapshot_workspace.snapshot(message=payload.get("message", ""))
                 return {
                     "success": True,
                     "data": {"agent_name": agent_name, "snapshot_id": commit_hash},

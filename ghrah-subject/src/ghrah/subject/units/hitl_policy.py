@@ -44,8 +44,7 @@ class HITLPolicyUnit(SubjectUnit):
         self._policy = HITLPolicy(
             auto_approve_abilities=self._config.hitl.auto_approve_abilities,
             require_approval_by_default=self._config.hitl.require_approval_by_default,
-            workspace_root=self._config.hitl.workspace_root
-            or self._config.sandbox.workspace_root,
+            workspace_root=self._config.hitl.workspace_root or self._config.sandbox.workspace_root,
             allowed_paths=self._config.hitl.allowed_paths or None,
             manifest_permission_index=manifest_index,
         )

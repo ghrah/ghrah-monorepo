@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import Any
 
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
 from ghrah.subject.recovery.desired_state import DesiredStateStore
 from ghrah.subject.recovery.reconciler import ReconciliationService
 from ghrah.subject.runtime.service_keys import (
@@ -167,7 +166,4 @@ class RecoveryUnit(SubjectUnit):
         ctx = self._ctx
         if ctx is None:
             return
-        ctx.emit(
-            f"event/{SUBJECT_CORE_EVENT_RECEIVED}",
-            {"event_type": event_type, "payload": payload},
-        )
+        ctx.emit(f"event/{event_type}", payload)

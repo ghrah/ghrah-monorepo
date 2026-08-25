@@ -12,10 +12,7 @@ from typing import Any
 from ghrah.manifest.builtins import load_all_builtin_manifests  # type: ignore[import-untyped]
 from ghrah.manifest.types import PermissionFlags  # type: ignore[import-untyped]
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.event_bus import (
-    SUBJECT_CORE_EVENT_RECEIVED,
-    SUBJECT_MANIFEST_PERMISSIONS_CHANGED,
-)
+from ghrah.subject.event_bus import SUBJECT_MANIFEST_PERMISSIONS_CHANGED
 from ghrah.subject.manifest_store.builtins import ensure_builtins
 from ghrah.subject.manifest_store.service import handle_manifest_command
 from ghrah.subject.manifest_store.store import ManifestStore
@@ -138,13 +135,7 @@ class ManifestStoreUnit(SubjectUnit):
 
         self.refresh_permission_index()
         ctx.emit(f"event/{SUBJECT_MANIFEST_PERMISSIONS_CHANGED}", {})
-        ctx.emit(
-            f"event/{SUBJECT_CORE_EVENT_RECEIVED}",
-            {
-                "event_type": event_type,
-                "payload": manifest_result_to_event_payload(result),
-            },
-        )
+        ctx.emit(f"event/{event_type}", manifest_result_to_event_payload(result))
 
     def refresh_permission_index(self) -> None:
         self.permission_index.rebuild()

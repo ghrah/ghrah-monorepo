@@ -57,12 +57,14 @@ class AbilityRunnerUnit(SubjectUnit):
         self._runner: AbilityRunner | None = None
         self._meta = UnitMeta(
             name="ability_runner",
-            requires=frozenset({
-                HITL_NOTARY,
-                PERMISSION_SERVICE,
-                WORKSPACE_SERVICE,
-                SANDBOX_EXECUTOR,
-            }),
+            requires=frozenset(
+                {
+                    HITL_NOTARY,
+                    PERMISSION_SERVICE,
+                    WORKSPACE_SERVICE,
+                    SANDBOX_EXECUTOR,
+                }
+            ),
             provides=frozenset({ABILITY_EXECUTOR}),
             # D10：只声明 long_running_commands，不重复放入 commands。
             routes=RouteSpec(long_running_commands=frozenset({"execute_ability"})),

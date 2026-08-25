@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
 from ghrah.subject.runtime.service_keys import TASK_MANAGER, TASK_STORE
 from ghrah.subject.task import TaskManager, TaskStore
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
@@ -71,15 +70,10 @@ class TaskUnit(SubjectUnit):
     ) -> dict[str, Any]:
         return await self.service.handle_command(command, payload)
 
-    async def _emit_event(
-        self, event_type: str, payload: dict[str, Any]
-    ) -> None:
+    async def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """TaskManager 的 ``on_event`` 回调：保留 async 签名，体内同步 ctx.emit。"""
 
         ctx = self._ctx
         if ctx is None:
             return
-        ctx.emit(
-            f"event/{SUBJECT_CORE_EVENT_RECEIVED}",
-            {"event_type": event_type, "payload": payload},
-        )
+        ctx.emit(f"event/{event_type}", payload)

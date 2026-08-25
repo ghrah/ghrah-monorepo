@@ -7,17 +7,13 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from fastapi import FastAPI, WebSocket
 
 from ghrah.protocol.types import EventType, Message  # type: ignore[import-untyped]
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.event_bus import (
-    SUBJECT_CORE_EVENT_RECEIVED,
-    SUBJECT_HITL_REQUEST_CREATED,
-)
 from ghrah.subject.runtime.ouroboros_bridge import bridge_command
 from ghrah.subject.runtime.service_keys import OBSERVER_ENDPOINT, OBSERVER_EVENT_BUS
 from ghrah.subject.server.config import ObserverServerConfig
@@ -40,9 +36,7 @@ class _ObserverEventBusAdapter:
         self._event_bus = event_bus
 
     async def publish(self, event_type: str, payload: dict[str, Any]) -> int:
-        return await self._event_bus.emit_core_event(
-            Message(type=event_type, payload=payload)
-        )
+        return await self._event_bus.emit_core_event(Message(type=event_type, payload=payload))
 
     def subscribe(self, *args: Any, **kwargs: Any) -> Any:
         return self._event_bus.subscribe(*args, **kwargs)
@@ -119,9 +113,7 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
         return self._router
 
     async def init(self, ctx: Any) -> None:
-        config = self._observer_config or ObserverServerConfig(
-            log_level=self._config.log_level
-        )
+        config = self._observer_config or ObserverServerConfig(log_level=self._config.log_level)
         connection_manager = ConnectionManager()
         observer_event_bus = EventBus(
             connection_manager,
@@ -143,8 +135,22 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
 
         ctx.provide(OBSERVER_ENDPOINT.name, self)
         ctx.provide(OBSERVER_EVENT_BUS.name, self._observer_event_bus_adapter)
-        ctx.on(f"event/{SUBJECT_CORE_EVENT_RECEIVED}", self._forward_core_event)
-        ctx.on(f"event/{SUBJECT_HITL_REQUEST_CREATED}", self._forward_hitl_request)
+        # 事件统一（无通配订阅）：对 EventType 全集显式订阅两种前缀——
+        # core 域（CoreUnit ``core:{type}``）与 subject 域（``event/{type}``），
+        # 转发直接以订阅闭包事件名构造 WS Message（无信封解包）。
+        for event_type in EventType:
+            ctx.on(f"core:{event_type.value}", self._make_forwarder(event_type.value))
+            ctx.on(f"event/{event_type.value}", self._make_forwarder(event_type.value))
+
+    def _make_forwarder(self, wire_type: str) -> Callable[[dict[str, Any]], Awaitable[None]]:
+        """构造单事件转发闭包（wire_type = 协议层事件名字符串）。"""
+
+        async def forward(payload: Any) -> None:
+            await self.observer_event_bus.emit_core_event(
+                Message(type=wire_type, payload=_payload_as_dict(payload))
+            )
+
+        return forward
 
     async def start(
         self,
@@ -169,29 +175,6 @@ class WebSocketObserverEndpointUnit(SubjectUnit):
 
     async def broadcast(self, message: dict[str, Any]) -> int:
         return await self.connection_manager.broadcast(message)
-
-    async def _forward_core_event(self, payload: Any) -> None:
-        if not isinstance(payload, Mapping):
-            logger.warning("Ignoring malformed core event payload: %r", payload)
-            return
-        event_type = payload.get("event_type")
-        if not isinstance(event_type, str) or not event_type:
-            logger.warning("Ignoring core event payload without event_type: %r", payload)
-            return
-        await self.observer_event_bus.emit_core_event(
-            Message(
-                type=event_type,
-                payload=_payload_as_dict(payload.get("payload", {})),
-            )
-        )
-
-    async def _forward_hitl_request(self, payload: Any) -> None:
-        await self.observer_event_bus.emit_core_event(
-            Message(
-                type=EventType.HITL_REQUEST.value,
-                payload=_payload_as_dict(payload),
-            )
-        )
 
 
 def _create_observer_app(

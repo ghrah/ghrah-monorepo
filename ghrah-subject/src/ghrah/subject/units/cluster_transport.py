@@ -101,9 +101,7 @@ class ClusterTransportUnit(SubjectUnit):
         return {"success": False, "data": None, "error": "cluster_transport has no commands"}
 
 
-def _build_spawn_materializer(
-    store: ManifestStore, workspace: Any
-) -> SpawnMaterializer:
+def _build_spawn_materializer(store: ManifestStore, workspace: Any) -> SpawnMaterializer:
     """构造 spawn 物化器（D3）。
 
     平移自 ``units/forward.py:_resolve_spawn_manifest``，把依赖从
@@ -163,8 +161,6 @@ def _agent_config_to_payload(config: Any) -> AgentConfigPayload:
         window=dataclasses.asdict(config.window) if config.window else None,
         context=dataclasses.asdict(config.context) if config.context else None,
         model_overrides=(
-            dataclasses.asdict(config.model_overrides)
-            if config.model_overrides
-            else None
+            dataclasses.asdict(config.model_overrides) if config.model_overrides else None
         ),
     )

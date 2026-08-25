@@ -7,10 +7,7 @@ from ouroboros import Context  # type: ignore[import-untyped]
 from ouroboros_testutil import wait_active
 
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.event_bus import (
-    SUBJECT_CORE_EVENT_RECEIVED,
-    SUBJECT_MANIFEST_PERMISSIONS_CHANGED,
-)
+from ghrah.subject.event_bus import SUBJECT_MANIFEST_PERMISSIONS_CHANGED
 from ghrah.subject.runtime.ouroboros_bridge import mount_unit
 from ghrah.subject.runtime.service_keys import MANIFEST_PERMISSION_INDEX
 from ghrah.subject.unit.base import CommandContext
@@ -48,15 +45,11 @@ def _config(tmp_path: Path) -> SubjectConfig:
 
 
 def test_manifest_command_to_event_maps_only_crud_commands() -> None:
-    assert manifest_command_to_event("manifest_put_ability", {}) == (
-        "manifest_ability_created"
-    )
+    assert manifest_command_to_event("manifest_put_ability", {}) == ("manifest_ability_created")
     assert manifest_command_to_event("manifest_put_ability", {"overwrite": True}) == (
         "manifest_ability_updated"
     )
-    assert manifest_command_to_event("manifest_delete_ability", {}) == (
-        "manifest_ability_deleted"
-    )
+    assert manifest_command_to_event("manifest_delete_ability", {}) == ("manifest_ability_deleted")
     assert manifest_command_to_event("manifest_put_agent", {}) == "manifest_agent_created"
     assert manifest_command_to_event("manifest_delete_agent", {}) == "manifest_agent_deleted"
     assert manifest_command_to_event("manifest_list_abilities", {}) is None
@@ -95,8 +88,8 @@ async def test_manifest_store_unit_refreshes_permission_index_after_crud(
             lambda payload: emitted.append((SUBJECT_MANIFEST_PERMISSIONS_CHANGED, payload)),
         )
         ctx.on(
-            f"event/{SUBJECT_CORE_EVENT_RECEIVED}",
-            lambda payload: emitted.append((SUBJECT_CORE_EVENT_RECEIVED, payload)),
+            "event/manifest_ability_created",
+            lambda payload: emitted.append(("manifest_ability_created", payload)),
         )
 
         fiber = ctx.plugin(mount_unit(unit))
@@ -119,15 +112,12 @@ async def test_manifest_store_unit_refreshes_permission_index_after_crud(
             {},
         ) in emitted
         assert (
-            SUBJECT_CORE_EVENT_RECEIVED,
+            "manifest_ability_created",
             {
-                "event_type": "manifest_ability_created",
-                "payload": {
-                    "full_name": "custom.needs_hitl",
-                    "namespace": "custom",
-                    "manifest": put_result["data"]["manifest"],
-                    "source": put_result["data"]["source"],
-                },
+                "full_name": "custom.needs_hitl",
+                "namespace": "custom",
+                "manifest": put_result["data"]["manifest"],
+                "source": put_result["data"]["source"],
             },
         ) in emitted
 

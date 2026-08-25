@@ -12,7 +12,6 @@ from typing import Any
 from ouroboros import Context  # type: ignore[import-untyped]
 
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
 from ghrah.subject.runtime.ouroboros_bridge import bridge_command
 from ghrah.subject.task.manager import TaskManager
 from ghrah.subject.units import mount_builtin_units
@@ -61,14 +60,14 @@ async def test_task_create_via_dispatcher_routes_to_taskunit(
         assert task["status"] == "pending"
 
 
-async def test_task_event_broadcast_to_core_event_bus(tmp_path: Path) -> None:
+async def test_task_event_broadcast_direct(tmp_path: Path) -> None:
     async with Context() as ctx:
         emitted: list[tuple[str, dict[str, Any]]] = []
 
         def collect(payload: Any) -> None:
-            emitted.append((SUBJECT_CORE_EVENT_RECEIVED, payload))
+            emitted.append(("task_created", payload))
 
-        ctx.on(f"event/{SUBJECT_CORE_EVENT_RECEIVED}", collect)
+        ctx.on("event/task_created", collect)
 
         await mount_builtin_units(ctx, _config(tmp_path), profile="coexistence")
 
@@ -78,18 +77,15 @@ async def test_task_event_broadcast_to_core_event_bus(tmp_path: Path) -> None:
             {"title": "t", "project_id": "proj-1", "agent_name": "alpha"},
         )
         task = result["data"]["task"]
-        core_events = [e for e in emitted if e[0] == SUBJECT_CORE_EVENT_RECEIVED]
-        assert core_events, "expected a SUBJECT_CORE_EVENT_RECEIVED broadcast"
-        event_type, payload = core_events[-1]
-        assert event_type == SUBJECT_CORE_EVENT_RECEIVED
-        assert payload["event_type"] == "task_created"
-        inner = payload["payload"]
-        assert inner["task"]["task_id"] == task["task_id"]
+        assert emitted, "expected a direct event/task_created broadcast"
+        event_type, payload = emitted[-1]
+        assert event_type == "task_created"
+        assert payload["task"]["task_id"] == task["task_id"]
         # 顶层 agent_name hoist
-        assert inner["agent_name"] == "alpha"
+        assert payload["agent_name"] == "alpha"
         # wire 形态：无 version / deleted_at
-        assert "version" not in inner["task"]
-        assert "deleted_at" not in inner["task"]
+        assert "version" not in payload["task"]
+        assert "deleted_at" not in payload["task"]
 
 
 async def test_end_to_end_lifecycle_protected_delete(tmp_path: Path) -> None:
@@ -137,19 +133,13 @@ async def test_end_to_end_lifecycle_protected_delete(tmp_path: Path) -> None:
 
         # force 软删 b 成功
         deleted = _data(
-            await _dispatch(
-                ctx, "task_delete", {"task_id": b["task_id"], "force": True}
-            )
+            await _dispatch(ctx, "task_delete", {"task_id": b["task_id"], "force": True})
         )
         assert deleted["task_id"] == b["task_id"]
 
         # 删后 get / list 不返回 b
         miss = await _dispatch(ctx, "task_get", {"task_id": b["task_id"]})
         assert not miss["success"]
-        listing = _data(
-            await _dispatch(
-                ctx, "task_list", {"include_terminal": True, "limit": 100}
-            )
-        )
+        listing = _data(await _dispatch(ctx, "task_list", {"include_terminal": True, "limit": 100}))
         ids = {t["task_id"] for t in listing["tasks"]}
         assert b["task_id"] not in ids

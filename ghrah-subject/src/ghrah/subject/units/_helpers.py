@@ -30,9 +30,7 @@ def manifest_command_to_event(command: str, payload: dict[str, Any]) -> str | No
             "manifest_ability_updated" if overwrite else "manifest_ability_created"
         ),
         "manifest_delete_ability": "manifest_ability_deleted",
-        "manifest_put_agent": (
-            "manifest_agent_updated" if overwrite else "manifest_agent_created"
-        ),
+        "manifest_put_agent": ("manifest_agent_updated" if overwrite else "manifest_agent_created"),
         "manifest_delete_agent": "manifest_agent_deleted",
     }
     return event_map.get(command)
