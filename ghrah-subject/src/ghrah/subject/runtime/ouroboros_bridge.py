@@ -143,11 +143,16 @@ async def bridge_command(
 ) -> dict[str, Any]:
     """Route a command via Ouroboros ``ctx.serial`` with Unknown fallback.
 
-    ``cmd_ctx`` 在阶段 2 仅作占位透传（Ouroboros listener 单参签名不携带
-    元数据）；正式的 ``request_id``/``session_id`` 透传在阶段 3 装配层实现。
-    零 handler 时 ``ctx.serial`` 返回 None（实测），本助手转
-    ``{"success": False, "error": f"Unknown command: {name}"}`` 对齐
-    ``MessageDispatcher.dispatch_observer_command`` 的兜底文案。
+    **消歧防御约定（聚合裁决后无实际冲突面，约定仅防御第三方同名命令）**：
+    ``ctx.serial`` 按注册顺序执行 listener，首个返回非 None 者短路胜出，
+    返回 None 穿透给下一个 handler——即「handler 返回 None = 不是我的」。
+    挂载顺序由 ``mount_builtin_units`` 列表固定：subject 单元在前、
+    CoreUnit 实例经 registry 运行时挂载必然在后。全部返回 None → 本助手
+    转 ``{"success": False, "error": f"Unknown command: {name}"}`` 兜底
+    （对齐旧 ``MessageDispatcher.dispatch_observer_command`` 文案）。
+
+    ``cmd_ctx`` 占位不透传（Ouroboros listener 单参签名）；``request_id``/
+    ``session_id`` 由装配层注入 payload（见 server/router 适配器）。
     """
 
     result = await ctx.serial(f"command/{name}", payload)
