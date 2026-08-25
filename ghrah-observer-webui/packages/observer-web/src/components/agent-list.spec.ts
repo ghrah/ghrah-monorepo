@@ -1,0 +1,80 @@
+// @vitest-environment happy-dom
+
+import { useAgentsStore, useRoomsStore } from "@ghrah/observer-core";
+import type { AgentSpawnedPayload, RoomInfoPayload } from "@ghrah/protocol";
+import { mount } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// 隔离 AgentActionMenu（其 monaco-diff 依赖链在测试环境不可解析）
+vi.mock("@/components/agent-action-menu.vue", () => ({
+  default: { template: "<div />" },
+}));
+
+import AgentList from "./agent-list.vue";
+
+function spawn(name: string): AgentSpawnedPayload {
+  return { type: "agent_spawned", name, config: { name } } as unknown as AgentSpawnedPayload;
+}
+
+function room(id: string, name: string, members: string[] = []): RoomInfoPayload {
+  return {
+    room_id: id,
+    project_id: "p1",
+    name,
+    status: "active",
+    members: members.map((s) => ({ subject: s, subject_type: "agent" as const, joined_at: "" })),
+    seq_watermark: 0,
+    version: 1,
+    created_at: "",
+    updated_at: "",
+  };
+}
+
+function agentItem(wrapper: ReturnType<typeof mount>, name: string) {
+  return wrapper.findAll("li").find((li) => li.text().includes(name));
+}
+
+describe("AgentList", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it("shows empty state when no agents", () => {
+    const wrapper = mount(AgentList, { global: { stubs: { AgentActionMenu: true } } });
+    expect(wrapper.text()).toContain("No active agents");
+  });
+
+  it("click selects agent (drives per-agent ActionChain)", async () => {
+    const agents = useAgentsStore();
+    agents.onAgentSpawned(spawn("architect"));
+    agents.onAgentSpawned(spawn("frontend"));
+    const wrapper = mount(AgentList, { global: { stubs: { AgentActionMenu: true } } });
+    await wrapper.vm.$nextTick();
+    await agentItem(wrapper, "frontend")!.trigger("click");
+    expect(agents.selectedAgentName).toBe("frontend");
+  });
+
+  it("shows room membership badges per agent (multi-room → multiple badges)", async () => {
+    const agents = useAgentsStore();
+    agents.onAgentSpawned(spawn("architect"));
+    agents.onAgentSpawned(spawn("tester"));
+    const rooms = useRoomsStore();
+    // architect 在 3 个 room；tester 不在任何 room
+    rooms.setRoomsFromList([
+      room("r1", "arch", ["architect"]),
+      room("r2", "frontend", ["architect"]),
+      room("r3", "backend", ["architect"]),
+    ]);
+    const wrapper = mount(AgentList, { global: { stubs: { AgentActionMenu: true } } });
+    await wrapper.vm.$nextTick();
+    const architectBadges = agentItem(wrapper, "architect")!.findAll(".agent-room-badge");
+    expect(architectBadges).toHaveLength(3);
+    expect(architectBadges.map((b) => b.attributes("title")).sort()).toEqual([
+      "arch",
+      "backend",
+      "frontend",
+    ]);
+    expect(agentItem(wrapper, "tester")!.findAll(".agent-room-badge")).toHaveLength(0);
+  });
+});

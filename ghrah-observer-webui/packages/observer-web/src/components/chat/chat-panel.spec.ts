@@ -1,157 +1,171 @@
 // @vitest-environment happy-dom
 
-import type { ChatEntry } from "@ghrah/observer-core";
-import { useAgentsStore, useChatStore, useConnectionStore } from "@ghrah/observer-core";
-import type { AgentSpawnedPayload } from "@ghrah/protocol";
+import { useChatStore, useConnectionStore, useRoomsStore } from "@ghrah/observer-core";
+import type { RoomInfoPayload, RoomLogEntryPayload } from "@ghrah/protocol";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const sendMessageMock = vi.fn();
+const roomSendMock = vi.fn();
 vi.mock("@/composables/useObserver", () => ({
-  useObserver: () => ({ sendMessage: sendMessageMock }),
+  useObserver: () => ({ roomSend: roomSendMock }),
 }));
 
 import ChatPanel from "./chat-panel.vue";
 
-function spawn(name: string) {
-  return { type: "agent_spawned", name, config: { name } } as unknown as AgentSpawnedPayload;
+function room(id: string, name: string): RoomInfoPayload {
+  return {
+    room_id: id,
+    project_id: "p1",
+    name,
+    status: "active",
+    members: [],
+    seq_watermark: 0,
+    version: 1,
+    created_at: "",
+    updated_at: "",
+  };
 }
 
-function entry(overrides: Partial<ChatEntry> = {}): ChatEntry {
+function logEntry(
+  roomId: string,
+  seq: number,
+  author: string,
+  authorType: "agent" | "human",
+  message: string,
+): RoomLogEntryPayload {
   return {
-    from: "agent-1",
-    to: "user",
-    content: "hi",
-    kind: "conversation",
-    timestamp: "2026-01-01T00:00:00Z",
-    nodeId: "n1",
-    agentName: "agent-1",
-    childSeq: 0,
-    ...overrides,
+    id: `${roomId}-${seq}`,
+    room_id: roomId,
+    seq,
+    author,
+    author_type: authorType,
+    timestamp: 1767225600,
+    data: { message },
   };
 }
 
 function setup() {
-  setActivePinia(createPinia());
-  const agents = useAgentsStore();
-  agents.onAgentSpawned(spawn("B"));
-  agents.onAgentSpawned(spawn("C"));
+  const rooms = useRoomsStore();
+  rooms.setRoomsFromList([room("r1", "arch"), room("r2", "frontend")]);
   const chat = useChatStore();
   const connection = useConnectionStore();
   connection.setConnected();
-  return { agents, chat, connection };
-}
-
-function setEntries(chat: ReturnType<typeof useChatStore>, list: ChatEntry[]) {
-  (chat as unknown as { entries: ChatEntry[] }).entries = list;
+  return { rooms, chat, connection };
 }
 
 describe("ChatPanel", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
-    sendMessageMock.mockReset();
+    roomSendMock.mockReset();
   });
 
-  it("renders entry kind → CSS class mapping", async () => {
-    const { chat } = setup();
-    setEntries(chat, [
-      entry({ kind: "human_input", to: "B", agentName: "B" }),
-      entry({ kind: "conversation" }),
-      entry({ kind: "send_message", from: "B", to: "C" }),
-      entry({ kind: "broadcast", from: "B", to: "all" }),
-      entry({ kind: "end_task" }),
+  it("shows empty state when no active room", () => {
+    setup();
+    const wrapper = mount(ChatPanel);
+    expect(wrapper.text()).toContain("Select a room to start chatting");
+  });
+
+  it("shows active room name in header", async () => {
+    const { rooms } = setup();
+    rooms.setActiveRoom("r1");
+    const wrapper = mount(ChatPanel);
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find("h3").text()).toContain("arch");
+  });
+
+  it("projects room log entries (agent → conversation, human → human_input)", async () => {
+    const { rooms } = setup();
+    rooms.setActiveRoom("r1");
+    rooms.setRoomLog("r1", [
+      logEntry("r1", 1, "architect", "agent", "hello from agent"),
+      logEntry("r1", 2, "user", "human", "hello from human"),
     ]);
     const wrapper = mount(ChatPanel);
     await wrapper.vm.$nextTick();
     const entries = wrapper.findAll(".chat-entry");
-    expect(entries).toHaveLength(5);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].classes()).toContain("entry-conversation");
+    expect(entries[0].text()).toContain("hello from agent");
+    expect(entries[1].classes()).toContain("entry-human");
+    expect(entries[1].text()).toContain("hello from human");
+  });
+
+  it("merges pending entries of the active room only", async () => {
+    const { rooms, chat } = setup();
+    rooms.setActiveRoom("r1");
+    rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "history")]);
+    chat.addPendingEntry({ to: "r1", content: "pending-r1", agentName: "", roomId: "r1" });
+    chat.addPendingEntry({ to: "r2", content: "pending-r2", agentName: "", roomId: "r2" });
+    const wrapper = mount(ChatPanel);
+    await wrapper.vm.$nextTick();
+    const entries = wrapper.findAll(".chat-entry");
+    expect(entries).toHaveLength(2);
+    expect(wrapper.text()).toContain("history");
+    expect(wrapper.text()).toContain("pending-r1");
+    expect(wrapper.text()).not.toContain("pending-r2");
+    expect(entries[1].classes()).toContain("entry-pending");
+  });
+
+  it("handleSend calls roomSend and adds pending entry", async () => {
+    const { rooms, chat } = setup();
+    rooms.setActiveRoom("r1");
+    roomSendMock.mockResolvedValueOnce({ success: true });
+    const wrapper = mount(ChatPanel);
+    await wrapper.vm.$nextTick();
+    await wrapper.find('input[type="text"]').setValue("hello room");
+    await wrapper.find("form").trigger("submit");
+    expect(roomSendMock).toHaveBeenCalledWith("r1", "hello room");
+    const pending = chat.allEntries.find((e) => e.content === "hello room");
+    expect(pending?.roomId).toBe("r1");
+    expect(pending?.pending).toBe(true);
+  });
+
+  it("pending entry is removed when echo arrives and history shows instead", async () => {
+    const { rooms, chat } = setup();
+    rooms.setActiveRoom("r1");
+    roomSendMock.mockResolvedValueOnce({ success: true });
+    const wrapper = mount(ChatPanel);
+    await wrapper.vm.$nextTick();
+    await wrapper.find('input[type="text"]').setValue("echo me");
+    await wrapper.find("form").trigger("submit");
+    expect(wrapper.text()).toContain("echo me");
+    // 模拟 bind 的 ROOM_LOG_APPENDED 分发：rooms 追加 + chat echo 确认
+    const echo = logEntry("r1", 1, "user", "human", "echo me");
+    rooms.onRoomLogAppended({ entry: echo });
+    chat.onRoomLogAppended(echo);
+    await wrapper.vm.$nextTick();
+    expect(chat.allEntries.find((e) => e.content === "echo me")).toBeUndefined();
+    const entries = wrapper.findAll(".chat-entry");
+    expect(entries).toHaveLength(1);
     expect(entries[0].classes()).toContain("entry-human");
-    expect(entries[1].classes()).toContain("entry-conversation");
-    expect(entries[2].classes()).toContain("entry-send");
-    expect(entries[3].classes()).toContain("entry-broadcast");
-    expect(entries[4].classes()).toContain("entry-endtask");
+    expect(entries[0].classes()).not.toContain("entry-pending");
   });
 
-  it("renders multimodal blocks", async () => {
-    const { chat } = setup();
-    setEntries(chat, [
-      entry({
-        kind: "conversation",
-        blocks: [
-          { type: "image", url: "https://x/y.png" },
-          { type: "audio", data: "BASE64", mime_type: "audio/wav" },
-          { type: "file", filename: "doc.txt", url: "https://x/doc.txt" },
-          { type: "reasoning", reasoning: "thinking...", incomplete: false },
-          { type: "tool_call", id: "t1", name: "search", arguments: { q: "x" } },
-          { type: "tool_result", tool_call_id: "t1", name: "search", content: "ok", success: true },
-          { type: "error", error_type: "X", message: "boom" },
-        ],
-      }),
-    ]);
+  it("marks pending error when roomSend returns null", async () => {
+    const { rooms, chat } = setup();
+    rooms.setActiveRoom("r1");
+    roomSendMock.mockResolvedValueOnce(null);
     const wrapper = mount(ChatPanel);
     await wrapper.vm.$nextTick();
-    expect(wrapper.find('img[alt="image"]').exists()).toBe(true);
-    expect(wrapper.find("audio").exists()).toBe(true);
-    expect(wrapper.find("a[download]").exists()).toBe(true);
-    // reasoning / tool_call / tool_result / error 各一个 <details> 或 div
-    expect(wrapper.findAll("details").length).toBeGreaterThanOrEqual(3);
-  });
-
-  it("renders markdown text block (safe links)", async () => {
-    const { chat } = setup();
-    setEntries(chat, [
-      entry({
-        kind: "conversation",
-        blocks: [{ type: "text", text: "[good](https://example.com) [bad](javascript:alert(1))" }],
-      }),
-    ]);
-    const wrapper = mount(ChatPanel);
-    await wrapper.vm.$nextTick();
-    const links = wrapper.findAll(".markdown-body a");
-    // javascript: 链接应被 validateLink 拒绝，渲染为纯文本，仅 good 产生 <a>
-    expect(links).toHaveLength(1);
-    expect(links[0].attributes("href")).toBe("https://example.com");
-  });
-
-  it("filter by agent narrows entries", async () => {
-    const { chat } = setup();
-    setEntries(chat, [
-      entry({ kind: "conversation", agentName: "B", from: "B" }),
-      entry({ kind: "conversation", agentName: "C", from: "C" }),
-    ]);
-    const wrapper = mount(ChatPanel);
-    await wrapper.vm.$nextTick();
-    expect(wrapper.findAll(".chat-entry")).toHaveLength(2);
-    const select = wrapper.find("select");
-    await select.setValue("B");
-    await wrapper.vm.$nextTick();
-    expect(wrapper.findAll(".chat-entry")).toHaveLength(1);
-  });
-
-  it("shows error block on entry.error", async () => {
-    const { chat } = setup();
-    setEntries(chat, [
-      entry({ kind: "human_input", to: "B", agentName: "B", error: "发送失败：未连接" }),
-    ]);
-    const wrapper = mount(ChatPanel);
-    await wrapper.vm.$nextTick();
-    expect(wrapper.find(".chat-entry").classes()).toContain("entry-error");
-    expect(wrapper.find(".block-error").text()).toContain("发送失败：未连接");
-  });
-
-  it("handleSend marks pending error when sendMessage returns null", async () => {
-    const { chat } = setup();
-    sendMessageMock.mockResolvedValueOnce(null);
-    const wrapper = mount(ChatPanel);
-    await wrapper.vm.$nextTick();
-    const input = wrapper.find('input[type="text"]');
-    await input.setValue("@B hello");
+    await wrapper.find('input[type="text"]').setValue("boom");
     await wrapper.find("form").trigger("submit");
     await vi.waitFor(() => {
       expect(chat.allEntries.some((e) => e.error)).toBe(true);
     });
     const e = chat.allEntries.find((x) => x.error);
     expect(e?.error).toContain("发送失败");
+    expect(e?.roomId).toBe("r1");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".chat-entry").classes()).toContain("entry-error");
+  });
+
+  it("does not send when input is empty", async () => {
+    const { rooms } = setup();
+    rooms.setActiveRoom("r1");
+    const wrapper = mount(ChatPanel);
+    await wrapper.vm.$nextTick();
+    await wrapper.find("form").trigger("submit");
+    expect(roomSendMock).not.toHaveBeenCalled();
   });
 });

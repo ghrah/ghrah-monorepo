@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import type { ChatEntry } from "@ghrah/observer-core";
-import { useAgentsStore, useChatStore, useConnectionStore } from "@ghrah/observer-core";
+import {
+  roomLogToChatEntries,
+  useChatStore,
+  useConnectionStore,
+  useRoomsStore,
+} from "@ghrah/observer-core";
 import type { ContentBlock } from "@ghrah/protocol";
 import { computed, nextTick, ref, watch } from "vue";
 import { useMarkdown } from "@/composables/useMarkdown";
@@ -8,31 +13,35 @@ import { useObserver } from "@/composables/useObserver";
 import MessageInput from "./message-input.vue";
 
 const chat = useChatStore();
-const agents = useAgentsStore();
+const rooms = useRoomsStore();
 const connection = useConnectionStore();
-const { sendMessage } = useObserver();
+const { roomSend } = useObserver();
 const { render: renderMarkdown } = useMarkdown();
 
 const messageContainer = ref<HTMLElement | null>(null);
-const filterAgent = ref<string | null>(null);
 
-const filteredEntries = computed<ChatEntry[]>(() => {
-  const all = chat.allEntries;
-  if (filterAgent.value === null) return all;
-  return all.filter((e) => e.agentName === filterAgent.value);
+/** active room 历史（room log 投影） + 本 room 的 pending/error 乐观层，按序合并。 */
+const roomEntries = computed<ChatEntry[]>(() => {
+  const roomId = rooms.activeRoomId;
+  if (!roomId) return [];
+  const history = rooms.activeRoomLog.map(roomLogToChatEntries);
+  const pending = chat.allEntries.filter(
+    (e) => (e.pending === true || e.error !== undefined) && e.roomId === roomId,
+  );
+  return [...history, ...pending];
 });
 
-const canChat = computed(() => agents.activeAgents.length > 0 && connection.state === "connected");
+const canChat = computed(() => rooms.activeRoomId !== null && connection.state === "connected");
 
-async function handleSend(targets: string[], content: string) {
-  for (const target of targets) {
-    chat.addPendingEntry({ to: target, content, agentName: target });
-    sendMessage(target, content)
-      .then((r) => {
-        if (r === null) chat.markPendingError(target, content, "发送失败：未连接");
-      })
-      .catch((e) => chat.markPendingError(target, content, `发送失败：${String(e ?? "")}`));
-  }
+async function handleSend(content: string) {
+  const roomId = rooms.activeRoomId;
+  if (!roomId || !content) return;
+  chat.addPendingEntry({ to: roomId, content, agentName: "", roomId });
+  roomSend(roomId, content)
+    .then((r) => {
+      if (r === null) chat.markPendingError(roomId, content, "发送失败：未连接", roomId);
+    })
+    .catch((e) => chat.markPendingError(roomId, content, `发送失败：${String(e ?? "")}`, roomId));
   await nextTick(() => scrollToBottom());
 }
 
@@ -42,7 +51,7 @@ function scrollToBottom() {
   }
 }
 
-watch(filteredEntries, () => {
+watch(roomEntries, () => {
   nextTick(() => scrollToBottom());
 });
 
@@ -67,7 +76,7 @@ function entryClass(entry: ChatEntry): string {
 function entryHeader(entry: ChatEntry): string {
   switch (entry.kind) {
     case "human_input":
-      return `you → @${entry.to}`;
+      return "you";
     case "conversation":
       return `@${entry.from}`;
     case "send_message":
@@ -110,22 +119,16 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
 <template>
   <div class="flex flex-col h-full">
     <div class="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between">
-      <h3 class="text-sm font-semibold truncate">Chat</h3>
-      <select
-        v-model="filterAgent"
-        class="text-xs bg-transparent border border-gray-300 dark:border-gray-600 rounded px-1 py-0.5"
-        aria-label="Filter by agent"
-      >
-        <option :value="null">all</option>
-        <option v-for="a in agents.activeAgents" :key="a.name" :value="a.name">{{ a.name }}</option>
-      </select>
+      <h3 class="text-sm font-semibold truncate">
+        Chat<span v-if="rooms.activeRoom" class="text-gray-500 dark:text-gray-400 font-normal"> · {{ rooms.activeRoom.name }}</span>
+      </h3>
     </div>
 
-    <div v-if="!canChat" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
-      Connect and spawn an agent to start chatting
+    <div v-if="!rooms.activeRoomId" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
+      Select a room to start chatting
     </div>
 
-    <div v-else-if="filteredEntries.length === 0" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
+    <div v-else-if="roomEntries.length === 0" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
       No messages yet
     </div>
 
@@ -135,7 +138,7 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
       class="flex-1 overflow-y-auto p-3 space-y-2"
     >
       <div
-        v-for="entry in filteredEntries"
+        v-for="entry in roomEntries"
         :key="`${entry.nodeId}-${entry.childSeq}`"
         :class="['chat-entry', entryClass(entry), { 'entry-pending': entry.pending }]"
       >
@@ -183,8 +186,8 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
     </div>
 
     <MessageInput
-      v-if="canChat"
-      :disabled="connection.state !== 'connected'"
+      v-if="rooms.activeRoomId"
+      :disabled="!canChat"
       @send="handleSend"
     />
   </div>
