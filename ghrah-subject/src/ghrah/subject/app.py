@@ -1,8 +1,7 @@
-"""ghrah-subject 应用入口。
+"""ghrah-subject 应用入口（Ouroboros 装配形态）。
 
-S2.3 后改用 SubjectEngine 装配（profile="full"）：
-register_builtin_units -> discover -> enable_from_config -> validate ->
-start -> run_forever -> stop。
+``async with Context()`` + ``assemble_subject(profile="full")`` + 常驻等待；
+退出（含取消）由 Context ``__aexit__`` dispose 全部 fiber。
 """
 
 from __future__ import annotations
@@ -10,23 +9,23 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from ouroboros import Context  # type: ignore[import-untyped]
+
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.runtime.engine import SubjectEngine
+from ghrah.subject.runtime.assembly import assemble_subject
 
 
 async def run_forever() -> None:
-    """异步入口：装配 SubjectEngine 并运行（断线由 transport Unit 处理）。"""
+    """异步入口：装配 Subject 运行时并常驻（断线/生命周期由各 unit 自理）。"""
     config = SubjectConfig.from_env()
-    engine = SubjectEngine(config)
-    engine.register_builtin_units(profile="full")
-    engine.discover()
-    engine.enable_from_config()
-    engine.validate()
-    try:
-        # engine.run_forever 内部已 start()，不再单独 await engine.start()。
-        await engine.run_forever()
-    finally:
-        await engine.stop()
+    async with Context() as ctx:
+        await assemble_subject(ctx, config, profile="full")
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            logger = logging.getLogger(__name__)
+            logger.info("run_forever cancelled, disposing via Context exit")
+            raise
 
 
 def main() -> None:
@@ -39,10 +38,9 @@ def main() -> None:
     )
 
     logger = logging.getLogger(__name__)
-    logger.info("ghrah-subject starting (engine, profile=full)...")
+    logger.info("ghrah-subject starting (ouroboros, profile=full)...")
     logger.info("  workspace_root: %s", config.workspace_root)
     logger.info("  db_path: %s", config.db_path)
-    logger.info("  core_url: %s", config.core.url)
 
     try:
         asyncio.run(run_forever())

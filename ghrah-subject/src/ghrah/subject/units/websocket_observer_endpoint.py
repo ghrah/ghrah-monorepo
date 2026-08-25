@@ -46,7 +46,9 @@ class _EngineDispatchAdapter:
     """Minimal engine-shaped adapter: routes Observer commands via Ouroboros.
 
     ObserverRouter 仅消费 ``dispatch_observer_command``；鸭子适配零改
-    ``server/``。正式管道（request_id/session_id 透传）归阶段 3.2。
+    ``server/``。``request_id``/``session_id`` 以 payload 副本合并注入
+    （不改原 dict；``setdefault`` 尊重 payload 已有值，unit 层
+    ``payload.get("request_id")`` 优先——ability_runner 先例）。
     """
 
     def __init__(self, ctx: Any) -> None:
@@ -59,8 +61,12 @@ class _EngineDispatchAdapter:
         request_id: str | None = None,
         session_id: str | None = None,
     ) -> dict[str, Any]:
-        del request_id, session_id  # 占位（阶段 3.2 装配层透传）
-        return await bridge_command(self._ctx, command, payload)
+        enriched = dict(payload)
+        if request_id is not None:
+            enriched.setdefault("request_id", request_id)
+        if session_id is not None:
+            enriched.setdefault("session_id", session_id)
+        return await bridge_command(self._ctx, command, enriched)
 
 
 class WebSocketObserverEndpointUnit(SubjectUnit):

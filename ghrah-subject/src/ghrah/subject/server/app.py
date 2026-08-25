@@ -1,12 +1,12 @@
-"""FastAPI 应用入口（S2.3 后降级为薄 facade）。
+"""FastAPI 应用入口（Ouroboros 形态薄 facade）。
 
-Observer FastAPI app 由 ``WebSocketObserverEndpointUnit`` 在
-``engine.start()`` 期间创建并持有（amendment A6：Unit owns app）。
-``create_app(config, *, engine)`` 仅作为取回该 app 的薄 facade，
-不再自建 ConnectionManager/EventBus/ObserverRouter/FastAPI。
+Observer FastAPI app 由 ``WebSocketObserverEndpointUnit`` 在装配期间创建
+并持有（amendment A6：Unit owns app）。``create_app(config, *, ctx)`` 仅
+作为经 ctx 取回该 app 的薄 facade。
 
-生命周期：先 ``await engine.start()``（Unit 初始化并构造 app），
-再 ``create_app(..., engine=engine)`` 取回 app，最后 ``await engine.stop()``。
+生命周期：先 ``assemble_subject(ctx, config, profile="full")``（Unit
+初始化并构造 app），再 ``create_app(..., ctx=ctx)`` 取回 app；Context
+退出时 dispose 全部 fiber。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from ghrah.subject.server.config import ObserverServerConfig
 
 if TYPE_CHECKING:
-    from ghrah.subject.runtime.engine import SubjectEngine
+    from ouroboros import Context  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -27,72 +27,66 @@ logger = logging.getLogger(__name__)
 def create_app(
     config: ObserverServerConfig | None = None,
     *,
-    engine: SubjectEngine,
+    ctx: Context,
 ) -> FastAPI:
-    """返回 engine 持有的 Observer FastAPI app（Unit owns app, amendment A6）。
+    """返回 ctx 中 observer unit 持有的 FastAPI app（Unit owns app, A6）。
 
     Args:
-        config: 保留用于签名兼容/未来校验；Unit 的 ws_path/event_replay_capacity
-            已在 ``engine.start() -> WebSocketObserverEndpointUnit.init()`` 时由
-            该 Unit 自身的 ObserverServerConfig 确定，facade 不重新配置已初始化 Unit。
-            若需覆盖这些字段，必须在注册/构造 Unit 阶段提前传入，而非在此事后覆盖。
-        engine: 已 start 的 SubjectEngine（必须已注册 websocket_observer_endpoint Unit）。
+        config: 保留用于签名兼容；Unit 的 ws_path/event_replay_capacity
+            已在装配期由该 Unit 自身的 ObserverServerConfig 确定。
+        ctx: 已装配的 Ouroboros Context（须含 websocket_observer_endpoint）。
 
     Returns:
         WebSocketObserverEndpointUnit 持有的 FastAPI 实例。
 
     Raises:
-        RuntimeError: engine 未 start 或未注册 websocket_observer_endpoint Unit。
+        RuntimeError: ctx 未装配 websocket_observer_endpoint unit。
     """
     del config
     from ghrah.subject.units.websocket_observer_endpoint import (
         WebSocketObserverEndpointUnit,
     )
 
-    unit = engine.get_unit("websocket_observer_endpoint")
+    unit = ctx.get("observer_endpoint", strict=False)
     if not isinstance(unit, WebSocketObserverEndpointUnit):
         raise RuntimeError(
-            "create_app requires a started engine with the websocket_observer_endpoint "
-            "unit (register_builtin_units(profile='full') + engine.start())."
+            "create_app requires an assembled Context with the "
+            "websocket_observer_endpoint unit "
+            "(assemble_subject(profile='full'))."
         )
     return unit.app
 
 
 async def serve() -> None:
-    """启动 Subject Observer 服务器（engine 生命周期 + uvicorn）。"""
+    """启动 Subject Observer 服务器（Ouroboros 装配 + uvicorn）。"""
+    import asyncio
+
     import uvicorn
+    from ouroboros import Context
+
+    from ghrah.subject.config import SubjectConfig
+    from ghrah.subject.runtime.assembly import assemble_subject
 
     observer_config = ObserverServerConfig.from_env()
-    engine = _build_engine()
-    await engine.start()
-    try:
-        app = create_app(observer_config, engine=engine)
-        server = uvicorn.Server(
-            uvicorn.Config(
-                app,
-                host=observer_config.host,
-                port=observer_config.port,
-                log_level=observer_config.log_level.lower(),
-                ws_ping_interval=observer_config.ping_interval,
-                ws_ping_timeout=observer_config.ping_timeout,
+    subject_config = SubjectConfig.from_env()
+    async with Context() as ctx:
+        await assemble_subject(ctx, subject_config, profile="full")
+        try:
+            app = create_app(observer_config, ctx=ctx)
+            server = uvicorn.Server(
+                uvicorn.Config(
+                    app,
+                    host=observer_config.host,
+                    port=observer_config.port,
+                    log_level=observer_config.log_level.lower(),
+                    ws_ping_interval=observer_config.ping_interval,
+                    ws_ping_timeout=observer_config.ping_timeout,
+                )
             )
-        )
-        await server.serve()
-    finally:
-        await engine.stop()
-
-
-def _build_engine() -> SubjectEngine:
-    from ghrah.subject.config import SubjectConfig
-    from ghrah.subject.runtime.engine import SubjectEngine
-
-    config = SubjectConfig.from_env()
-    engine = SubjectEngine(config)
-    engine.register_builtin_units(profile="full")
-    engine.discover()
-    engine.enable_from_config()
-    engine.validate()
-    return engine
+            await server.serve()
+        except asyncio.CancelledError:
+            logger.info("observer serve cancelled, disposing via Context exit")
+            raise
 
 
 def main() -> None:
@@ -106,7 +100,7 @@ def main() -> None:
         level=getattr(logging, config.log_level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    logger.info("ghrah-subject observer server starting (engine, profile=full)...")
+    logger.info("ghrah-subject observer server starting (ouroboros, profile=full)...")
     asyncio.run(serve())
 
 
