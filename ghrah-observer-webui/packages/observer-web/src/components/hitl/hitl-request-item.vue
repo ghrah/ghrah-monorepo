@@ -72,14 +72,14 @@ async function handleRejectSubmit() {
         placeholder="Reason for rejection (optional)"
       />
       <div class="flex gap-2">
-        <button class="btn-danger text-xs" :disabled="loading" @click="handleRejectSubmit">Confirm Reject</button>
-        <button class="btn-secondary text-xs" @click="showRejectForm = false">Cancel</button>
+        <button class="btn-danger" :disabled="loading" @click="handleRejectSubmit">Confirm Reject</button>
+        <button class="btn-secondary" @click="showRejectForm = false">Cancel</button>
       </div>
     </div>
 
     <div v-else class="flex gap-2 pl-5">
-      <button class="btn-primary text-xs" :disabled="loading" @click="handleApprove">Approve</button>
-      <button class="btn-danger text-xs" :disabled="loading" @click="showRejectForm = true">Reject</button>
+      <button class="btn-primary" :disabled="loading" @click="handleApprove">Approve</button>
+      <button class="btn-danger" :disabled="loading" @click="showRejectForm = true">Reject</button>
     </div>
   </li>
 </template>

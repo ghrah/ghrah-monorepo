@@ -145,7 +145,7 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
         <div class="entry-header">{{ entryHeader(entry) }}</div>
 
         <div v-if="entry.error" class="block-error">
-          <span class="text-xs text-red-600 dark:text-red-400">{{ entry.error }}</span>
+          <span class="text-sm text-red-600 dark:text-red-400">{{ entry.error }}</span>
         </div>
 
         <!-- 富块渲染 -->
@@ -181,7 +181,7 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
         </template>
 
         <!-- 无块：纯 content -->
-        <span v-else class="text-sm">{{ entry.content }}</span>
+        <span v-else class="text-base">{{ entry.content }}</span>
       </div>
     </div>
 

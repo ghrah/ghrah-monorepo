@@ -60,7 +60,7 @@ function initial(subject: string): string {
             :key="member.subject"
             :title="member.subject"
             :class="[
-              'room-member inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-semibold',
+              'room-member inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold',
               isMultiRoom(member.subject)
                 ? 'bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 ring-1 ring-amber-500'
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
@@ -72,6 +72,6 @@ function initial(subject: string): string {
       </li>
     </ul>
 
-    <p v-else class="text-gray-400 dark:text-gray-600 text-xs italic">No rooms</p>
+    <p v-else class="text-gray-400 dark:text-gray-600 text-sm italic">No rooms</p>
   </div>
 </template>

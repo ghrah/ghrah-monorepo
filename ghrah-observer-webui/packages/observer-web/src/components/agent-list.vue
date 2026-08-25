@@ -29,7 +29,7 @@ function roomsOf(agentName: string): string[] {
   <div class="p-3 h-full flex flex-col">
     <div class="flex items-center justify-between mb-3">
       <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Agents</h3>
-      <RouterLink to="/config/agents" class="btn-primary text-xs">+ Spawn</RouterLink>
+      <RouterLink to="/config/agents" class="btn-primary">+ Spawn</RouterLink>
     </div>
 
     <ul v-if="agents.activeAgents.length > 0" class="flex-1 overflow-y-auto space-y-1">
@@ -50,7 +50,7 @@ function roomsOf(agentName: string): string[] {
             v-for="roomName in roomsOf(agent.name)"
             :key="roomName"
             :title="roomName"
-            class="agent-room-badge inline-flex items-center justify-center min-w-4 h-4 px-0.5 rounded text-[10px] font-semibold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
+            class="agent-room-badge inline-flex items-center justify-center min-w-5 h-5 px-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
           >{{ roomName.slice(0, 1).toUpperCase() }}</span>
           <AgentActionMenu v-if="agents.selectedAgentName === agent.name" />
           <span class="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
@@ -58,6 +58,6 @@ function roomsOf(agentName: string): string[] {
       </li>
     </ul>
 
-    <p v-else class="text-gray-400 dark:text-gray-600 text-xs italic">No active agents</p>
+    <p v-else class="text-gray-400 dark:text-gray-600 text-sm italic">No active agents</p>
   </div>
 </template>

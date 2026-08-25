@@ -1,6 +1,7 @@
 import { createPinia } from "pinia";
 import { createApp } from "vue";
 import "virtual:uno.css";
+import "./style.css";
 import App from "./app.vue";
 import router from "./router.js";
 

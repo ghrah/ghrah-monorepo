@@ -26,6 +26,6 @@ const { switchProject } = useObserver();
       </li>
     </ul>
 
-    <p v-else class="text-gray-400 dark:text-gray-600 text-xs italic">No projects</p>
+    <p v-else class="text-gray-400 dark:text-gray-600 text-sm italic">No projects</p>
   </div>
 </template>

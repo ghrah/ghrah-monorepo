@@ -106,7 +106,7 @@ function close() {
       &#8943;
     </button>
 
-    <div v-if="showMenu" class="absolute left-0 top-full mt-1 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-40">
+    <div v-if="showMenu" class="absolute right-0 top-full mt-1 w-52 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded shadow-lg z-40">
       <div class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-800">
         {{ agents.selectedAgentName }}
       </div>
@@ -140,7 +140,7 @@ function close() {
       <div class="bg-white dark:bg-gray-900 rounded shadow-lg w-[90vw] h-[80vh] flex flex-col">
         <div class="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700">
           <span class="text-sm font-semibold">Workspace Diff — {{ agents.selectedAgentName }}</span>
-          <button type="button" class="text-xs btn-secondary" @click="closeDiff">Close</button>
+          <button type="button" class="btn-secondary" @click="closeDiff">Close</button>
         </div>
         <div class="flex-1 min-h-0">
           <MonacoDiff :patch="diffPatch" />
