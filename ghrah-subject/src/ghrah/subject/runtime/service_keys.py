@@ -33,6 +33,7 @@ __all__ = [
     "CLUSTER_TRANSPORT_MANAGER",
     "COMMAND_BRIDGE",
     "COMMAND_RUNNER",
+    "CORE_CLUSTER_REGISTRY",
     "DESIRED_STATE_STORE",
     "EVENT_BRIDGE",
     "HITL_POLICY",
@@ -57,6 +58,7 @@ __all__ = [
     "ClusterHandle",
     "ClusterTransportManager",
     "CommandRunner",
+    "CoreClusterRegistryService",
     "ManifestPermissionIndex",
     "ObserverEventBus",
     "PermissionService",
@@ -232,6 +234,25 @@ class ClusterTransportManager(Protocol):
         """关闭所有 handle 的 transport。"""
 
 
+class CoreClusterRegistryService(Protocol):
+    """cluster = CoreUnit 实例注册表契约（进程内运行时挂载/卸载）。"""
+
+    async def ensure_cluster(self, cluster_id: str) -> ClusterHandle:
+        """幂等挂载/取某 cluster 的 CoreUnit 实例 handle。"""
+
+    def get_handle(self, cluster_id: str) -> ClusterHandle:
+        """取已挂载 handle；不存在 raise KeyError。"""
+
+    def has_cluster(self, cluster_id: str) -> bool:
+        """某 cluster 实例是否已挂载。"""
+
+    async def shutdown_cluster(self, cluster_id: str) -> None:
+        """dispose 某 cluster 的 fiber（handle 失效）。"""
+
+    async def stop(self) -> None:
+        """dispose 全部 cluster（unit.stop 时调用）。"""
+
+
 class ObserverEventBus(Protocol):
     """Observer-facing event bridge contract."""
 
@@ -273,6 +294,9 @@ TASK_MANAGER = SubjectServiceKey[TaskManagerService]("task_manager")
 TASK_STORE = SubjectServiceKey[TaskStore]("task_store", TaskStore)
 CLUSTER_TRANSPORT_MANAGER = SubjectServiceKey[ClusterTransportManager](
     "cluster_transport_manager"
+)
+CORE_CLUSTER_REGISTRY = SubjectServiceKey[CoreClusterRegistryService](
+    "core_cluster_registry"
 )
 PROJECT_MANAGER = SubjectServiceKey[ProjectManagerService]("project_manager")
 

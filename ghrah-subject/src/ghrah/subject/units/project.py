@@ -22,7 +22,7 @@ from ghrah.subject.project.manager import ProjectManager
 from ghrah.subject.project.store import ProjectStore
 from ghrah.subject.recovery.desired_state import DesiredStateRecord, DesiredStateStore
 from ghrah.subject.runtime.service_keys import (
-    CLUSTER_TRANSPORT_MANAGER,
+    CORE_CLUSTER_REGISTRY,
     DESIRED_STATE_STORE,
     MANIFEST_STORE,
     PROJECT_MANAGER,
@@ -57,7 +57,7 @@ class ProjectUnit(SubjectUnit):
                 {
                     WORKSPACE_MANAGER,
                     TASK_MANAGER,
-                    CLUSTER_TRANSPORT_MANAGER,
+                    CORE_CLUSTER_REGISTRY,
                     MANIFEST_STORE,
                     DESIRED_STATE_STORE,
                 }
@@ -82,7 +82,7 @@ class ProjectUnit(SubjectUnit):
         self._desired_store = ctx.get(DESIRED_STATE_STORE.name)
         workspace_mgr = ctx.get(WORKSPACE_MANAGER.name)
         task_mgr = ctx.get(TASK_MANAGER.name)
-        cluster_transport = ctx.get(CLUSTER_TRANSPORT_MANAGER.name)
+        cluster_transport = ctx.get(CORE_CLUSTER_REGISTRY.name)
         manifest_store = ctx.get(MANIFEST_STORE.name)
         self._manager = ProjectManager(
             self._store,

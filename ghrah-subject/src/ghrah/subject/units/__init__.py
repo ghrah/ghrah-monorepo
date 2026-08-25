@@ -64,6 +64,7 @@ async def mount_builtin_units(
     ]
 
     if profile == "full":
+        from ghrah.subject.units.core_cluster import CoreClusterRegistryUnit
         from ghrah.subject.units.project import ProjectUnit
         from ghrah.subject.units.recovery import RecoveryUnit
         from ghrah.subject.units.websocket_observer_endpoint import (
@@ -72,6 +73,7 @@ async def mount_builtin_units(
 
         units.extend([
             WebSocketObserverEndpointUnit(config),
+            CoreClusterRegistryUnit(config),
             ProjectUnit(config),
             RecoveryUnit(config),
         ])

@@ -18,7 +18,7 @@ from ghrah.subject.event_bus import SUBJECT_CORE_EVENT_RECEIVED
 from ghrah.subject.recovery.desired_state import DesiredStateStore
 from ghrah.subject.recovery.reconciler import ReconciliationService
 from ghrah.subject.runtime.service_keys import (
-    CLUSTER_TRANSPORT_MANAGER,
+    CORE_CLUSTER_REGISTRY,
     DESIRED_STATE_STORE,
     MANIFEST_STORE,
     PROJECT_MANAGER,
@@ -99,7 +99,7 @@ class RecoveryUnit(SubjectUnit):
                     PROJECT_MANAGER,
                     WORKSPACE_MANAGER,
                     TASK_STORE,
-                    CLUSTER_TRANSPORT_MANAGER,
+                    CORE_CLUSTER_REGISTRY,
                     MANIFEST_STORE,
                 }
             ),
@@ -123,7 +123,7 @@ class RecoveryUnit(SubjectUnit):
         project_mgr = ctx.get(PROJECT_MANAGER.name)
         workspace_mgr = ctx.get(WORKSPACE_MANAGER.name)
         task_store = ctx.get(TASK_STORE.name)
-        cluster_transport = ctx.get(CLUSTER_TRANSPORT_MANAGER.name)
+        cluster_transport = ctx.get(CORE_CLUSTER_REGISTRY.name)
         manifest_store = ctx.get(MANIFEST_STORE.name)
         self._service = ReconciliationService(
             desired_store,

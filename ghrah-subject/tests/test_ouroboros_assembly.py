@@ -66,20 +66,11 @@ async def test_coexistence_assembly_all_fibers_active(tmp_path: Path) -> None:
         assert ctx.get("desired_state_store") is not None
 
 
-class _ClusterTransportStub:
-    """full 装配测试的 cluster 占位（cluster_transport unit 归项① Core Unit）。
-
-    仅满足 project/recovery 构造期的存储面；装配断言不触发 cluster 调用。
-    """
-
-
-async def test_full_assembly_with_cluster_stub_all_fibers_active(
+async def test_full_assembly_all_fibers_active(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
     async with Context() as ctx:
-        ctx.provide("cluster_transport_manager", _ClusterTransportStub())
-
         fibers = await mount_builtin_units(ctx, config, profile="full")
         assert set(fibers) == {
             "persistence",
@@ -94,6 +85,7 @@ async def test_full_assembly_with_cluster_stub_all_fibers_active(
             "task",
             "desired_state",
             "websocket_observer_endpoint",
+            "core_cluster_registry",
             "project",
             "recovery",
         }
@@ -104,5 +96,6 @@ async def test_full_assembly_with_cluster_stub_all_fibers_active(
 
         assert ctx.get("observer_endpoint") is not None
         assert ctx.get("observer_event_bus") is not None
+        assert ctx.get("core_cluster_registry") is not None
         assert ctx.get("project_manager") is not None
         assert ctx.get("reconciliation_service") is not None
