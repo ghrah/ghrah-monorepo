@@ -4,8 +4,10 @@ import {
   ClientType,
   type CommandResultPayload,
   CommandType,
+  type RoomSubjectType,
   ServerClient,
   type ServerMessage,
+  type TaskPriority,
   generateRequestId,
   type SubscribePayload,
 } from "@ghrah/protocol";
@@ -459,6 +461,270 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
+  // ── Room ──
+
+  async createRoom(projectId: string, name: string): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.ROOM_CREATE,
+      payload: { project_id: projectId, name },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async listRooms(
+    projectId?: string | null,
+    status?: string | null,
+  ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = {};
+    if (projectId != null) payload["project_id"] = projectId;
+    if (status != null) payload["status"] = status;
+
+    const msg: ServerMessage = {
+      type: CommandType.ROOM_LIST,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async getRoom(roomId: string): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.ROOM_GET,
+      payload: { room_id: roomId },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async updateRoom(
+    roomId: string,
+    name?: string | null,
+    expectedVersion?: number | null,
+  ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { room_id: roomId };
+    if (name != null) payload["name"] = name;
+    if (expectedVersion != null) payload["expected_version"] = expectedVersion;
+
+    const msg: ServerMessage = {
+      type: CommandType.ROOM_UPDATE,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async deleteRoom(roomId: string, force?: boolean): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { room_id: roomId };
+    if (force != null) payload["force"] = force;
+
+    const msg: ServerMessage = {
+      type: CommandType.ROOM_DELETE,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async joinRoom(
+    roomId: string,
+    subject: string,
+    subjectType: RoomSubjectType,
+  ): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.ROOM_JOIN,
+      payload: { room_id: roomId, subject, subject_type: subjectType },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async leaveRoom(roomId: string, subject: string): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.ROOM_LEAVE,
+      payload: { room_id: roomId, subject },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async getRoomMembers(roomId: string): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.ROOM_GET_MEMBERS,
+      payload: { room_id: roomId },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async getRoomLog(
+    roomId: string,
+    sinceSeq?: number | null,
+    limit?: number,
+  ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { room_id: roomId };
+    if (sinceSeq != null) payload["since_seq"] = sinceSeq;
+    if (limit != null) payload["limit"] = limit;
+
+    const msg: ServerMessage = {
+      type: CommandType.ROOM_GET_LOG,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async roomSend(
+    roomId: string,
+    data: Record<string, unknown>,
+    author = "user",
+    authorType: RoomSubjectType = "human",
+  ): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.ROOM_SEND,
+      payload: { room_id: roomId, author, author_type: authorType, data },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  // ── Project ──
+
+  async createProject(name: string, manifestRef?: string | null): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { name };
+    if (manifestRef != null) payload["manifest_ref"] = manifestRef;
+
+    const msg: ServerMessage = {
+      type: CommandType.PROJECT_CREATE,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async listProjects(status?: string | null): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = {};
+    if (status != null) payload["status"] = status;
+
+    const msg: ServerMessage = {
+      type: CommandType.PROJECT_LIST,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async getProject(projectId: string): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.PROJECT_GET,
+      payload: { project_id: projectId },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async updateProject(
+    projectId: string,
+    fields: { name?: string | null; manifestRef?: string | null; expectedVersion?: number | null },
+  ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { project_id: projectId };
+    if (fields.name != null) payload["name"] = fields.name;
+    if (fields.manifestRef != null) payload["manifest_ref"] = fields.manifestRef;
+    if (fields.expectedVersion != null) payload["expected_version"] = fields.expectedVersion;
+
+    const msg: ServerMessage = {
+      type: CommandType.PROJECT_UPDATE,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async deleteProject(projectId: string, force?: boolean): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { project_id: projectId };
+    if (force != null) payload["force"] = force;
+
+    const msg: ServerMessage = {
+      type: CommandType.PROJECT_DELETE,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  // ── Task ──
+
+  async createTask(
+    title: string,
+    projectId: string,
+    opts?: {
+      description?: string;
+      agentName?: string | null;
+      priority?: TaskPriority;
+      parentId?: string | null;
+    },
+  ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { title, project_id: projectId };
+    if (opts?.description != null) payload["description"] = opts.description;
+    if (opts?.agentName != null) payload["agent_name"] = opts.agentName;
+    if (opts?.priority != null) payload["priority"] = opts.priority;
+    if (opts?.parentId != null) payload["parent_id"] = opts.parentId;
+
+    const msg: ServerMessage = {
+      type: CommandType.TASK_CREATE,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async listTasks(filter?: {
+    projectId?: string | null;
+    agentName?: string | null;
+    status?: string | string[] | null;
+    limit?: number;
+  }): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = {};
+    if (filter?.projectId != null) payload["project_id"] = filter.projectId;
+    if (filter?.agentName != null) payload["agent_name"] = filter.agentName;
+    if (filter?.status != null) payload["status"] = filter.status;
+    if (filter?.limit != null) payload["limit"] = filter.limit;
+
+    const msg: ServerMessage = {
+      type: CommandType.TASK_LIST,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async getTask(taskId: string): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.TASK_GET,
+      payload: { task_id: taskId },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
   // ── 内部方法 ──
 
   protected async _syncInitialState(): Promise<void> {
@@ -469,6 +735,16 @@ export class ObserverClient extends ServerClient {
     }
     try {
       await this.listManifestAgents();
+    } catch {
+      // 静默忽略初始同步失败
+    }
+    try {
+      await this.listProjects();
+    } catch {
+      // 静默忽略初始同步失败
+    }
+    try {
+      await this.listRooms();
     } catch {
       // 静默忽略初始同步失败
     }

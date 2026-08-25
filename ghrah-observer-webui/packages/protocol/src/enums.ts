@@ -58,6 +58,54 @@ export enum CommandType {
   MANIFEST_DELETE_AGENT = "manifest_delete_agent",
   MANIFEST_RESOLVE_AGENT = "manifest_resolve_agent",
   MANIFEST_VALIDATE = "manifest_validate",
+
+  TASK_CREATE = "task_create",
+  TASK_UPDATE = "task_update",
+  TASK_ASSIGN = "task_assign",
+  TASK_START = "task_start",
+  TASK_COMPLETE = "task_complete",
+  TASK_FAIL = "task_fail",
+  TASK_CANCEL = "task_cancel",
+  TASK_BLOCK = "task_block",
+  TASK_LIST = "task_list",
+  TASK_GET = "task_get",
+  TASK_DELETE = "task_delete",
+
+  PROJECT_CREATE = "project_create",
+  PROJECT_UPDATE = "project_update",
+  PROJECT_LIST = "project_list",
+  PROJECT_GET = "project_get",
+  PROJECT_DELETE = "project_delete",
+  PROJECT_ADD_AGENT = "project_add_agent",
+  PROJECT_REMOVE_AGENT = "project_remove_agent",
+  PROJECT_LINK_TASK = "project_link_task",
+  PROJECT_UNLINK_TASK = "project_unlink_task",
+  PROJECT_SET_RECOVERY = "project_set_recovery",
+  PROJECT_PAUSE = "project_pause",
+  PROJECT_RESUME = "project_resume",
+  PROJECT_STOP = "project_stop",
+
+  ROOM_CREATE = "room_create",
+  ROOM_LIST = "room_list",
+  ROOM_GET = "room_get",
+  ROOM_UPDATE = "room_update",
+  ROOM_DELETE = "room_delete",
+  ROOM_JOIN = "room_join",
+  ROOM_LEAVE = "room_leave",
+  ROOM_GET_MEMBERS = "room_get_members",
+  ROOM_GET_LOG = "room_get_log",
+  ROOM_SEND = "room_send",
+
+  SESSION_CREATE = "session_create",
+  SESSION_SWITCH = "session_switch",
+  SESSION_LIST = "session_list",
+  SESSION_ARCHIVE = "session_archive",
+  SESSION_DELETE = "session_delete",
+
+  GET_CHAIN_HISTORY = "get_chain_history",
+
+  RECONCILE_NOW = "reconcile_now",
+  RECONCILE_STATUS = "reconcile_status",
 }
 
 export enum EventType {
@@ -81,6 +129,42 @@ export enum EventType {
   MANIFEST_AGENT_CREATED = "manifest_agent_created",
   MANIFEST_AGENT_UPDATED = "manifest_agent_updated",
   MANIFEST_AGENT_DELETED = "manifest_agent_deleted",
+
+  TASK_CREATED = "task_created",
+  TASK_UPDATED = "task_updated",
+  TASK_ASSIGNED = "task_assigned",
+  TASK_STARTED = "task_started",
+  TASK_COMPLETED = "task_completed",
+  TASK_FAILED = "task_failed",
+  TASK_CANCELED = "task_canceled",
+  TASK_BLOCKED = "task_blocked",
+  TASK_DELETED = "task_deleted",
+
+  PROJECT_CREATED = "project_created",
+  PROJECT_UPDATED = "project_updated",
+  PROJECT_DELETED = "project_deleted",
+  PROJECT_PAUSED = "project_paused",
+  PROJECT_RESUMED = "project_resumed",
+  PROJECT_STOPPED = "project_stopped",
+  PROJECT_AGENT_ADDED = "project_agent_added",
+  PROJECT_AGENT_REMOVED = "project_agent_removed",
+  PROJECT_RECOVERY_SET = "project_recovery_set",
+
+  ROOM_CREATED = "room_created",
+  ROOM_UPDATED = "room_updated",
+  ROOM_DELETED = "room_deleted",
+  ROOM_MEMBER_JOINED = "room_member_joined",
+  ROOM_MEMBER_LEFT = "room_member_left",
+  ROOM_LOG_APPENDED = "room_log_appended",
+
+  SESSION_CREATED = "session_created",
+  SESSION_SWITCHED = "session_switched",
+  SESSION_ARCHIVED = "session_archived",
+  SESSION_DELETED = "session_deleted",
+  SESSION_LIST_RESULT = "session_list_result",
+
+  SUBJECT_RECONCILED = "subject_reconciled",
+  RECONCILE_FAILED = "reconcile_failed",
 }
 
 export enum SystemType {
@@ -142,6 +226,49 @@ export const MANIFEST_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.MANIFEST_DELETE_AGENT,
   CommandType.MANIFEST_RESOLVE_AGENT,
   CommandType.MANIFEST_VALIDATE,
+]);
+
+export const TASK_COMMANDS: ReadonlySet<string> = new Set([
+  CommandType.TASK_CREATE,
+  CommandType.TASK_UPDATE,
+  CommandType.TASK_ASSIGN,
+  CommandType.TASK_START,
+  CommandType.TASK_COMPLETE,
+  CommandType.TASK_FAIL,
+  CommandType.TASK_CANCEL,
+  CommandType.TASK_BLOCK,
+  CommandType.TASK_LIST,
+  CommandType.TASK_GET,
+  CommandType.TASK_DELETE,
+]);
+
+export const PROJECT_COMMANDS: ReadonlySet<string> = new Set([
+  CommandType.PROJECT_CREATE,
+  CommandType.PROJECT_UPDATE,
+  CommandType.PROJECT_LIST,
+  CommandType.PROJECT_GET,
+  CommandType.PROJECT_DELETE,
+  CommandType.PROJECT_ADD_AGENT,
+  CommandType.PROJECT_REMOVE_AGENT,
+  CommandType.PROJECT_LINK_TASK,
+  CommandType.PROJECT_UNLINK_TASK,
+  CommandType.PROJECT_SET_RECOVERY,
+  CommandType.PROJECT_PAUSE,
+  CommandType.PROJECT_RESUME,
+  CommandType.PROJECT_STOP,
+]);
+
+export const ROOM_COMMANDS: ReadonlySet<string> = new Set([
+  CommandType.ROOM_CREATE,
+  CommandType.ROOM_LIST,
+  CommandType.ROOM_GET,
+  CommandType.ROOM_UPDATE,
+  CommandType.ROOM_DELETE,
+  CommandType.ROOM_JOIN,
+  CommandType.ROOM_LEAVE,
+  CommandType.ROOM_GET_MEMBERS,
+  CommandType.ROOM_GET_LOG,
+  CommandType.ROOM_SEND,
 ]);
 
 export type MessageType = CommandType | EventType | SystemType;

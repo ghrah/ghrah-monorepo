@@ -11,6 +11,9 @@ import { useChatStore } from "./stores/chat.js";
 import { useConnectionStore } from "./stores/connection.js";
 import { useHitlStore } from "./stores/hitl.js";
 import { useManifestsStore } from "./stores/manifests.js";
+import { useProjectsStore } from "./stores/projects.js";
+import { useRoomsStore } from "./stores/rooms.js";
+import { useTasksStore } from "./stores/tasks.js";
 
 const WS_OPEN = 1;
 
@@ -156,10 +159,124 @@ describe("connectStores", () => {
     });
   });
 
-  describe("chat events (projection-driven from action_chain_updated)", () => {
-    it("projects conversation entry from action_chain_updated", async () => {
+  describe("room events", () => {
+    function makeRoom(roomId: string, overrides: Record<string, unknown> = {}) {
+      return {
+        room_id: roomId,
+        project_id: "p1",
+        name: roomId,
+        status: "active",
+        members: [],
+        seq_watermark: 0,
+        version: 1,
+        created_at: "",
+        updated_at: "",
+        ...overrides,
+      };
+    }
+
+    function makeLogEntry(roomId: string, overrides: Record<string, unknown> = {}) {
+      return {
+        id: `${roomId}-e1`,
+        room_id: roomId,
+        seq: 1,
+        author: "agent-1",
+        author_type: "agent",
+        timestamp: 1750000000,
+        data: { message: "hi" },
+        ...overrides,
+      };
+    }
+
+    it("room_created / room_updated upsert rooms store", async () => {
       await connectClient();
-      const store = useChatStore();
+      const store = useRoomsStore();
+
+      internals(client)._dispatch(
+        EventType.ROOM_CREATED,
+        makeMsg(EventType.ROOM_CREATED, { room: makeRoom("r1") }),
+      );
+      expect(store.rooms.has("r1")).toBe(true);
+
+      internals(client)._dispatch(
+        EventType.ROOM_UPDATED,
+        makeMsg(EventType.ROOM_UPDATED, { room: makeRoom("r1", { name: "renamed" }) }),
+      );
+      expect(store.rooms.get("r1")?.name).toBe("renamed");
+    });
+
+    it("room_deleted removes room", async () => {
+      await connectClient();
+      const store = useRoomsStore();
+      store.onRoomCreated({ room: makeRoom("r1") as never });
+
+      internals(client)._dispatch(
+        EventType.ROOM_DELETED,
+        makeMsg(EventType.ROOM_DELETED, { room_id: "r1", project_id: "p1" }),
+      );
+      expect(store.rooms.has("r1")).toBe(false);
+    });
+
+    it("room_member_joined / room_member_left upsert envelope room", async () => {
+      await connectClient();
+      const store = useRoomsStore();
+      store.onRoomCreated({ room: makeRoom("r1") as never });
+
+      internals(client)._dispatch(
+        EventType.ROOM_MEMBER_JOINED,
+        makeMsg(EventType.ROOM_MEMBER_JOINED, {
+          room: makeRoom("r1", {
+            members: [{ subject: "agent-1", subject_type: "agent", joined_at: "" }],
+          }),
+          member: { subject: "agent-1", subject_type: "agent", joined_at: "" },
+        }),
+      );
+      expect(store.rooms.get("r1")?.members).toHaveLength(1);
+
+      internals(client)._dispatch(
+        EventType.ROOM_MEMBER_LEFT,
+        makeMsg(EventType.ROOM_MEMBER_LEFT, {
+          room: makeRoom("r1", { members: [] }),
+          subject: "agent-1",
+        }),
+      );
+      expect(store.rooms.get("r1")?.members).toHaveLength(0);
+    });
+
+    it("room_log_appended appends to rooms store and dedups replay", async () => {
+      await connectClient();
+      const store = useRoomsStore();
+
+      const msg = makeMsg(EventType.ROOM_LOG_APPENDED, { entry: makeLogEntry("r1") });
+      internals(client)._dispatch(EventType.ROOM_LOG_APPENDED, msg);
+      internals(client)._dispatch(EventType.ROOM_LOG_APPENDED, msg);
+
+      expect(store.logs.get("r1")).toHaveLength(1);
+    });
+
+    it("room_log_appended confirms matching human pending in chat store", async () => {
+      await connectClient();
+      const chatStore = useChatStore();
+      chatStore.addPendingEntry({ to: "r1", content: "hello", agentName: "", roomId: "r1" });
+      expect(chatStore.allEntries).toHaveLength(1);
+
+      internals(client)._dispatch(
+        EventType.ROOM_LOG_APPENDED,
+        makeMsg(EventType.ROOM_LOG_APPENDED, {
+          entry: makeLogEntry("r1", {
+            author: "user",
+            author_type: "human",
+            data: { message: "hello" },
+          }),
+        }),
+      );
+
+      expect(chatStore.allEntries).toHaveLength(0);
+    });
+
+    it("action_chain_updated no longer feeds chat store", async () => {
+      await connectClient();
+      const chatStore = useChatStore();
 
       internals(client)._dispatch(
         EventType.ACTION_CHAIN_UPDATED,
@@ -176,10 +293,119 @@ describe("connectStores", () => {
         }),
       );
 
-      const entries = store.allEntries;
-      expect(entries).toHaveLength(1);
-      expect(entries[0].content).toBe("Hello");
-      expect(entries[0].kind).toBe("conversation");
+      expect(chatStore.allEntries).toHaveLength(0);
+    });
+  });
+
+  describe("project events", () => {
+    function makeProject(projectId: string, overrides: Record<string, unknown> = {}) {
+      return {
+        project_id: projectId,
+        name: projectId,
+        manifest_ref: "",
+        instance_manifest_dir: "",
+        cluster_ids: [],
+        workspaces: [],
+        db_path: "",
+        agents: [],
+        task_ids: [],
+        status: "active",
+        recovery: "resume",
+        version: 1,
+        created_at: "",
+        updated_at: "",
+        ...overrides,
+      };
+    }
+
+    it("project_created / project_paused upsert projects store", async () => {
+      await connectClient();
+      const store = useProjectsStore();
+
+      internals(client)._dispatch(
+        EventType.PROJECT_CREATED,
+        makeMsg(EventType.PROJECT_CREATED, { project: makeProject("p1") }),
+      );
+      expect(store.projects.has("p1")).toBe(true);
+
+      internals(client)._dispatch(
+        EventType.PROJECT_PAUSED,
+        makeMsg(EventType.PROJECT_PAUSED, { project: makeProject("p1", { status: "paused" }) }),
+      );
+      expect(store.projects.get("p1")?.status).toBe("paused");
+    });
+
+    it("project_agent_added upserts with agent_name envelope", async () => {
+      await connectClient();
+      const store = useProjectsStore();
+      store.onProjectEvent({ project: makeProject("p1") as never });
+
+      internals(client)._dispatch(
+        EventType.PROJECT_AGENT_ADDED,
+        makeMsg(EventType.PROJECT_AGENT_ADDED, {
+          project: makeProject("p1", {
+            agents: [{ name: "agent-1", cluster_id: "c1", path_grants: [] }],
+          }),
+          agent_name: "agent-1",
+        }),
+      );
+      expect(store.projects.get("p1")?.agents).toHaveLength(1);
+    });
+
+    it("project_deleted removes project", async () => {
+      await connectClient();
+      const store = useProjectsStore();
+      store.onProjectEvent({ project: makeProject("p1") as never });
+
+      internals(client)._dispatch(
+        EventType.PROJECT_DELETED,
+        makeMsg(EventType.PROJECT_DELETED, { project: makeProject("p1") }),
+      );
+      expect(store.projects.has("p1")).toBe(false);
+    });
+  });
+
+  describe("task events", () => {
+    function makeTask(taskId: string, overrides: Record<string, unknown> = {}) {
+      return {
+        task_id: taskId,
+        project_id: "p1",
+        title: taskId,
+        description: "",
+        status: "pending",
+        priority: "normal",
+        dependencies: [],
+        created_at: "",
+        updated_at: "",
+        metadata: {},
+        ...overrides,
+      };
+    }
+
+    it("task_created upserts, task_deleted removes", async () => {
+      await connectClient();
+      const store = useTasksStore();
+
+      internals(client)._dispatch(
+        EventType.TASK_CREATED,
+        makeMsg(EventType.TASK_CREATED, { task: makeTask("t1") }),
+      );
+      expect(store.tasks.has("t1")).toBe(true);
+
+      internals(client)._dispatch(
+        EventType.TASK_UPDATED,
+        makeMsg(EventType.TASK_UPDATED, {
+          task: makeTask("t1", { status: "in_progress" }),
+          previous_status: "pending",
+        }),
+      );
+      expect(store.tasks.get("t1")?.status).toBe("in_progress");
+
+      internals(client)._dispatch(
+        EventType.TASK_DELETED,
+        makeMsg(EventType.TASK_DELETED, { task: makeTask("t1"), reason: "cleanup" }),
+      );
+      expect(store.tasks.has("t1")).toBe(false);
     });
   });
 

@@ -1,0 +1,8 @@
+{
+  "agent_name": null,
+  "status": ["pending", "in_progress"],
+  "parent_id": null,
+  "project_id": "proj-001",
+  "include_terminal": true,
+  "limit": 100
+}

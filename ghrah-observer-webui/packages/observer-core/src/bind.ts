@@ -7,7 +7,17 @@ import type {
   HITLRequestPayload,
   ManifestAbilityEventPayload,
   ManifestAgentEventPayload,
+  ProjectEventPayload,
+  ProjectAgentEventPayload,
+  ProjectInfoPayload,
+  RoomDeletedEventPayload,
+  RoomEventPayload,
+  RoomInfoPayload,
+  RoomLogEntryPayload,
+  RoomLogEventPayload,
+  RoomMemberEventPayload,
   ServerMessage,
+  TaskEventPayload,
 } from "@ghrah/protocol";
 import { CommandType, EventType, SystemType } from "@ghrah/protocol";
 import type { ObserverClient } from "./client.js";
@@ -18,6 +28,9 @@ import { useChatStore } from "./stores/chat.js";
 import { useConnectionStore } from "./stores/connection.js";
 import { useHitlStore } from "./stores/hitl.js";
 import { useManifestsStore } from "./stores/manifests.js";
+import { useProjectsStore } from "./stores/projects.js";
+import { useRoomsStore } from "./stores/rooms.js";
+import { useTasksStore } from "./stores/tasks.js";
 
 type AgentListItem = { name: string; config: AgentConfigPayload };
 
@@ -29,6 +42,9 @@ export function connectStores(client: ObserverClient): () => void {
   const chat = useChatStore();
   const changes = useChangesStore();
   const manifests = useManifestsStore();
+  const rooms = useRoomsStore();
+  const projects = useProjectsStore();
+  const tasks = useTasksStore();
 
   client.onConnected(() => {
     connection.setConnected();
@@ -51,7 +67,6 @@ export function connectStores(client: ObserverClient): () => void {
     const node = payload.node;
     if (!node) return;
     chains.onActionChainUpdated(payload);
-    chat.onActionChainNode(node);
     changes.onActionChainNode(payload.agent_name, node);
   });
 
@@ -69,6 +84,21 @@ export function connectStores(client: ObserverClient): () => void {
       | undefined;
     if (originalCommand === CommandType.LIST_AGENTS && Array.isArray(data.agents)) {
       agents.setAgentsFromList(data.agents as AgentListItem[]);
+    }
+    if (originalCommand === CommandType.ROOM_LIST && Array.isArray(data.rooms)) {
+      rooms.setRoomsFromList(data.rooms as RoomInfoPayload[]);
+    }
+    if (originalCommand === CommandType.ROOM_GET_LOG && Array.isArray(data.entries)) {
+      // RoomLogResultPayload = { entries, count }，不含 room_id；从 entry 自身取
+      const entries = data.entries as RoomLogEntryPayload[];
+      const roomId =
+        (typeof data.room_id === "string" ? data.room_id : null) ?? entries[0]?.room_id ?? null;
+      if (roomId) {
+        rooms.setRoomLog(roomId, entries);
+      }
+    }
+    if (originalCommand === CommandType.PROJECT_LIST && Array.isArray(data.projects)) {
+      projects.setProjectsFromList(data.projects as ProjectInfoPayload[]);
     }
   });
 
@@ -95,6 +125,60 @@ export function connectStores(client: ObserverClient): () => void {
     manifests.onManifestAgentDeleted(msg.payload as ManifestAgentEventPayload),
   );
 
+  // ── Room 事件 ──
+  client.on(EventType.ROOM_CREATED, (msg: ServerMessage) =>
+    rooms.onRoomCreated(msg.payload as RoomEventPayload),
+  );
+  client.on(EventType.ROOM_UPDATED, (msg: ServerMessage) =>
+    rooms.onRoomUpdated(msg.payload as RoomEventPayload),
+  );
+  client.on(EventType.ROOM_DELETED, (msg: ServerMessage) =>
+    rooms.onRoomDeleted(msg.payload as RoomDeletedEventPayload),
+  );
+  client.on(EventType.ROOM_MEMBER_JOINED, (msg: ServerMessage) =>
+    rooms.onRoomMemberJoined(msg.payload as RoomMemberEventPayload),
+  );
+  client.on(EventType.ROOM_MEMBER_LEFT, (msg: ServerMessage) =>
+    rooms.onRoomMemberLeft(msg.payload as RoomMemberEventPayload),
+  );
+  client.on(EventType.ROOM_LOG_APPENDED, (msg: ServerMessage) => {
+    const payload = msg.payload as RoomLogEventPayload;
+    if (!payload.entry) return;
+    rooms.onRoomLogAppended(payload);
+    chat.onRoomLogAppended(payload.entry);
+  });
+
+  // ── Project 事件 ──
+  const projectEvent = (msg: ServerMessage) =>
+    projects.onProjectEvent(msg.payload as ProjectEventPayload | ProjectAgentEventPayload);
+  client.on(EventType.PROJECT_CREATED, projectEvent);
+  client.on(EventType.PROJECT_UPDATED, projectEvent);
+  client.on(EventType.PROJECT_PAUSED, projectEvent);
+  client.on(EventType.PROJECT_RESUMED, projectEvent);
+  client.on(EventType.PROJECT_STOPPED, projectEvent);
+  client.on(EventType.PROJECT_RECOVERY_SET, projectEvent);
+  client.on(EventType.PROJECT_AGENT_ADDED, projectEvent);
+  client.on(EventType.PROJECT_AGENT_REMOVED, projectEvent);
+  client.on(EventType.PROJECT_DELETED, (msg: ServerMessage) =>
+    projects.onProjectDeleted(msg.payload as ProjectEventPayload),
+  );
+
+  // ── Task 事件（信封统一 {task, previous_status?, reason?}，删除语义按事件类型分发）──
+  const taskEventTypes = [
+    EventType.TASK_CREATED,
+    EventType.TASK_UPDATED,
+    EventType.TASK_ASSIGNED,
+    EventType.TASK_STARTED,
+    EventType.TASK_COMPLETED,
+    EventType.TASK_FAILED,
+    EventType.TASK_CANCELED,
+    EventType.TASK_BLOCKED,
+    EventType.TASK_DELETED,
+  ] as const;
+  for (const et of taskEventTypes) {
+    client.on(et, (msg: ServerMessage) => tasks.onTaskEvent(et, msg.payload as TaskEventPayload));
+  }
+
   const eventTypes = [
     EventType.AGENT_SPAWNED,
     EventType.AGENT_TERMINATED,
@@ -107,6 +191,22 @@ export function connectStores(client: ObserverClient): () => void {
     EventType.MANIFEST_AGENT_CREATED,
     EventType.MANIFEST_AGENT_UPDATED,
     EventType.MANIFEST_AGENT_DELETED,
+    EventType.ROOM_CREATED,
+    EventType.ROOM_UPDATED,
+    EventType.ROOM_DELETED,
+    EventType.ROOM_MEMBER_JOINED,
+    EventType.ROOM_MEMBER_LEFT,
+    EventType.ROOM_LOG_APPENDED,
+    EventType.PROJECT_CREATED,
+    EventType.PROJECT_UPDATED,
+    EventType.PROJECT_PAUSED,
+    EventType.PROJECT_RESUMED,
+    EventType.PROJECT_STOPPED,
+    EventType.PROJECT_RECOVERY_SET,
+    EventType.PROJECT_AGENT_ADDED,
+    EventType.PROJECT_AGENT_REMOVED,
+    EventType.PROJECT_DELETED,
+    ...taskEventTypes,
   ] as const;
 
   return () => {

@@ -1,4 +1,4 @@
-import type { ActionNode, ContentBlock } from "@ghrah/protocol";
+import type { ActionNode, ContentBlock, RoomLogEntryPayload } from "@ghrah/protocol";
 
 export type ChatEntryKind =
   | "human_input"
@@ -17,6 +17,7 @@ export interface ChatEntry {
   nodeId: string;
   agentName: string;
   childSeq: number;
+  roomId?: string;
   pending?: boolean;
   error?: string;
 }
@@ -50,6 +51,31 @@ function _blockArg(block: ContentBlock, key: string): string {
   return typeof v === "string" ? v : "";
 }
 
+/**
+ * RoomLog entry → ChatEntry。chat 的按 Room 投影（数据源 = rooms store 的 logs）。
+ * data.message（string）为 content；缺 message 时回退 JSON.stringify(data)。
+ */
+export function roomLogToChatEntries(entry: RoomLogEntryPayload): ChatEntry {
+  const data = entry.data ?? {};
+  const message = data.message;
+  const content = typeof message === "string" ? message : JSON.stringify(data);
+  return {
+    from: entry.author,
+    to: entry.room_id,
+    content,
+    kind: entry.author_type === "human" ? "human_input" : "conversation",
+    timestamp: new Date(entry.timestamp * 1000).toISOString(),
+    nodeId: entry.id,
+    agentName: entry.author_type === "agent" ? entry.author : "",
+    childSeq: entry.seq,
+    roomId: entry.room_id,
+  };
+}
+
+/**
+ * @deprecated chat 已改为按 Room 投影（roomLogToChatEntries）；本函数仅保留给
+ * ActionChain 面板等 chain 维度消费，不要再用于 chat 流。
+ */
 export function projectNodeToChatEntries(node: ActionNode): ChatEntry[] {
   const entries: ChatEntry[] = [];
   const agentName = node.agent_name ?? "";
@@ -157,6 +183,10 @@ export function projectNodeToChatEntries(node: ActionNode): ChatEntry[] {
   return entries;
 }
 
+/**
+ * @deprecated chat 已改为按 Room 投影；chain → chat 重建已废弃（chain 投影仅用于
+ * ActionChain 面板）。保留仅为兼容，勿用于 chat 流。
+ */
 export function rebuildChatEntriesFromChain(nodes: ActionNode[]): ChatEntry[] {
   const entries: ChatEntry[] = [];
   for (const node of nodes) {

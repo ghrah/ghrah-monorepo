@@ -6,7 +6,10 @@ import {
   EventType,
   MANIFEST_COMMANDS,
   PERSIST_COMMANDS,
+  PROJECT_COMMANDS,
+  ROOM_COMMANDS,
   SystemType,
+  TASK_COMMANDS,
   WORKSPACE_COMMANDS,
 } from "./enums.js";
 
@@ -70,9 +73,51 @@ describe("CommandType", () => {
     "manifest_delete_agent",
     "manifest_resolve_agent",
     "manifest_validate",
+    "task_create",
+    "task_update",
+    "task_assign",
+    "task_start",
+    "task_complete",
+    "task_fail",
+    "task_cancel",
+    "task_block",
+    "task_list",
+    "task_get",
+    "task_delete",
+    "project_create",
+    "project_update",
+    "project_list",
+    "project_get",
+    "project_delete",
+    "project_add_agent",
+    "project_remove_agent",
+    "project_link_task",
+    "project_unlink_task",
+    "project_set_recovery",
+    "project_pause",
+    "project_resume",
+    "project_stop",
+    "room_create",
+    "room_list",
+    "room_get",
+    "room_update",
+    "room_delete",
+    "room_join",
+    "room_leave",
+    "room_get_members",
+    "room_get_log",
+    "room_send",
+    "session_create",
+    "session_switch",
+    "session_list",
+    "session_archive",
+    "session_delete",
+    "get_chain_history",
+    "reconcile_now",
+    "reconcile_status",
   ]);
 
-  it("has exactly 41 values matching Python CommandType", () => {
+  it("has exactly 83 values matching Python CommandType", () => {
     const tsValues = new Set(Object.values(CommandType));
     expect(tsValues).toEqual(PYTHON_COMMAND_VALUES);
   });
@@ -104,9 +149,40 @@ describe("EventType", () => {
     "manifest_agent_created",
     "manifest_agent_updated",
     "manifest_agent_deleted",
+    "task_created",
+    "task_updated",
+    "task_assigned",
+    "task_started",
+    "task_completed",
+    "task_failed",
+    "task_canceled",
+    "task_blocked",
+    "task_deleted",
+    "project_created",
+    "project_updated",
+    "project_deleted",
+    "project_paused",
+    "project_resumed",
+    "project_stopped",
+    "project_agent_added",
+    "project_agent_removed",
+    "project_recovery_set",
+    "room_created",
+    "room_updated",
+    "room_deleted",
+    "room_member_joined",
+    "room_member_left",
+    "room_log_appended",
+    "session_created",
+    "session_switched",
+    "session_archived",
+    "session_deleted",
+    "session_list_result",
+    "subject_reconciled",
+    "reconcile_failed",
   ]);
 
-  it("has exactly 19 values matching Python EventType", () => {
+  it("has exactly 50 values matching Python EventType", () => {
     const tsValues = new Set(Object.values(EventType));
     expect(tsValues).toEqual(PYTHON_EVENT_VALUES);
   });
@@ -200,5 +276,66 @@ describe("MANIFEST_COMMANDS", () => {
 
   it("contains exactly 10 manifest command values", () => {
     expect(MANIFEST_COMMANDS).toEqual(PYTHON_MANIFEST);
+  });
+});
+
+describe("TASK_COMMANDS", () => {
+  const PYTHON_TASK = new Set([
+    "task_create",
+    "task_update",
+    "task_assign",
+    "task_start",
+    "task_complete",
+    "task_fail",
+    "task_cancel",
+    "task_block",
+    "task_list",
+    "task_get",
+    "task_delete",
+  ]);
+
+  it("contains exactly 11 task command values", () => {
+    expect(TASK_COMMANDS).toEqual(PYTHON_TASK);
+  });
+});
+
+describe("PROJECT_COMMANDS", () => {
+  const PYTHON_PROJECT = new Set([
+    "project_create",
+    "project_update",
+    "project_list",
+    "project_get",
+    "project_delete",
+    "project_add_agent",
+    "project_remove_agent",
+    "project_link_task",
+    "project_unlink_task",
+    "project_set_recovery",
+    "project_pause",
+    "project_resume",
+    "project_stop",
+  ]);
+
+  it("contains exactly 13 project command values", () => {
+    expect(PROJECT_COMMANDS).toEqual(PYTHON_PROJECT);
+  });
+});
+
+describe("ROOM_COMMANDS", () => {
+  const PYTHON_ROOM = new Set([
+    "room_create",
+    "room_list",
+    "room_get",
+    "room_update",
+    "room_delete",
+    "room_join",
+    "room_leave",
+    "room_get_members",
+    "room_get_log",
+    "room_send",
+  ]);
+
+  it("contains exactly 10 room command values", () => {
+    expect(ROOM_COMMANDS).toEqual(PYTHON_ROOM);
   });
 });

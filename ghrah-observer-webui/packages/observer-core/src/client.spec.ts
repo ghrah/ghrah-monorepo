@@ -304,8 +304,196 @@ describe("ObserverClient", () => {
     });
   });
 
+  describe("room methods", () => {
+    /** 发起请求 → 断言构造 → 回 command_result 解除 pending。 */
+    async function runRequest(promise: Promise<unknown>) {
+      const parsed = JSON.parse(mockWs.sent[0]);
+      mockWs.onmessage!({
+        data: JSON.stringify({
+          type: "command_result",
+          payload: { request_id: parsed.request_id, success: true, data: {} },
+          request_id: parsed.request_id,
+        }),
+      });
+      await expect(promise).resolves.toBeDefined();
+      return parsed;
+    }
+
+    it("createRoom sends room_create", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.createRoom("p1", "general"));
+      expect(parsed.type).toBe(CommandType.ROOM_CREATE);
+      expect(parsed.payload).toEqual({ project_id: "p1", name: "general" });
+    });
+
+    it("listRooms sends room_list with optional filters", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.listRooms("p1", "active"));
+      expect(parsed.type).toBe(CommandType.ROOM_LIST);
+      expect(parsed.payload).toEqual({ project_id: "p1", status: "active" });
+
+      mockWs.sent.length = 0;
+      const bare = await runRequest(client.listRooms());
+      expect(bare.payload).toEqual({});
+    });
+
+    it("getRoom sends room_get", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.getRoom("r1"));
+      expect(parsed.type).toBe(CommandType.ROOM_GET);
+      expect(parsed.payload).toEqual({ room_id: "r1" });
+    });
+
+    it("updateRoom sends room_update with expected_version", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.updateRoom("r1", "new-name", 3));
+      expect(parsed.type).toBe(CommandType.ROOM_UPDATE);
+      expect(parsed.payload).toEqual({ room_id: "r1", name: "new-name", expected_version: 3 });
+    });
+
+    it("deleteRoom sends room_delete with force", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.deleteRoom("r1", true));
+      expect(parsed.type).toBe(CommandType.ROOM_DELETE);
+      expect(parsed.payload).toEqual({ room_id: "r1", force: true });
+    });
+
+    it("joinRoom / leaveRoom send membership commands", async () => {
+      await connectClient(client, mockWs);
+      const join = await runRequest(client.joinRoom("r1", "agent-1", "agent"));
+      expect(join.type).toBe(CommandType.ROOM_JOIN);
+      expect(join.payload).toEqual({ room_id: "r1", subject: "agent-1", subject_type: "agent" });
+
+      mockWs.sent.length = 0;
+      const leave = await runRequest(client.leaveRoom("r1", "agent-1"));
+      expect(leave.type).toBe(CommandType.ROOM_LEAVE);
+      expect(leave.payload).toEqual({ room_id: "r1", subject: "agent-1" });
+    });
+
+    it("getRoomMembers sends room_get_members", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.getRoomMembers("r1"));
+      expect(parsed.type).toBe(CommandType.ROOM_GET_MEMBERS);
+      expect(parsed.payload).toEqual({ room_id: "r1" });
+    });
+
+    it("getRoomLog sends room_get_log with since_seq/limit", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.getRoomLog("r1", 5, 50));
+      expect(parsed.type).toBe(CommandType.ROOM_GET_LOG);
+      expect(parsed.payload).toEqual({ room_id: "r1", since_seq: 5, limit: 50 });
+    });
+
+    it("roomSend sends room_send with data map and default human author", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.roomSend("r1", { message: "hello" }));
+      expect(parsed.type).toBe(CommandType.ROOM_SEND);
+      expect(parsed.payload).toEqual({
+        room_id: "r1",
+        author: "user",
+        author_type: "human",
+        data: { message: "hello" },
+      });
+    });
+  });
+
+  describe("project methods", () => {
+    async function runRequest(promise: Promise<unknown>) {
+      const parsed = JSON.parse(mockWs.sent[0]);
+      mockWs.onmessage!({
+        data: JSON.stringify({
+          type: "command_result",
+          payload: { request_id: parsed.request_id, success: true, data: {} },
+          request_id: parsed.request_id,
+        }),
+      });
+      await expect(promise).resolves.toBeDefined();
+      return parsed;
+    }
+
+    it("createProject sends project_create", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.createProject("proj", "ns.ref"));
+      expect(parsed.type).toBe(CommandType.PROJECT_CREATE);
+      expect(parsed.payload).toEqual({ name: "proj", manifest_ref: "ns.ref" });
+    });
+
+    it("listProjects sends project_list", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.listProjects());
+      expect(parsed.type).toBe(CommandType.PROJECT_LIST);
+      expect(parsed.payload).toEqual({});
+    });
+
+    it("getProject sends project_get", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.getProject("p1"));
+      expect(parsed.type).toBe(CommandType.PROJECT_GET);
+      expect(parsed.payload).toEqual({ project_id: "p1" });
+    });
+
+    it("updateProject sends project_update", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(
+        client.updateProject("p1", { name: "renamed", expectedVersion: 2 }),
+      );
+      expect(parsed.type).toBe(CommandType.PROJECT_UPDATE);
+      expect(parsed.payload).toEqual({ project_id: "p1", name: "renamed", expected_version: 2 });
+    });
+
+    it("deleteProject sends project_delete", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.deleteProject("p1", true));
+      expect(parsed.type).toBe(CommandType.PROJECT_DELETE);
+      expect(parsed.payload).toEqual({ project_id: "p1", force: true });
+    });
+  });
+
+  describe("task methods", () => {
+    async function runRequest(promise: Promise<unknown>) {
+      const parsed = JSON.parse(mockWs.sent[0]);
+      mockWs.onmessage!({
+        data: JSON.stringify({
+          type: "command_result",
+          payload: { request_id: parsed.request_id, success: true, data: {} },
+          request_id: parsed.request_id,
+        }),
+      });
+      await expect(promise).resolves.toBeDefined();
+      return parsed;
+    }
+
+    it("createTask sends task_create with opts", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(
+        client.createTask("do it", "p1", { agentName: "agent-1", priority: "high" }),
+      );
+      expect(parsed.type).toBe(CommandType.TASK_CREATE);
+      expect(parsed.payload).toEqual({
+        title: "do it",
+        project_id: "p1",
+        agent_name: "agent-1",
+        priority: "high",
+      });
+    });
+
+    it("listTasks sends task_list with filter", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.listTasks({ projectId: "p1", status: "pending" }));
+      expect(parsed.type).toBe(CommandType.TASK_LIST);
+      expect(parsed.payload).toEqual({ project_id: "p1", status: "pending" });
+    });
+
+    it("getTask sends task_get", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.getTask("t1"));
+      expect(parsed.type).toBe(CommandType.TASK_GET);
+      expect(parsed.payload).toEqual({ task_id: "t1" });
+    });
+  });
+
   describe("_syncInitialState", () => {
-    it("calls listAgents and listManifestAgents", async () => {
+    it("calls listAgents, listManifestAgents, listProjects and listRooms", async () => {
       const listAgentsSpy = vi.spyOn(client, "listAgents").mockResolvedValue({
         request_id: "r0",
         success: true,
@@ -316,11 +504,23 @@ describe("ObserverClient", () => {
         success: true,
         data: { agents: [] },
       } satisfies CommandResultPayload);
+      const listProjectsSpy = vi.spyOn(client, "listProjects").mockResolvedValue({
+        request_id: "r2",
+        success: true,
+        data: { projects: [] },
+      } satisfies CommandResultPayload);
+      const listRoomsSpy = vi.spyOn(client, "listRooms").mockResolvedValue({
+        request_id: "r3",
+        success: true,
+        data: { rooms: [] },
+      } satisfies CommandResultPayload);
 
       await (client as any)._syncInitialState();
 
       expect(listAgentsSpy).toHaveBeenCalledOnce();
       expect(listManifestSpy).toHaveBeenCalledOnce();
+      expect(listProjectsSpy).toHaveBeenCalledOnce();
+      expect(listRoomsSpy).toHaveBeenCalledOnce();
     });
 
     it("continues on listAgents failure", async () => {
@@ -330,10 +530,22 @@ describe("ObserverClient", () => {
         success: true,
         data: { agents: [] },
       } satisfies CommandResultPayload);
+      const listProjectsSpy = vi.spyOn(client, "listProjects").mockResolvedValue({
+        request_id: "r2",
+        success: true,
+        data: { projects: [] },
+      } satisfies CommandResultPayload);
+      const listRoomsSpy = vi.spyOn(client, "listRooms").mockResolvedValue({
+        request_id: "r3",
+        success: true,
+        data: { rooms: [] },
+      } satisfies CommandResultPayload);
 
       await (client as any)._syncInitialState();
 
       expect(listManifestSpy).toHaveBeenCalledOnce();
+      expect(listProjectsSpy).toHaveBeenCalledOnce();
+      expect(listRoomsSpy).toHaveBeenCalledOnce();
     });
   });
 });

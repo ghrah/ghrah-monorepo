@@ -385,6 +385,355 @@ export const ErrorPayloadSchema = z.object({
   details: z.record(z.unknown()).nullable().optional(),
 });
 
+// ─── Task Payloads ───
+
+export const TaskStatusSchema = z.enum([
+  "pending",
+  "in_progress",
+  "blocked",
+  "completed",
+  "failed",
+  "canceled",
+]);
+
+export const TaskPrioritySchema = z.enum(["low", "normal", "high", "urgent"]);
+
+export const TaskInfoPayloadSchema = z.object({
+  task_id: z.string(),
+  project_id: z.string(),
+  title: z.string(),
+  description: z.string().optional().default(""),
+  agent_name: z.string().nullable().optional(),
+  status: TaskStatusSchema.optional().default("pending"),
+  priority: TaskPrioritySchema.optional().default("normal"),
+  parent_id: z.string().nullable().optional(),
+  dependencies: z.array(z.string()).optional().default([]),
+  result: z.unknown().nullable().optional(),
+  error: z.string().nullable().optional(),
+  created_at: z.string().optional().default(""),
+  updated_at: z.string().optional().default(""),
+  started_at: z.string().nullable().optional(),
+  completed_at: z.string().nullable().optional(),
+  metadata: z.record(z.unknown()).optional().default({}),
+});
+
+export const TaskCreatePayloadSchema = z.object({
+  title: z.string(),
+  project_id: z.string(),
+  description: z.string().optional().default(""),
+  agent_name: z.string().nullable().optional(),
+  priority: TaskPrioritySchema.optional().default("normal"),
+  parent_id: z.string().nullable().optional(),
+  dependencies: z.array(z.string()).optional().default([]),
+  metadata: z.record(z.unknown()).optional().default({}),
+});
+
+export const TaskUpdatePayloadSchema = z.object({
+  task_id: z.string(),
+  title: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
+  agent_name: z.string().nullable().optional(),
+  status: TaskStatusSchema.nullable().optional(),
+  priority: TaskPrioritySchema.nullable().optional(),
+  parent_id: z.string().nullable().optional(),
+  dependencies: z.array(z.string()).nullable().optional(),
+  result: z.unknown().nullable().optional(),
+  error: z.string().nullable().optional(),
+  metadata: z.record(z.unknown()).nullable().optional(),
+  metadata_patch: z.record(z.unknown()).nullable().optional(),
+  expected_version: z.number().int().nullable().optional(),
+});
+
+export const TaskIdPayloadSchema = z.object({
+  task_id: z.string(),
+});
+
+export const TaskAssignPayloadSchema = z.object({
+  task_id: z.string(),
+  agent_name: z.string(),
+});
+
+export const TaskCompletePayloadSchema = z.object({
+  task_id: z.string(),
+  result: z.unknown().nullable().optional(),
+});
+
+export const TaskFailPayloadSchema = z.object({
+  task_id: z.string(),
+  error: z.string(),
+});
+
+export const TaskCancelPayloadSchema = z.object({
+  task_id: z.string(),
+  reason: z.string().nullable().optional(),
+});
+
+export const TaskBlockPayloadSchema = z.object({
+  task_id: z.string(),
+  reason: z.string().nullable().optional(),
+});
+
+export const TaskListPayloadSchema = z.object({
+  agent_name: z.string().nullable().optional(),
+  status: z.union([TaskStatusSchema, z.array(TaskStatusSchema)]).nullable().optional(),
+  parent_id: z.string().nullable().optional(),
+  project_id: z.string().nullable().optional(),
+  include_terminal: z.boolean().optional().default(true),
+  limit: z.number().int().optional().default(100),
+});
+
+export const TaskDeletePayloadSchema = z.object({
+  task_id: z.string(),
+  force: z.boolean().optional().default(false),
+});
+
+export const TaskListResultPayloadSchema = z.object({
+  tasks: z.array(TaskInfoPayloadSchema).optional().default([]),
+  count: z.number().int().optional().default(0),
+});
+
+export const TaskEventPayloadSchema = z.object({
+  task: TaskInfoPayloadSchema,
+  previous_status: TaskStatusSchema.nullable().optional(),
+  reason: z.string().nullable().optional(),
+});
+
+// ─── Project Payloads ───
+
+export const ProjectStatusSchema = z.enum(["active", "paused", "stopped", "failed"]);
+
+export const RecoveryActionSchema = z.enum(["resume", "pause", "drop"]);
+
+export const PathGrantSchema = z.object({
+  workspace_id: z.string(),
+  subpath: z.string().optional().default("."),
+});
+
+export const WorkspaceMountSchema = z.object({
+  workspace_id: z.string(),
+  role: z.string().nullable().optional(),
+  default_for_agents: z.boolean().optional().default(false),
+});
+
+export const AgentSpecSchema = z.object({
+  name: z.string(),
+  cluster_id: z.string(),
+  manifest_ref: z.string().optional().default(""),
+  instance_manifest_path: z.string().optional().default(""),
+  system_prompt: z.string().optional().default(""),
+  abilities: z.array(z.string()).nullable().optional(),
+  path_grants: z.array(PathGrantSchema).optional().default([]),
+});
+
+export const ProjectInfoPayloadSchema = z.object({
+  project_id: z.string(),
+  name: z.string(),
+  manifest_ref: z.string().optional().default(""),
+  instance_manifest_dir: z.string().optional().default(""),
+  cluster_ids: z.array(z.string()).optional().default([]),
+  workspaces: z.array(WorkspaceMountSchema).optional().default([]),
+  db_path: z.string().optional().default(""),
+  agents: z.array(AgentSpecSchema).optional().default([]),
+  task_ids: z.array(z.string()).optional().default([]),
+  status: ProjectStatusSchema.optional().default("active"),
+  recovery: RecoveryActionSchema.optional().default("resume"),
+  version: z.number().int().optional().default(1),
+  created_at: z.string().optional().default(""),
+  updated_at: z.string().optional().default(""),
+  deleted_at: z.string().nullable().optional(),
+});
+
+export const ProjectCreatePayloadSchema = z.object({
+  name: z.string(),
+  manifest_ref: z.string().optional().default(""),
+  default_workspace_locator: z.string().optional().default(""),
+  default_workspace_name: z.string().optional().default(""),
+  instance_manifest_dir: z.string().optional().default(".ghrah/agents"),
+  recovery: RecoveryActionSchema.optional().default("resume"),
+});
+
+export const ProjectUpdatePayloadSchema = z.object({
+  project_id: z.string(),
+  name: z.string().nullable().optional(),
+  manifest_ref: z.string().nullable().optional(),
+  instance_manifest_dir: z.string().nullable().optional(),
+  expected_version: z.number().int().nullable().optional(),
+});
+
+export const ProjectIdPayloadSchema = z.object({
+  project_id: z.string(),
+});
+
+export const ProjectDeletePayloadSchema = z.object({
+  project_id: z.string(),
+  force: z.boolean().optional().default(false),
+});
+
+export const ProjectListPayloadSchema = z.object({
+  status: ProjectStatusSchema.nullable().optional(),
+  include_deleted: z.boolean().optional().default(false),
+});
+
+export const ProjectAddAgentPayloadSchema = z.object({
+  project_id: z.string(),
+  agent: AgentSpecSchema,
+  expected_version: z.number().int().nullable().optional(),
+});
+
+export const ProjectRemoveAgentPayloadSchema = z.object({
+  project_id: z.string(),
+  agent_name: z.string(),
+  expected_version: z.number().int().nullable().optional(),
+});
+
+export const ProjectLinkTaskPayloadSchema = z.object({
+  project_id: z.string(),
+  task_id: z.string(),
+  expected_version: z.number().int().nullable().optional(),
+});
+
+export const ProjectUnlinkTaskPayloadSchema = z.object({
+  project_id: z.string(),
+  task_id: z.string(),
+  expected_version: z.number().int().nullable().optional(),
+});
+
+export const ProjectSetRecoveryPayloadSchema = z.object({
+  project_id: z.string(),
+  recovery: RecoveryActionSchema.optional().default("resume"),
+  expected_version: z.number().int().nullable().optional(),
+});
+
+export const ProjectListResultPayloadSchema = z.object({
+  projects: z.array(ProjectInfoPayloadSchema).optional().default([]),
+  count: z.number().int().optional().default(0),
+});
+
+// ─── Project Event Payloads ───
+
+export const ProjectEventPayloadSchema = z.object({
+  project: ProjectInfoPayloadSchema,
+});
+
+export const ProjectAgentEventPayloadSchema = z.object({
+  project: ProjectInfoPayloadSchema,
+  agent_name: z.string(),
+});
+
+// ─── Room Payloads ───
+
+export const RoomSubjectTypeSchema = z.enum(["agent", "human"]);
+
+export const RoomStatusSchema = z.enum(["active", "archived"]);
+
+export const RoomMemberSchema = z.object({
+  subject: z.string(),
+  subject_type: RoomSubjectTypeSchema,
+  joined_at: z.string().optional().default(""),
+});
+
+export const RoomInfoPayloadSchema = z.object({
+  room_id: z.string(),
+  project_id: z.string(),
+  name: z.string(),
+  status: RoomStatusSchema.optional().default("active"),
+  members: z.array(RoomMemberSchema).optional().default([]),
+  seq_watermark: z.number().int().optional().default(0),
+  version: z.number().int().optional().default(1),
+  created_at: z.string().optional().default(""),
+  updated_at: z.string().optional().default(""),
+});
+
+export const RoomLogEntryPayloadSchema = z.object({
+  id: z.string(),
+  room_id: z.string(),
+  seq: z.number().int(),
+  author: z.string(),
+  author_type: RoomSubjectTypeSchema,
+  timestamp: z.number(),
+  data: z.record(z.unknown()).optional().default({}),
+});
+
+export const RoomCreatePayloadSchema = z.object({
+  project_id: z.string(),
+  name: z.string(),
+});
+
+export const RoomListPayloadSchema = z.object({
+  project_id: z.string().nullable().optional(),
+  status: RoomStatusSchema.nullable().optional(),
+});
+
+export const RoomIdPayloadSchema = z.object({
+  room_id: z.string(),
+});
+
+export const RoomUpdatePayloadSchema = z.object({
+  room_id: z.string(),
+  name: z.string().nullable().optional(),
+  expected_version: z.number().int().nullable().optional(),
+});
+
+export const RoomDeletePayloadSchema = z.object({
+  room_id: z.string(),
+  force: z.boolean().optional().default(false),
+});
+
+export const RoomJoinPayloadSchema = z.object({
+  room_id: z.string(),
+  subject: z.string(),
+  subject_type: RoomSubjectTypeSchema,
+});
+
+export const RoomLeavePayloadSchema = z.object({
+  room_id: z.string(),
+  subject: z.string(),
+});
+
+export const RoomGetLogPayloadSchema = z.object({
+  room_id: z.string(),
+  since_seq: z.number().int().nullable().optional(),
+  limit: z.number().int().optional().default(100),
+});
+
+export const RoomSendPayloadSchema = z.object({
+  room_id: z.string(),
+  author: z.string(),
+  author_type: RoomSubjectTypeSchema,
+  data: z.record(z.unknown()).optional().default({}),
+});
+
+export const RoomListResultPayloadSchema = z.object({
+  rooms: z.array(RoomInfoPayloadSchema).optional().default([]),
+  count: z.number().int().optional().default(0),
+});
+
+export const RoomLogResultPayloadSchema = z.object({
+  entries: z.array(RoomLogEntryPayloadSchema).optional().default([]),
+  count: z.number().int().optional().default(0),
+});
+
+// ─── Room Event Payloads ───
+
+export const RoomEventPayloadSchema = z.object({
+  room: RoomInfoPayloadSchema,
+});
+
+export const RoomDeletedEventPayloadSchema = z.object({
+  room_id: z.string(),
+  project_id: z.string(),
+});
+
+export const RoomMemberEventPayloadSchema = z.object({
+  room: RoomInfoPayloadSchema,
+  member: RoomMemberSchema.nullable().optional(),
+  subject: z.string().nullable().optional(),
+});
+
+export const RoomLogEventPayloadSchema = z.object({
+  entry: RoomLogEntryPayloadSchema,
+});
+
 export type AgentConfigPayload = z.infer<typeof AgentConfigPayloadSchema>;
 export type AbilityDefinitionPayload = z.infer<typeof AbilityDefinitionPayloadSchema>;
 export type SpawnAgentPayload = z.infer<typeof SpawnAgentPayloadSchema>;
@@ -442,3 +791,57 @@ export type ManifestValidatePayload = z.infer<typeof ManifestValidatePayloadSche
 export type ManifestResolvePayload = z.infer<typeof ManifestResolvePayloadSchema>;
 export type ManifestAbilityEventPayload = z.infer<typeof ManifestAbilityEventPayloadSchema>;
 export type ManifestAgentEventPayload = z.infer<typeof ManifestAgentEventPayloadSchema>;
+export type TaskStatus = z.infer<typeof TaskStatusSchema>;
+export type TaskPriority = z.infer<typeof TaskPrioritySchema>;
+export type TaskInfoPayload = z.infer<typeof TaskInfoPayloadSchema>;
+export type TaskCreatePayload = z.infer<typeof TaskCreatePayloadSchema>;
+export type TaskUpdatePayload = z.infer<typeof TaskUpdatePayloadSchema>;
+export type TaskIdPayload = z.infer<typeof TaskIdPayloadSchema>;
+export type TaskAssignPayload = z.infer<typeof TaskAssignPayloadSchema>;
+export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
+export type TaskFailPayload = z.infer<typeof TaskFailPayloadSchema>;
+export type TaskCancelPayload = z.infer<typeof TaskCancelPayloadSchema>;
+export type TaskBlockPayload = z.infer<typeof TaskBlockPayloadSchema>;
+export type TaskListPayload = z.infer<typeof TaskListPayloadSchema>;
+export type TaskDeletePayload = z.infer<typeof TaskDeletePayloadSchema>;
+export type TaskListResultPayload = z.infer<typeof TaskListResultPayloadSchema>;
+export type TaskEventPayload = z.infer<typeof TaskEventPayloadSchema>;
+export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
+export type RecoveryAction = z.infer<typeof RecoveryActionSchema>;
+export type PathGrant = z.infer<typeof PathGrantSchema>;
+export type WorkspaceMount = z.infer<typeof WorkspaceMountSchema>;
+export type AgentSpec = z.infer<typeof AgentSpecSchema>;
+export type ProjectInfoPayload = z.infer<typeof ProjectInfoPayloadSchema>;
+export type ProjectCreatePayload = z.infer<typeof ProjectCreatePayloadSchema>;
+export type ProjectUpdatePayload = z.infer<typeof ProjectUpdatePayloadSchema>;
+export type ProjectIdPayload = z.infer<typeof ProjectIdPayloadSchema>;
+export type ProjectDeletePayload = z.infer<typeof ProjectDeletePayloadSchema>;
+export type ProjectListPayload = z.infer<typeof ProjectListPayloadSchema>;
+export type ProjectAddAgentPayload = z.infer<typeof ProjectAddAgentPayloadSchema>;
+export type ProjectRemoveAgentPayload = z.infer<typeof ProjectRemoveAgentPayloadSchema>;
+export type ProjectLinkTaskPayload = z.infer<typeof ProjectLinkTaskPayloadSchema>;
+export type ProjectUnlinkTaskPayload = z.infer<typeof ProjectUnlinkTaskPayloadSchema>;
+export type ProjectSetRecoveryPayload = z.infer<typeof ProjectSetRecoveryPayloadSchema>;
+export type ProjectListResultPayload = z.infer<typeof ProjectListResultPayloadSchema>;
+export type ProjectEventPayload = z.infer<typeof ProjectEventPayloadSchema>;
+export type ProjectAgentEventPayload = z.infer<typeof ProjectAgentEventPayloadSchema>;
+export type RoomSubjectType = z.infer<typeof RoomSubjectTypeSchema>;
+export type RoomStatus = z.infer<typeof RoomStatusSchema>;
+export type RoomMember = z.infer<typeof RoomMemberSchema>;
+export type RoomInfoPayload = z.infer<typeof RoomInfoPayloadSchema>;
+export type RoomLogEntryPayload = z.infer<typeof RoomLogEntryPayloadSchema>;
+export type RoomCreatePayload = z.infer<typeof RoomCreatePayloadSchema>;
+export type RoomListPayload = z.infer<typeof RoomListPayloadSchema>;
+export type RoomIdPayload = z.infer<typeof RoomIdPayloadSchema>;
+export type RoomUpdatePayload = z.infer<typeof RoomUpdatePayloadSchema>;
+export type RoomDeletePayload = z.infer<typeof RoomDeletePayloadSchema>;
+export type RoomJoinPayload = z.infer<typeof RoomJoinPayloadSchema>;
+export type RoomLeavePayload = z.infer<typeof RoomLeavePayloadSchema>;
+export type RoomGetLogPayload = z.infer<typeof RoomGetLogPayloadSchema>;
+export type RoomSendPayload = z.infer<typeof RoomSendPayloadSchema>;
+export type RoomListResultPayload = z.infer<typeof RoomListResultPayloadSchema>;
+export type RoomLogResultPayload = z.infer<typeof RoomLogResultPayloadSchema>;
+export type RoomEventPayload = z.infer<typeof RoomEventPayloadSchema>;
+export type RoomDeletedEventPayload = z.infer<typeof RoomDeletedEventPayloadSchema>;
+export type RoomMemberEventPayload = z.infer<typeof RoomMemberEventPayloadSchema>;
+export type RoomLogEventPayload = z.infer<typeof RoomLogEventPayloadSchema>;

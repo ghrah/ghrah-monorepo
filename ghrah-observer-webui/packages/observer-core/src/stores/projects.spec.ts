@@ -1,0 +1,89 @@
+import type { ProjectInfoPayload } from "@ghrah/protocol";
+import { createPinia, setActivePinia } from "pinia";
+import { beforeEach, describe, expect, it } from "vitest";
+import { useProjectsStore } from "./projects.js";
+
+function makeProject(overrides: Partial<ProjectInfoPayload> = {}): ProjectInfoPayload {
+  return {
+    project_id: "p1",
+    name: "proj-1",
+    manifest_ref: "",
+    instance_manifest_dir: "",
+    cluster_ids: [],
+    workspaces: [],
+    db_path: "",
+    agents: [],
+    task_ids: [],
+    status: "active",
+    recovery: "resume",
+    version: 1,
+    created_at: "",
+    updated_at: "",
+    ...overrides,
+  };
+}
+
+describe("useProjectsStore", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it("starts empty", () => {
+    const store = useProjectsStore();
+    expect(store.projects.size).toBe(0);
+    expect(store.activeProjectId).toBeNull();
+    expect(store.activeProject).toBeNull();
+  });
+
+  it("onProjectEvent upserts for created/updated/paused/resumed/stopped", () => {
+    const store = useProjectsStore();
+    store.onProjectEvent({ project: makeProject() });
+    expect(store.projects.size).toBe(1);
+    store.onProjectEvent({ project: makeProject({ status: "paused", version: 2 }) });
+    expect(store.projects.size).toBe(1);
+    expect(store.projects.get("p1")?.status).toBe("paused");
+  });
+
+  it("onProjectEvent handles agent envelope {project, agent_name}", () => {
+    const store = useProjectsStore();
+    store.onProjectEvent({
+      project: makeProject({
+        agents: [{ name: "agent-1", cluster_id: "c1", path_grants: [] }],
+      }),
+      agent_name: "agent-1",
+    });
+    expect(store.projects.get("p1")?.agents).toHaveLength(1);
+  });
+
+  it("onProjectDeleted removes project and resets activeProjectId", () => {
+    const store = useProjectsStore();
+    store.onProjectEvent({ project: makeProject() });
+    store.setActiveProject("p1");
+    store.onProjectDeleted({ project: makeProject() });
+    expect(store.projects.size).toBe(0);
+    expect(store.activeProjectId).toBeNull();
+  });
+
+  it("setProjectsFromList replaces map", () => {
+    const store = useProjectsStore();
+    store.onProjectEvent({ project: makeProject({ project_id: "old" }) });
+    store.setProjectsFromList([makeProject({ project_id: "p1" }), makeProject({ project_id: "p2" })]);
+    expect([...store.projects.keys()].sort()).toEqual(["p1", "p2"]);
+  });
+
+  it("activeProject follows activeProjectId", () => {
+    const store = useProjectsStore();
+    store.setProjectsFromList([makeProject({ project_id: "p1" }), makeProject({ project_id: "p2", name: "two" })]);
+    store.setActiveProject("p2");
+    expect(store.activeProject?.name).toBe("two");
+  });
+
+  it("clearAll resets", () => {
+    const store = useProjectsStore();
+    store.onProjectEvent({ project: makeProject() });
+    store.setActiveProject("p1");
+    store.clearAll();
+    expect(store.projects.size).toBe(0);
+    expect(store.activeProjectId).toBeNull();
+  });
+});

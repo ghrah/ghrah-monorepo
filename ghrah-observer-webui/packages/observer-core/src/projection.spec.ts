@@ -1,10 +1,11 @@
-import type { ActionNode, ContentBlock } from "@ghrah/protocol";
+import type { ActionNode, ContentBlock, RoomLogEntryPayload } from "@ghrah/protocol";
 import { ActionNodeSchema } from "@ghrah/protocol";
 import { describe, expect, it } from "vitest";
 import {
   projectNodeToChatEntries,
   projectNodeToFileChanges,
   rebuildChatEntriesFromChain,
+  roomLogToChatEntries,
 } from "./projection.js";
 
 function makeNode(overrides: Partial<ActionNode> = {}): ActionNode {
@@ -207,6 +208,50 @@ describe("rebuildChatEntriesFromChain", () => {
       "n1:human_input",
       "n2:conversation",
     ]);
+  });
+});
+
+describe("roomLogToChatEntries", () => {
+  function makeRoomEntry(overrides: Partial<RoomLogEntryPayload> = {}): RoomLogEntryPayload {
+    return {
+      id: "e1",
+      room_id: "r1",
+      seq: 3,
+      author: "agent-1",
+      author_type: "agent",
+      timestamp: 1750000000,
+      data: { message: "hi from room" },
+      ...overrides,
+    };
+  }
+
+  it("agent entry → conversation, content from data.message", () => {
+    const e = roomLogToChatEntries(makeRoomEntry());
+    expect(e).toMatchObject({
+      from: "agent-1",
+      to: "r1",
+      content: "hi from room",
+      kind: "conversation",
+      nodeId: "e1",
+      childSeq: 3,
+      agentName: "agent-1",
+      roomId: "r1",
+    });
+    expect(e.timestamp).toBe(new Date(1750000000 * 1000).toISOString());
+  });
+
+  it("human entry → human_input", () => {
+    const e = roomLogToChatEntries(
+      makeRoomEntry({ author: "user", author_type: "human", data: { message: "hello" } }),
+    );
+    expect(e.kind).toBe("human_input");
+    expect(e.from).toBe("user");
+    expect(e.agentName).toBe("");
+  });
+
+  it("data 缺 message 时 content 回退 JSON.stringify(data)", () => {
+    const e = roomLogToChatEntries(makeRoomEntry({ data: { foo: 1 } }));
+    expect(e.content).toBe(JSON.stringify({ foo: 1 }));
   });
 });
 
