@@ -229,6 +229,8 @@ def default_core_unit_factory(config: SubjectConfig) -> Callable[[str], Any]:
             cluster_id=cluster_id,
             hitl_timeout=config.core.command_timeout,
             workspace_root=config.workspace_root,
+            auto_approve_abilities=tuple(config.hitl_policy.auto_approve_abilities),
+            require_approval_by_default=config.hitl_policy.require_approval_by_default,
             persistence_factory=persistence_factory,
         )
         return create_core_unit(core_config)
