@@ -985,6 +985,7 @@ class GetChainHistoryPayload(BaseModel):
     """get_chain_history 命令载荷。"""
 
     agent_name: str
+    project_id: str | None = None
     branch_name: str = "main"
     limit: int = -1
 
@@ -1166,7 +1167,7 @@ class ProjectInfoPayload(BaseModel):
     对齐 ghrah-subject project/models.ProjectRecord，用于 project_get/project_list
     结果项及 PROJECT_* 事件回执。version/deleted_at/cluster_ids/workspaces/
     project_root_locator 为 Subject 独占内部状态 Root；workspaces 为 Agent 工作资源。
-    db_path 为 ProjectRecord 兼容字段；命令 payload 子类按需复用并追加入参字段。
+    Project 内部存储位置统一由 ``project_root_locator`` 派生。
     """
 
     project_id: str
@@ -1174,10 +1175,8 @@ class ProjectInfoPayload(BaseModel):
     description: str = ""
     project_root_locator: str = ""
     manifest_ref: str = ""
-    instance_manifest_dir: str = ""
     cluster_ids: list[str] = Field(default_factory=list)
     workspaces: list[WorkspaceMountSchema] = Field(default_factory=list)
-    db_path: str = ""
     agents: list[AgentSpecSchema] = Field(default_factory=list)
     task_ids: list[str] = Field(default_factory=list)
     status: ProjectStatus = ProjectStatus.ACTIVE
@@ -1196,9 +1195,6 @@ class ProjectCreatePayload(BaseModel):
     project_root_locator: str = ""
     writable_workspaces: list[WritableWorkspaceSpec] = Field(default_factory=list)
     manifest_ref: str = ""
-    default_workspace_locator: str = ""
-    default_workspace_name: str = ""
-    instance_manifest_dir: str = ".ghrah/agents"
     recovery: str = RecoveryAction.RESUME.value
 
 
@@ -1209,7 +1205,6 @@ class ProjectUpdatePayload(BaseModel):
     name: str | None = None
     description: str | None = None
     manifest_ref: str | None = None
-    instance_manifest_dir: str | None = None
     expected_version: int | None = None
 
 
@@ -1224,6 +1219,7 @@ class ProjectDeletePayload(ProjectIdPayload):
     """project_delete 命令载荷。"""
 
     force: bool = False
+    purge_storage: bool = False
 
 
 class ProjectListPayload(BaseModel):
