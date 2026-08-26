@@ -1139,6 +1139,15 @@ class WorkspaceMountSchema(BaseModel):
     default_for_agents: bool = False
 
 
+class WritableWorkspaceSpec(BaseModel):
+    """project_create 时登记的默认批准读写 Workspace。"""
+
+    locator: str
+    name: str = ""
+    role: str | None = None
+    default_for_agents: bool = False
+
+
 class AgentSpecSchema(BaseModel):
     """Project 内 agent desired-state 摘要。"""
 
@@ -1156,11 +1165,14 @@ class ProjectInfoPayload(BaseModel):
 
     对齐 ghrah-subject project/models.ProjectRecord，用于 project_get/project_list
     结果项及 PROJECT_* 事件回执。version/deleted_at/cluster_ids/workspaces/
-    db_path 为 ProjectRecord 全量字段；命令 payload 子类按需复用并追加入参字段。
+    project_root_locator 为 Subject 独占内部状态 Root；workspaces 为 Agent 工作资源。
+    db_path 为 ProjectRecord 兼容字段；命令 payload 子类按需复用并追加入参字段。
     """
 
     project_id: str
     name: str
+    description: str = ""
+    project_root_locator: str = ""
     manifest_ref: str = ""
     instance_manifest_dir: str = ""
     cluster_ids: list[str] = Field(default_factory=list)
@@ -1180,6 +1192,9 @@ class ProjectCreatePayload(BaseModel):
     """project_create 命令载荷。"""
 
     name: str
+    description: str = ""
+    project_root_locator: str = ""
+    writable_workspaces: list[WritableWorkspaceSpec] = Field(default_factory=list)
     manifest_ref: str = ""
     default_workspace_locator: str = ""
     default_workspace_name: str = ""
@@ -1192,6 +1207,7 @@ class ProjectUpdatePayload(BaseModel):
 
     project_id: str
     name: str | None = None
+    description: str | None = None
     manifest_ref: str | None = None
     instance_manifest_dir: str | None = None
     expected_version: int | None = None
