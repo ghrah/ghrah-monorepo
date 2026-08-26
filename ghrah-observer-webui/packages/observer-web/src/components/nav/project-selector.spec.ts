@@ -67,12 +67,18 @@ describe("ProjectSelector", () => {
     const input = wrapper.find('input[placeholder="Project name"]');
     expect(input.exists()).toBe(true);
     await input.setValue("demo-project");
+    await wrapper.find('textarea[placeholder="What is this project for?"]').setValue("Demo app");
+    await wrapper.find('input[placeholder="/absolute/path/to/project"]').setValue("/work/demo");
     createProjectMock.mockResolvedValue({
       success: true,
       data: { project: { project_id: "p9", name: "demo-project" } },
     });
     await wrapper.find("form").trigger("submit.prevent");
-    expect(createProjectMock).toHaveBeenCalledWith("demo-project");
+    expect(createProjectMock).toHaveBeenCalledWith("demo-project", {
+      description: "Demo app",
+      defaultWorkspaceLocator: "/work/demo",
+      defaultWorkspaceName: "default",
+    });
     expect(switchProjectMock).toHaveBeenCalledWith("p9");
     // 成功后表单收起
     expect(wrapper.find('input[placeholder="Project name"]').exists()).toBe(false);
@@ -82,6 +88,7 @@ describe("ProjectSelector", () => {
     const wrapper = mount(ProjectSelector);
     await wrapper.find('button[title="New project"]').trigger("click");
     await wrapper.find('input[placeholder="Project name"]').setValue("dup");
+    await wrapper.find('input[placeholder="/absolute/path/to/project"]').setValue("/work/dup");
     createProjectMock.mockResolvedValue({
       success: false,
       error: "project already exists",

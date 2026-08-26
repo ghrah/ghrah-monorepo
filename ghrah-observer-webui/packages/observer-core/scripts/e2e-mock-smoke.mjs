@@ -147,7 +147,9 @@ async function main() {
   check("scenario targeted entry visible in room log", scenarioTargeted);
 
   // ── 6.6 UI 管理面链路：project_create → room_create → join/leave ──
-  const newProject = await client.createProject("smoke-project");
+  const newProject = await client.createProject("smoke-project", {
+    defaultWorkspaceLocator: "/tmp/ghrah-smoke-project",
+  });
   check(
     "project_create success",
     newProject.success && !!newProject.data?.project?.project_id,

@@ -7,6 +7,8 @@ function makeProject(overrides: Partial<ProjectInfoPayload> = {}): ProjectInfoPa
   return {
     project_id: "p1",
     name: "proj-1",
+    description: "",
+    project_root_locator: "",
     manifest_ref: "",
     instance_manifest_dir: "",
     cluster_ids: [],

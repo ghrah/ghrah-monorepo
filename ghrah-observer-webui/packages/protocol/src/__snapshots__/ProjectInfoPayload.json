@@ -1,6 +1,8 @@
 {
   "project_id": "proj-001",
   "name": "ghrah-demo",
+  "description": "Collaborative demo project",
+  "project_root_locator": "file:///srv/ghrah/projects/proj-001",
   "manifest_ref": "ghrah/demo",
   "instance_manifest_dir": ".ghrah/agents",
   "cluster_ids": ["cluster-1"],

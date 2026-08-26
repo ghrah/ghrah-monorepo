@@ -368,10 +368,17 @@ export class MockState {
 
   // ─── Project / Task（最小实现） ───
 
-  private _projectCreate(p: { name: string; manifest_ref?: string }): CommandOutcome {
+  private _projectCreate(p: {
+    name: string;
+    description?: string;
+    project_root_locator?: string;
+    manifest_ref?: string;
+  }): CommandOutcome {
     const project: ProjectInfoPayload = {
       project_id: uuid(),
       name: p.name,
+      description: p.description ?? "",
+      project_root_locator: p.project_root_locator ?? "",
       manifest_ref: p.manifest_ref ?? "",
       instance_manifest_dir: "",
       cluster_ids: [],

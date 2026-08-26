@@ -435,9 +435,44 @@ describe("ObserverClient", () => {
 
     it("createProject sends project_create", async () => {
       await connectClient(client, mockWs);
-      const parsed = await runRequest(client.createProject("proj", "ns.ref"));
+      const parsed = await runRequest(
+        client.createProject("proj", {
+          description: "Project description",
+          manifestRef: "ns.ref",
+          projectRootLocator: "/srv/ghrah/projects/proj",
+          writableWorkspaces: [
+            {
+              locator: "/srv/projects/proj",
+              name: "source",
+              role: "default",
+              defaultForAgents: true,
+            },
+          ],
+        }),
+      );
       expect(parsed.type).toBe(CommandType.PROJECT_CREATE);
-      expect(parsed.payload).toEqual({ name: "proj", manifest_ref: "ns.ref" });
+      expect(parsed.payload).toEqual({
+        name: "proj",
+        description: "Project description",
+        manifest_ref: "ns.ref",
+        project_root_locator: "/srv/ghrah/projects/proj",
+        writable_workspaces: [
+          {
+            locator: "/srv/projects/proj",
+            name: "source",
+            role: "default",
+            default_for_agents: true,
+          },
+        ],
+      });
+    });
+
+    it("createProject preserves an explicit empty writable workspace list", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(
+        client.createProject("private-project", { writableWorkspaces: [] }),
+      );
+      expect(parsed.payload).toEqual({ name: "private-project", writable_workspaces: [] });
     });
 
     it("listProjects sends project_list", async () => {

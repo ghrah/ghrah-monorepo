@@ -153,6 +153,8 @@ export {
   ProjectUnlinkTaskPayloadSchema,
   type ProjectUpdatePayload,
   ProjectUpdatePayloadSchema,
+  type WritableWorkspaceSpec,
+  WritableWorkspaceSpecSchema,
   type RecoveryAction,
   RecoveryActionSchema,
   type RegisterAbilityPayload,

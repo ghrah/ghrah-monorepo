@@ -4,13 +4,29 @@ import {
   ClientType,
   type CommandResultPayload,
   CommandType,
+  generateRequestId,
   type RoomSubjectType,
   ServerClient,
   type ServerMessage,
-  type TaskPriority,
-  generateRequestId,
   type SubscribePayload,
+  type TaskPriority,
 } from "@ghrah/protocol";
+
+export interface CreateProjectOptions {
+  description?: string;
+  manifestRef?: string | null;
+  projectRootLocator?: string;
+  writableWorkspaces?: Array<{
+    locator: string;
+    name?: string;
+    role?: string | null;
+    defaultForAgents?: boolean;
+  }>;
+  /** @deprecated Use writableWorkspaces. */
+  defaultWorkspaceLocator?: string;
+  /** @deprecated Use writableWorkspaces. */
+  defaultWorkspaceName?: string;
+}
 
 export class ObserverClient extends ServerClient {
   async subscribe(agentNames?: string[] | null, eventTypes?: string[] | null): Promise<void> {
@@ -613,9 +629,29 @@ export class ObserverClient extends ServerClient {
 
   // ── Project ──
 
-  async createProject(name: string, manifestRef?: string | null): Promise<CommandResultPayload> {
+  async createProject(name: string, options: CreateProjectOptions): Promise<CommandResultPayload> {
     const payload: Record<string, unknown> = { name };
-    if (manifestRef != null) payload["manifest_ref"] = manifestRef;
+    if (options.description) payload["description"] = options.description;
+    if (options.manifestRef != null) payload["manifest_ref"] = options.manifestRef;
+    if (options.projectRootLocator) {
+      payload["project_root_locator"] = options.projectRootLocator;
+    }
+    if (options.writableWorkspaces !== undefined) {
+      payload["writable_workspaces"] = options.writableWorkspaces.map((workspace) => ({
+        locator: workspace.locator,
+        ...(workspace.name ? { name: workspace.name } : {}),
+        ...(workspace.role !== undefined ? { role: workspace.role } : {}),
+        ...(workspace.defaultForAgents !== undefined
+          ? { default_for_agents: workspace.defaultForAgents }
+          : {}),
+      }));
+    }
+    if (options.defaultWorkspaceLocator) {
+      payload["default_workspace_locator"] = options.defaultWorkspaceLocator;
+    }
+    if (options.defaultWorkspaceName) {
+      payload["default_workspace_name"] = options.defaultWorkspaceName;
+    }
 
     const msg: ServerMessage = {
       type: CommandType.PROJECT_CREATE,
@@ -651,10 +687,16 @@ export class ObserverClient extends ServerClient {
 
   async updateProject(
     projectId: string,
-    fields: { name?: string | null; manifestRef?: string | null; expectedVersion?: number | null },
+    fields: {
+      name?: string | null;
+      description?: string | null;
+      manifestRef?: string | null;
+      expectedVersion?: number | null;
+    },
   ): Promise<CommandResultPayload> {
     const payload: Record<string, unknown> = { project_id: projectId };
     if (fields.name != null) payload["name"] = fields.name;
+    if (fields.description != null) payload["description"] = fields.description;
     if (fields.manifestRef != null) payload["manifest_ref"] = fields.manifestRef;
     if (fields.expectedVersion != null) payload["expected_version"] = fields.expectedVersion;
 

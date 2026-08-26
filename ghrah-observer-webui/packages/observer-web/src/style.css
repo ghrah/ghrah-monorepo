@@ -349,7 +349,7 @@ button:focus-visible,
   top: -7px;
   left: calc(100% + 18px);
   z-index: 20;
-  width: 270px;
+  width: 360px;
   box-sizing: border-box;
   padding: 12px;
   border: 1px solid #d8dde6;
@@ -371,7 +371,7 @@ button:focus-visible,
   transform: rotate(45deg);
 }
 
-.project-create-popover label {
+.project-create-fields label {
   display: block;
   margin-bottom: 7px;
   color: #626979;
@@ -379,9 +379,27 @@ button:focus-visible,
   font-weight: 700;
 }
 
-.project-create-row {
+.project-create-header,
+.project-create-actions {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 6px;
+}
+
+.project-create-header {
+  margin-bottom: 12px;
+  color: #272b38;
+  font-size: 13px;
+}
+
+.project-create-fields {
+  display: grid;
+}
+
+.project-create-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 .project-create-input {
@@ -393,6 +411,18 @@ button:focus-visible,
   background: #fff;
   color: #272b38;
   font-size: 12px;
+}
+
+.project-create-textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.project-create-hint {
+  margin: -2px 0 10px;
+  color: #7a8291;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 .project-create-cancel {
@@ -659,6 +689,10 @@ button:focus-visible,
 :root.dark .project-create-input {
   border-color: #3b4250;
   background: #20252f;
+  color: #eef0f5;
+}
+
+:root.dark .project-create-header {
   color: #eef0f5;
 }
 

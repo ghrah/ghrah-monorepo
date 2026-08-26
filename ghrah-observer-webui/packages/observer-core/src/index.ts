@@ -1,5 +1,5 @@
-export { connectStores, type ConnectStoresOptions } from "./bind.js";
-export { ObserverClient } from "./client.js";
+export { type ConnectStoresOptions, connectStores } from "./bind.js";
+export { type CreateProjectOptions, ObserverClient } from "./client.js";
 export {
   createFrameBatcher,
   createSyncBatcher,

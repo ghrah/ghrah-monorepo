@@ -2,6 +2,7 @@ import {
   type AbilityManifestInfo,
   type AgentManifestInfo,
   connectStores,
+  type CreateProjectOptions,
   extractAbilityList,
   extractAgentList,
   extractManifestEntry,
@@ -203,8 +204,8 @@ export function useObserver() {
     return withClient((c) => c.listProjects());
   }
 
-  async function createProject(name: string, manifestRef?: string | null) {
-    return withClient((c) => c.createProject(name, manifestRef ?? null));
+  async function createProject(name: string, options: CreateProjectOptions) {
+    return withClient((c) => c.createProject(name, options));
   }
 
   /** 切换 active room；缓存缺失时拉历史。 */

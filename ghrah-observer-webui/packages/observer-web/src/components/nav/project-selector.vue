@@ -8,26 +8,40 @@ const { switchProject, createProject, error } = useObserver();
 
 const creating = ref(false);
 const newName = ref("");
+const newDescription = ref("");
+const newWorkspaceLocator = ref("");
+const newWorkspaceName = ref("default");
 const busy = ref(false);
 const nameInput = ref<HTMLInputElement | null>(null);
 
 function startCreate() {
   creating.value = true;
   newName.value = "";
+  newDescription.value = "";
+  newWorkspaceLocator.value = "";
+  newWorkspaceName.value = "default";
   void nextTick(() => nameInput.value?.focus());
 }
 
 function cancelCreate() {
   creating.value = false;
   newName.value = "";
+  newDescription.value = "";
+  newWorkspaceLocator.value = "";
+  newWorkspaceName.value = "default";
 }
 
 async function submitCreate() {
   const name = newName.value.trim();
-  if (!name || busy.value) return;
+  const workspaceLocator = newWorkspaceLocator.value.trim();
+  if (!name || !workspaceLocator || busy.value) return;
   busy.value = true;
   try {
-    const result = await createProject(name);
+    const result = await createProject(name, {
+      description: newDescription.value.trim(),
+      defaultWorkspaceLocator: workspaceLocator,
+      defaultWorkspaceName: newWorkspaceName.value.trim() || "default",
+    });
     if (result?.success) {
       // PROJECT_CREATED 事件驱动 store 后选定新 project
       const created = (result.data as { project?: { project_id: string } } | undefined)?.project;
@@ -88,8 +102,19 @@ async function submitCreate() {
       </button>
 
       <form v-else class="project-create-popover" @submit.prevent="submitCreate">
-        <label for="new-project-name">Create project</label>
-        <div class="project-create-row">
+        <div class="project-create-header">
+          <strong>Create project</strong>
+          <button
+            type="button"
+            class="project-create-cancel"
+            aria-label="Cancel"
+            @click="cancelCreate"
+          >
+            ×
+          </button>
+        </div>
+        <div class="project-create-fields">
+          <label for="new-project-name">Project name</label>
           <input
             id="new-project-name"
             ref="nameInput"
@@ -99,16 +124,44 @@ async function submitCreate() {
             class="project-create-input"
             @keydown.esc="cancelCreate"
           />
-          <button type="submit" class="btn-primary" :disabled="busy || !newName.trim()">
-            {{ busy ? "…" : "Create" }}
-          </button>
+          <label for="new-project-description">Description</label>
+          <textarea
+            id="new-project-description"
+            v-model="newDescription"
+            rows="3"
+            placeholder="What is this project for?"
+            class="project-create-input project-create-textarea"
+            @keydown.esc="cancelCreate"
+          />
+          <label for="new-project-workspace">Default workspace folder</label>
+          <input
+            id="new-project-workspace"
+            v-model="newWorkspaceLocator"
+            type="text"
+            placeholder="/absolute/path/to/project"
+            class="project-create-input"
+            @keydown.esc="cancelCreate"
+          />
+          <p class="project-create-hint">
+            Use a unique folder that does not contain, or sit inside, another project's workspace.
+          </p>
+          <label for="new-project-workspace-name">Workspace name</label>
+          <input
+            id="new-project-workspace-name"
+            v-model="newWorkspaceName"
+            type="text"
+            placeholder="default"
+            class="project-create-input"
+            @keydown.esc="cancelCreate"
+          />
+        </div>
+        <div class="project-create-actions">
           <button
-            type="button"
-            class="project-create-cancel"
-            aria-label="Cancel"
-            @click="cancelCreate"
+            type="submit"
+            class="btn-primary"
+            :disabled="busy || !newName.trim() || !newWorkspaceLocator.trim()"
           >
-            ×
+            {{ busy ? "…" : "Create" }}
           </button>
         </div>
       </form>

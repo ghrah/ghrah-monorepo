@@ -515,6 +515,13 @@ export const WorkspaceMountSchema = z.object({
   default_for_agents: z.boolean().optional().default(false),
 });
 
+export const WritableWorkspaceSpecSchema = z.object({
+  locator: z.string(),
+  name: z.string().optional().default(""),
+  role: z.string().nullable().optional(),
+  default_for_agents: z.boolean().optional().default(false),
+});
+
 export const AgentSpecSchema = z.object({
   name: z.string(),
   cluster_id: z.string(),
@@ -528,6 +535,8 @@ export const AgentSpecSchema = z.object({
 export const ProjectInfoPayloadSchema = z.object({
   project_id: z.string(),
   name: z.string(),
+  description: z.string().optional().default(""),
+  project_root_locator: z.string().optional().default(""),
   manifest_ref: z.string().optional().default(""),
   instance_manifest_dir: z.string().optional().default(""),
   cluster_ids: z.array(z.string()).optional().default([]),
@@ -545,6 +554,9 @@ export const ProjectInfoPayloadSchema = z.object({
 
 export const ProjectCreatePayloadSchema = z.object({
   name: z.string(),
+  description: z.string().optional().default(""),
+  project_root_locator: z.string().optional().default(""),
+  writable_workspaces: z.array(WritableWorkspaceSpecSchema).optional().default([]),
   manifest_ref: z.string().optional().default(""),
   default_workspace_locator: z.string().optional().default(""),
   default_workspace_name: z.string().optional().default(""),
@@ -555,6 +567,7 @@ export const ProjectCreatePayloadSchema = z.object({
 export const ProjectUpdatePayloadSchema = z.object({
   project_id: z.string(),
   name: z.string().nullable().optional(),
+  description: z.string().nullable().optional(),
   manifest_ref: z.string().nullable().optional(),
   instance_manifest_dir: z.string().nullable().optional(),
   expected_version: z.number().int().nullable().optional(),
@@ -810,6 +823,7 @@ export type ProjectStatus = z.infer<typeof ProjectStatusSchema>;
 export type RecoveryAction = z.infer<typeof RecoveryActionSchema>;
 export type PathGrant = z.infer<typeof PathGrantSchema>;
 export type WorkspaceMount = z.infer<typeof WorkspaceMountSchema>;
+export type WritableWorkspaceSpec = z.infer<typeof WritableWorkspaceSpecSchema>;
 export type AgentSpec = z.infer<typeof AgentSpecSchema>;
 export type ProjectInfoPayload = z.infer<typeof ProjectInfoPayloadSchema>;
 export type ProjectCreatePayload = z.infer<typeof ProjectCreatePayloadSchema>;
