@@ -37,22 +37,26 @@ const statusText: Record<string, string> = {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
-    <header class="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-      <div class="flex items-center gap-3">
-        <h1 class="text-lg font-bold tracking-tight">Ghrah Observer</h1>
+  <div class="app-frame h-screen flex flex-col text-gray-900 dark:text-gray-100">
+    <header class="app-header">
+      <div class="brand-lockup">
+        <span class="brand-mark">G</span>
+        <div>
+          <h1>Ghrah</h1>
+          <span>Agent workspace</span>
+        </div>
         <span :class="['badge', statusClass[connection.state]]">
           <span :class="['inline-block w-2 h-2 rounded-full mr-1', statusDot[connection.state]]" />
           {{ statusText[connection.state] }}
         </span>
       </div>
-      <nav class="flex gap-1 text-sm">
+      <nav class="top-nav">
         <RouterLink to="/" :class="['px-3 py-1 rounded transition-colors', route.path === '/' ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800']">Dashboard</RouterLink>
         <RouterLink to="/changes" :class="['px-3 py-1 rounded transition-colors', route.path === '/changes' ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800']">Changes</RouterLink>
         <RouterLink to="/config" :class="['px-3 py-1 rounded transition-colors', route.path.startsWith('/config') ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800']">Config</RouterLink>
       </nav>
-      <div class="flex items-center gap-2 text-sm">
-        <span class="text-gray-500 dark:text-gray-400 font-mono text-sm">{{ connection.serverUrl }}</span>
+      <div class="connection-tools">
+        <span class="server-address">{{ connection.serverUrl }}</span>
         <button
           v-if="connection.state === 'connected'"
           class="btn-secondary"

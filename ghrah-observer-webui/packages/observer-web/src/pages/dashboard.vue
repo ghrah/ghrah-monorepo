@@ -1,31 +1,133 @@
 <script setup lang="ts">
+import { useAgentsStore, useRoomsStore } from "@ghrah/observer-core";
+import { computed, ref } from "vue";
 import ActionChainPanel from "@/components/action-chain/action-chain-panel.vue";
 import AgentList from "@/components/agent-list.vue";
 import ChatPanel from "@/components/chat/chat-panel.vue";
 import HitlInbox from "@/components/hitl/hitl-inbox.vue";
 import ProjectSelector from "@/components/nav/project-selector.vue";
 import RoomSelector from "@/components/nav/room-selector.vue";
+import { useObserver } from "@/composables/useObserver";
+
+type WorkspaceTab = {
+  id: string;
+  kind: "room" | "agent";
+  target: string;
+  label: string;
+};
+
+const rooms = useRoomsStore();
+const agents = useAgentsStore();
+const { switchRoom } = useObserver();
+const tabs = ref<WorkspaceTab[]>([]);
+const activeTabId = ref<string | null>(null);
+
+const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeTabId.value) ?? null);
+const activePanel = computed(() => {
+  if (activeTab.value?.kind === "room") return ChatPanel;
+  if (activeTab.value?.kind === "agent") return ActionChainPanel;
+  return null;
+});
+
+function openRoom(room: { room_id: string; name: string }) {
+  const id = `room:${room.room_id}`;
+  if (!tabs.value.some((tab) => tab.id === id)) {
+    tabs.value.push({ id, kind: "room", target: room.room_id, label: room.name });
+  }
+  activeTabId.value = id;
+}
+
+function openAgent(agentName: string) {
+  const id = `agent:${agentName}`;
+  if (!tabs.value.some((tab) => tab.id === id)) {
+    tabs.value.push({ id, kind: "agent", target: agentName, label: agentName });
+  }
+  activeTabId.value = id;
+}
+
+async function activateTab(tab: WorkspaceTab) {
+  activeTabId.value = tab.id;
+  if (tab.kind === "room" && rooms.activeRoomId !== tab.target) {
+    await switchRoom(tab.target);
+  }
+  if (tab.kind === "agent" && agents.selectedAgentName !== tab.target) {
+    agents.selectAgent(tab.target);
+  }
+}
+
+function closeTab(tab: WorkspaceTab) {
+  const index = tabs.value.findIndex((item) => item.id === tab.id);
+  if (index < 0) return;
+  const wasActive = activeTabId.value === tab.id;
+  tabs.value.splice(index, 1);
+  if (wasActive) {
+    const next = tabs.value[Math.min(index, tabs.value.length - 1)];
+    activeTabId.value = next?.id ?? null;
+    if (next) void activateTab(next);
+  }
+}
 </script>
 
 <template>
-  <div class="flex flex-col h-full">
-    <div class="flex flex-1 min-h-0">
-      <aside class="w-64 border-r border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-900 flex flex-col">
-        <ProjectSelector />
-        <RoomSelector />
-        <div class="flex-1 min-h-0 overflow-y-auto">
-          <AgentList />
+  <div class="workspace-shell">
+    <aside class="project-rail workspace-column" aria-label="Projects">
+      <ProjectSelector />
+    </aside>
+
+    <aside class="room-sidebar workspace-column" aria-label="Rooms">
+      <RoomSelector @open-room="openRoom" />
+    </aside>
+
+    <section class="workspace-main" aria-label="Workspace tabs">
+      <div class="workspace-tabs" role="tablist" aria-label="Open views">
+        <div class="tabs-scroll">
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            type="button"
+            :class="['workspace-tab', { active: activeTabId === tab.id }]"
+            role="tab"
+            :aria-selected="activeTabId === tab.id"
+            @click="activateTab(tab)"
+          >
+            <span :class="['tab-kind', tab.kind]">{{ tab.kind === "room" ? "#" : "◎" }}</span>
+            <span class="tab-label">{{ tab.label }}</span>
+            <span
+              class="tab-close"
+              role="button"
+              tabindex="0"
+              :aria-label="`Close ${tab.label}`"
+              @click.stop="closeTab(tab)"
+              @keydown.enter.stop="closeTab(tab)"
+            >×</span>
+          </button>
         </div>
-      </aside>
-      <section class="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-900">
-        <ChatPanel />
-      </section>
-      <aside class="w-72 border-l border-gray-200 dark:border-gray-700 overflow-y-auto bg-white dark:bg-gray-900">
-        <ActionChainPanel />
-      </aside>
-    </div>
-    <footer class="border-t border-gray-200 dark:border-gray-700 max-h-52 overflow-y-auto bg-white dark:bg-gray-900">
-      <HitlInbox />
-    </footer>
+        <span class="tab-count">{{ tabs.length }} open</span>
+      </div>
+
+      <div class="workspace-content">
+        <!-- KeepAlive 保留 ActionChain 增量缓存，同时让隐藏面板停止渲染更新。 -->
+        <KeepAlive>
+          <component :is="activePanel" v-if="activePanel" />
+        </KeepAlive>
+        <div v-if="!activeTab" class="workspace-empty">
+          <div class="empty-mark">⌘</div>
+          <h2>Your workspace is ready</h2>
+          <p>Open a room from the left to start a conversation, or choose an agent to inspect its ActionChain.</p>
+          <div class="empty-shortcuts">
+            <span class="shortcut-pill"><kbd>#</kbd> Room conversation</span>
+            <span class="shortcut-pill"><kbd>◎</kbd> Agent ActionChain</span>
+          </div>
+        </div>
+      </div>
+
+      <footer class="hitl-dock">
+        <HitlInbox />
+      </footer>
+    </section>
+
+    <aside class="agent-sidebar workspace-column" aria-label="Agents">
+      <AgentList @open-agent="openAgent" />
+    </aside>
   </div>
 </template>

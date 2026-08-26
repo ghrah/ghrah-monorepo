@@ -8,6 +8,9 @@ const rooms = useRoomsStore();
 const projects = useProjectsStore();
 const agents = useAgentsStore();
 const { switchRoom, createRoom, joinRoom, leaveRoom, error } = useObserver();
+const emit = defineEmits<{
+  openRoom: [room: { room_id: string; name: string }];
+}>();
 
 const visibleRooms = computed<RoomInfoPayload[]>(() => {
   const list = rooms.roomList;
@@ -32,6 +35,11 @@ function isMultiRoom(subject: string): boolean {
 
 function initial(subject: string): string {
   return subject.slice(0, 1).toUpperCase();
+}
+
+async function selectRoom(room: RoomInfoPayload) {
+  await switchRoom(room.room_id);
+  emit("openRoom", { room_id: room.room_id, name: room.name });
 }
 
 // ── 创建 room（active project 域内） ──
@@ -63,7 +71,10 @@ async function submitCreate() {
     const result = await createRoom(projectId, name);
     if (result?.success) {
       const created = (result.data as { room?: { room_id: string } } | undefined)?.room;
-      if (created?.room_id) await switchRoom(created.room_id);
+      if (created?.room_id) {
+        await switchRoom(created.room_id);
+        emit("openRoom", { room_id: created.room_id, name });
+      }
       cancelCreate();
     } else if (result && !result.success) {
       error.value = result.error ?? "创建失败";
@@ -119,9 +130,12 @@ async function removeMember(subject: string) {
 </script>
 
 <template>
-  <div class="p-3 border-b border-gray-200 dark:border-gray-700">
-    <div class="flex items-center justify-between mb-2">
-      <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Rooms</h3>
+  <div class="room-selector sidebar-section">
+    <div class="section-heading">
+      <div>
+        <span class="section-eyebrow">Workspace</span>
+        <h3>Rooms</h3>
+      </div>
       <div class="flex items-center gap-1">
         <button
           v-if="activeRoom"
@@ -176,7 +190,7 @@ async function removeMember(subject: string) {
             ? 'bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100 font-medium'
             : 'hover:bg-gray-100 dark:hover:bg-gray-800',
         ]"
-        @click="switchRoom(room.room_id)"
+        @click="selectRoom(room)"
       >
         <div class="flex items-center justify-between">
           <span class="truncate">{{ room.name }}</span>

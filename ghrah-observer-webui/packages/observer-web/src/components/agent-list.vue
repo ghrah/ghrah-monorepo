@@ -5,6 +5,7 @@ import AgentActionMenu from "@/components/agent-action-menu.vue";
 
 const agents = useAgentsStore();
 const rooms = useRoomsStore();
+const emit = defineEmits<{ openAgent: [agentName: string] }>();
 
 /** agent 名 → 所属 room 列表（RoomMember.subject_type === "agent"）。 */
 const agentRooms = computed<Map<string, string[]>>(() => {
@@ -23,12 +24,20 @@ const agentRooms = computed<Map<string, string[]>>(() => {
 function roomsOf(agentName: string): string[] {
   return agentRooms.value.get(agentName) ?? [];
 }
+
+function selectAgent(agentName: string) {
+  agents.selectAgent(agentName);
+  emit("openAgent", agentName);
+}
 </script>
 
 <template>
-  <div class="p-3 h-full flex flex-col">
-    <div class="flex items-center justify-between mb-3">
-      <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Agents</h3>
+  <div class="agent-list sidebar-section h-full flex flex-col">
+    <div class="section-heading">
+      <div>
+        <span class="section-eyebrow">Runtime</span>
+        <h3>Agents</h3>
+      </div>
       <RouterLink to="/config/agents" class="btn-primary">+ Spawn</RouterLink>
     </div>
 
@@ -42,7 +51,7 @@ function roomsOf(agentName: string): string[] {
             ? 'bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100 font-medium'
             : 'hover:bg-gray-100 dark:hover:bg-gray-800',
         ]"
-        @click="agents.selectAgent(agent.name)"
+        @click="selectAgent(agent.name)"
       >
         <span class="truncate">{{ agent.name }}</span>
         <div class="flex items-center gap-1">
