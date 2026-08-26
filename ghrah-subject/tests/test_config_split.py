@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -49,11 +50,11 @@ class TestFlatFieldCompat:
         assert cc.url == "ws://example:1234/ws"
         assert cc.command_timeout == 42
 
-    def test_legacy_construction_unchanged(self) -> None:
+    def test_legacy_construction_unchanged(self, tmp_path: Path) -> None:
         # 模拟 scripts/start_all.py:185 的构造调用（零改动）
         config = SubjectConfig(
-            workspace_root="/tmp/ws",
-            db_path="/tmp/subject.db",
+            workspace_root=str(tmp_path / "ws"),
+            db_path=str(tmp_path / "subject.db"),
             hitl_policy=HITLPolicyConfig(
                 auto_approve_abilities=["conversation", "read_file"],
                 require_approval_by_default=True,
@@ -63,8 +64,8 @@ class TestFlatFieldCompat:
                 command_timeout=300,
             ),
         )
-        assert config.workspace_root == "/tmp/ws"
-        assert config.db_path == "/tmp/subject.db"
+        assert config.workspace_root == str(tmp_path / "ws")
+        assert config.db_path == str(tmp_path / "subject.db")
         assert config.core.url == "ws://core:4111/ws"
         assert config.core.command_timeout == 300
         assert config.hitl_policy.auto_approve_abilities == ["conversation", "read_file"]
@@ -73,13 +74,13 @@ class TestFlatFieldCompat:
 class TestSliceDerivation:
     """未显式传入 slice 时，由 flat 字段派生。"""
 
-    def test_persistence_slice_derived(self) -> None:
-        config = SubjectConfig(db_path="/tmp/test.db")
-        assert config.persistence.db_path == "/tmp/test.db"
+    def test_persistence_slice_derived(self, tmp_path: Path) -> None:
+        config = SubjectConfig(db_path=str(tmp_path / "test.db"))
+        assert config.persistence.db_path == str(tmp_path / "test.db")
 
-    def test_sandbox_slice_derived_from_workspace_root(self) -> None:
-        config = SubjectConfig(workspace_root="/tmp/ws")
-        assert config.sandbox.workspace_root == "/tmp/ws"
+    def test_sandbox_slice_derived_from_workspace_root(self, tmp_path: Path) -> None:
+        config = SubjectConfig(workspace_root=str(tmp_path / "ws"))
+        assert config.sandbox.workspace_root == str(tmp_path / "ws")
 
     def test_sandbox_default_timeout_derives_from_core(self) -> None:
         # 默认派生：sandbox.default_timeout == core.command_timeout
@@ -90,9 +91,9 @@ class TestSliceDerivation:
         config = SubjectConfig(core=CoreTransportConfig(command_timeout=99.0))
         assert config.sandbox.default_timeout == 99.0
 
-    def test_manifest_slice_derived(self) -> None:
-        config = SubjectConfig(manifest_root="/tmp/manifests")
-        assert config.manifest.manifest_root == "/tmp/manifests"
+    def test_manifest_slice_derived(self, tmp_path: Path) -> None:
+        config = SubjectConfig(manifest_root=str(tmp_path / "manifests"))
+        assert config.manifest.manifest_root == str(tmp_path / "manifests")
 
     def test_hitl_slice_derived_from_hitl_policy(self) -> None:
         policy = HITLPolicyConfig(auto_approve_abilities=["x"])
@@ -104,30 +105,30 @@ class TestSliceDerivation:
 class TestSliceExplicitOverride:
     """slice 可显式传入，覆盖 flat 派生。"""
 
-    def test_persistence_slice_explicit(self) -> None:
+    def test_persistence_slice_explicit(self, tmp_path: Path) -> None:
         config = SubjectConfig(
-            db_path="/tmp/flat.db",
-            persistence_slice=PersistenceConfig(db_path="/tmp/slice.db"),
+            db_path=str(tmp_path / "flat.db"),
+            persistence_slice=PersistenceConfig(db_path=str(tmp_path / "slice.db")),
         )
-        assert config.persistence.db_path == "/tmp/slice.db"
+        assert config.persistence.db_path == str(tmp_path / "slice.db")
 
-    def test_sandbox_slice_explicit(self) -> None:
+    def test_sandbox_slice_explicit(self, tmp_path: Path) -> None:
         config = SubjectConfig(
-            workspace_root="/tmp/flat-ws",
+            workspace_root=str(tmp_path / "flat-ws"),
             sandbox_slice=SandboxUnitConfig(
-                workspace_root="/tmp/slice-ws",
+                workspace_root=str(tmp_path / "slice-ws"),
                 default_timeout=42.0,
             ),
         )
-        assert config.sandbox.workspace_root == "/tmp/slice-ws"
+        assert config.sandbox.workspace_root == str(tmp_path / "slice-ws")
         assert config.sandbox.default_timeout == 42.0
 
-    def test_manifest_slice_explicit(self) -> None:
+    def test_manifest_slice_explicit(self, tmp_path: Path) -> None:
         config = SubjectConfig(
-            manifest_root="/tmp/flat-man",
-            manifest_slice=ManifestConfig(manifest_root="/tmp/slice-man"),
+            manifest_root=str(tmp_path / "flat-man"),
+            manifest_slice=ManifestConfig(manifest_root=str(tmp_path / "slice-man")),
         )
-        assert config.manifest.manifest_root == "/tmp/slice-man"
+        assert config.manifest.manifest_root == str(tmp_path / "slice-man")
 
     def test_hitl_slice_explicit(self) -> None:
         slice_policy = HITLPolicyConfig(auto_approve_abilities=["slice-ability"])
@@ -225,16 +226,16 @@ class TestFromEnv:
         assert config.enabled_third_party_units == []
         assert "GHRAH_SUBJECT_SANDBOX_DEFAULT_TIMEOUT" not in caplog.text
 
-    def test_from_env_flat_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("GHRAH_SUBJECT_WORKSPACE_ROOT", "/tmp/env-ws")
-        monkeypatch.setenv("GHRAH_SUBJECT_DB_PATH", "/tmp/env.db")
-        monkeypatch.setenv("GHRAH_SUBJECT_MANIFEST_ROOT", "/tmp/env-man")
+    def test_from_env_flat_fields(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_WORKSPACE_ROOT", str(tmp_path / "env-ws"))
+        monkeypatch.setenv("GHRAH_SUBJECT_DB_PATH", str(tmp_path / "env.db"))
+        monkeypatch.setenv("GHRAH_SUBJECT_MANIFEST_ROOT", str(tmp_path / "env-man"))
         monkeypatch.setenv("GHRAH_SUBJECT_LOG_LEVEL", "DEBUG")
 
         config = SubjectConfig.from_env()
-        assert config.workspace_root == "/tmp/env-ws"
-        assert config.db_path == "/tmp/env.db"
-        assert config.manifest_root == "/tmp/env-man"
+        assert config.workspace_root == str(tmp_path / "env-ws")
+        assert config.db_path == str(tmp_path / "env.db")
+        assert config.manifest_root == str(tmp_path / "env-man")
         assert config.log_level == "DEBUG"
 
     def test_from_env_sandbox_timeout_fallback_to_core(
@@ -289,8 +290,10 @@ class TestFromEnv:
         # hitl slice 与 flat 字段一致（from_env 未显式传 hitl_slice，由 flat 派生）
         assert config.hitl is config.hitl_policy
 
-    def test_from_env_sandbox_workspace_derived(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("GHRAH_SUBJECT_WORKSPACE_ROOT", "/tmp/env-ws2")
+    def test_from_env_sandbox_workspace_derived(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_WORKSPACE_ROOT", str(tmp_path / "env-ws2"))
 
         config = SubjectConfig.from_env()
-        assert config.sandbox.workspace_root == "/tmp/env-ws2"
+        assert config.sandbox.workspace_root == str(tmp_path / "env-ws2")

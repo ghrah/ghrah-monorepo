@@ -28,6 +28,7 @@ from ghrah.subject.unit.base import RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units import mount_builtin_units
 from ghrah.subject.units.project import ProjectUnit
 from ghrah.subject.units.recovery import RecoveryUnit
+from ghrah.subject.workspace.providers.git import path_to_locator
 
 
 class _FakeCoreUnit(SubjectUnit):
@@ -132,7 +133,7 @@ class TestUnitsAssembly:
             result = await bridge_command(
                 ctx,
                 "project_create",
-                {"name": "P2", "default_workspace_locator": f"file://{tmp_path / 'p2'}"},
+                {"name": "P2", "default_workspace_locator": path_to_locator(str(tmp_path / "p2"))},
             )
             assert result["success"], result.get("error")
             assert result["data"]["project"]["name"] == "P2"

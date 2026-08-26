@@ -175,7 +175,7 @@ _WS1 = WorkspaceRecord(
     name="n",
     provider_type="git",
     subject_id="default",
-    locator="file:///tmp/x",
+    locator="file:///workspaces/ws1",
 )
 
 
@@ -240,7 +240,7 @@ class TestReconcile:
             name="n",
             provider_type="git",
             subject_id="default",
-            locator="file:///tmp/x",
+            locator="file:///workspaces/ws1",
         )
         svc, (_, project_mgr, _, _) = _make_service(
             desired_record=None,
@@ -302,7 +302,7 @@ class TestReconcile:
             name="n",
             provider_type="git",
             subject_id="default",
-            locator="file:///tmp/x",
+            locator="file:///workspaces/ws1",
         )
         svc, (_, _, cluster_transport, _) = _make_service(
             desired_record=record, workspace_records=[ws]

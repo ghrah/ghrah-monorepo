@@ -17,10 +17,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import shutil
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
+from ghrah.subject._fs import is_writable, robust_rmtree
 from ghrah.subject.workspace.errors import SnapshotError, WorkspaceProviderError
 from ghrah.subject.workspace.marker import (
     MarkerData,
@@ -43,21 +45,55 @@ logger = logging.getLogger(__name__)
 __all__ = ["GitWorkspaceProvider", "locator_to_path", "path_to_locator"]
 
 
+_DRIVE_NETLOC_RE = re.compile(r"^[A-Za-z]:$")
+
+
 def path_to_locator(path: str) -> str:
-    """本地绝对路径 → file:// URI。"""
-    return "file://" + path
+    """本地绝对路径 → file:// URI（``Path.as_uri()`` 规范形态）。
+
+    POSIX 上输出 ``file:///abs/path``（与历史拼接格式逐字节一致）；
+    Windows 上输出 ``file:///C:/ws/a``（正斜杠 + 百分号编码），保证
+    round-trip 与 URI 合法性。
+    """
+    return Path(os.path.abspath(path)).as_uri()
 
 
 def locator_to_path(locator: str) -> str:
     """file:// URI → 本地绝对路径。
 
     非 file:// locator（未来 nfs://、table://）抛 ValueError。
+
+    兼容两类历史/宽松输入：
+    - ``file://C:/x``（盘符落在 netloc 的旧式 Windows 形态）；
+    - ``file://C:\\x``（未转义反斜杠的裸拼接形态）。
+
+    UNC（``file://server/share/x``，由 ``as_uri`` 产出）仅 Windows 上还原为
+    ``\\\\server\\share\\x``；POSIX 上拒绝远程主机 netloc（localhost 除外）。
     """
     parsed = urlparse(locator)
     if parsed.scheme != "file":
         raise ValueError(f"GitWorkspaceProvider requires file:// locator, got: {locator}")
-    # urlparse 对 file:///abs/path 给出 path=/abs/path；空 netloc 时直接取 path
-    return parsed.path or ""
+    path = unquote(parsed.path or "")
+    netloc = unquote(parsed.netloc or "")
+    if netloc:
+        if _DRIVE_NETLOC_RE.match(netloc):
+            # 旧式盘符形态：file://C:/x → /C:/x（Path 归一为 C:\x）
+            path = f"/{netloc}{path}"
+        elif "\\" in netloc:
+            # 宽容：file://C:\ws\a 裸拼接形态
+            path = netloc + path
+        elif netloc == "localhost":
+            pass
+        elif os.name == "nt":
+            # UNC：file://server/share/x → //server/share/x
+            path = f"//{netloc}{path}"
+        else:
+            raise ValueError(
+                f"file:// locator with remote host is not locally resolvable: {locator}"
+            )
+    if not path:
+        return ""
+    return str(Path(path))
 
 
 class GitWorkspaceProvider(VersionedWorkspaceProvider):
@@ -115,6 +151,11 @@ class GitWorkspaceProvider(VersionedWorkspaceProvider):
         await self._sandbox.execute_command(
             ["git", "config", "tag.gpgsign", "false"], cwd=ws_path
         )
+        # Windows 全局 core.autocrlf=true 会改写工作区文件行尾，污染
+        # diff/rollback 语义；工作区快照按字节保真，显式关闭。
+        await self._sandbox.execute_command(
+            ["git", "config", "core.autocrlf", "false"], cwd=ws_path
+        )
 
         write_marker(ws_path, record)
 
@@ -145,7 +186,7 @@ class GitWorkspaceProvider(VersionedWorkspaceProvider):
         """查询 git 状态：存在性/可写性 + branch/is_clean/脏文件计数（extra）。"""
         ws_path = locator_to_path(record.locator)
         exists = os.path.isdir(ws_path) and os.path.isdir(os.path.join(ws_path, ".git"))
-        writable = os.access(ws_path, os.W_OK) if exists else False
+        writable = is_writable(ws_path) if exists else False
 
         extra: dict[str, object] = {}
         if exists:
@@ -168,10 +209,10 @@ class GitWorkspaceProvider(VersionedWorkspaceProvider):
         return WorkspaceStatus(exists=exists, writable=writable, extra=extra)
 
     async def destroy(self, record: WorkspaceRecord) -> None:
-        """递归删除目录（同现有 AgentWorkspace 语义）。"""
+        """递归删除目录（容忍只读 git object 文件，Windows 兼容）。"""
         ws_path = locator_to_path(record.locator)
         if os.path.exists(ws_path):
-            await asyncio.to_thread(shutil.rmtree, ws_path)
+            await asyncio.to_thread(robust_rmtree, ws_path)
         logger.info("Destroyed git workspace %s at %s", record.workspace_id, ws_path)
 
     # ─── VersionedWorkspaceProvider ───

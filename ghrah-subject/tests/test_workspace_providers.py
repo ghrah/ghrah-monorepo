@@ -11,6 +11,7 @@ plain provider init/adopt/status/destroy + registry register/get/detect。
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,10 @@ from ghrah.subject.workspace import (
     path_to_locator,
 )
 from ghrah.subject.workspace.marker import MARKER_FILENAME, read_marker
+
+requires_git = pytest.mark.skipif(
+    shutil.which("git") is None, reason="git not available"
+)
 
 
 def _record(ws_path: str, name: str = "test-agent") -> WorkspaceRecord:
@@ -64,6 +69,7 @@ class _Sandbox:
 # ─── GitWorkspaceProvider ───
 
 
+@requires_git
 class TestGitWorkspaceProviderInit:
     async def test_init_creates_repo_and_marker(self, tmp_path: Path) -> None:
         root = str(tmp_path / "wsroot")
@@ -97,6 +103,7 @@ class TestGitWorkspaceProviderInit:
             assert os.path.isfile(f)
 
 
+@requires_git
 class TestGitWorkspaceProviderVersioned:
     async def test_snapshot_returns_hash_and_diff(self, tmp_path: Path) -> None:
         root = str(tmp_path / "wsroot")
@@ -209,6 +216,7 @@ class TestGitWorkspaceProviderVersioned:
             assert not os.path.exists(ws_path)
 
 
+@requires_git
 class TestGitWorkspaceProviderAdopt:
     async def test_adopt_marker_match(self, tmp_path: Path) -> None:
         root = str(tmp_path / "wsroot")

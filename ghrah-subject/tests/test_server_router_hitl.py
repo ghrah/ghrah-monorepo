@@ -70,7 +70,7 @@ async def test_observer_router_hitl_response_uses_engine_dispatch() -> None:
 
 
 async def test_observer_router_translates_engine_success_to_command_result() -> None:
-    engine = _FakeEngine({"success": True, "data": {"workspace_path": "/tmp/ws"}})
+    engine = _FakeEngine({"success": True, "data": {"workspace_path": "ws"}})
     connection_manager = ConnectionManager()
     event_bus = EventBus(connection_manager)
     router = ObserverRouter(connection_manager, event_bus, engine=engine)  # type: ignore[arg-type]
@@ -86,7 +86,7 @@ async def test_observer_router_translates_engine_success_to_command_result() -> 
 
     assert result is not None
     assert result.payload.success is True
-    assert result.payload.data == {"workspace_path": "/tmp/ws"}
+    assert result.payload.data == {"workspace_path": "ws"}
 
 
 async def test_observer_router_unknown_command_delegates_to_engine() -> None:

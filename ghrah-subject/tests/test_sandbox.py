@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import shutil
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +12,10 @@ from ghrah.subject.sandbox.workspace import (
     SnapshotError,
     SnapshotInfo,
     WorkspaceManager,
+)
+
+requires_git = pytest.mark.skipif(
+    shutil.which("git") is None, reason="git not available"
 )
 
 
@@ -56,62 +63,62 @@ class TestSandboxExecutorConfig:
 
 
 class TestSandboxExecutorCheckCommand:
-    async def test_empty_command(self):
-        executor = SandboxExecutor(workspace_root="/tmp/test_sb_check")
+    async def test_empty_command(self, tmp_path: Path):
+        executor = SandboxExecutor(workspace_root=str(tmp_path))
         allowed, reason = executor.check_command([])
         assert allowed is False
         assert "Empty" in reason
 
-    async def test_blocked_command(self):
+    async def test_blocked_command(self, tmp_path: Path):
         config = SandboxExecutorConfig(blocked_commands={"rm", "kill"})
-        executor = SandboxExecutor(workspace_root="/tmp/test_sb_check", config=config)
+        executor = SandboxExecutor(workspace_root=str(tmp_path), config=config)
         allowed, reason = executor.check_command(["rm", "-rf", "/"])
         assert allowed is False
         assert "rm" in reason
 
-    async def test_allowed_command(self):
+    async def test_allowed_command(self, tmp_path: Path):
         config = SandboxExecutorConfig(blocked_commands={"rm"})
-        executor = SandboxExecutor(workspace_root="/tmp/test_sb_check", config=config)
+        executor = SandboxExecutor(workspace_root=str(tmp_path), config=config)
         allowed, reason = executor.check_command(["git", "status"])
         assert allowed is True
         assert reason == ""
 
-    async def test_blocked_command_with_path(self):
+    async def test_blocked_command_with_path(self, tmp_path: Path):
         config = SandboxExecutorConfig(blocked_commands={"shutdown"})
-        executor = SandboxExecutor(workspace_root="/tmp/test_sb_check", config=config)
+        executor = SandboxExecutor(workspace_root=str(tmp_path), config=config)
         allowed, reason = executor.check_command(["/usr/sbin/shutdown", "-h", "now"])
         assert allowed is False
         assert "shutdown" in reason
 
 
 class TestSandboxExecutorResolveCwd:
-    async def test_none_defaults_to_workspace_root(self):
-        executor = SandboxExecutor(workspace_root="/tmp/test_sb_cwd")
+    async def test_none_defaults_to_workspace_root(self, tmp_path: Path):
+        executor = SandboxExecutor(workspace_root=str(tmp_path))
         resolved = executor._resolve_cwd(None)
-        assert resolved == "/tmp/test_sb_cwd"
+        assert resolved == str(tmp_path)
 
-    async def test_relative_path(self):
-        executor = SandboxExecutor(workspace_root="/tmp/test_sb_cwd")
+    async def test_relative_path(self, tmp_path: Path):
+        executor = SandboxExecutor(workspace_root=str(tmp_path))
         resolved = executor._resolve_cwd("subdir")
-        expected = os.path.abspath("/tmp/test_sb_cwd/subdir")
+        expected = os.path.abspath(os.path.join(str(tmp_path), "subdir"))
         assert resolved == expected
 
-    async def test_absolute_path_inside_workspace(self):
-        ws = "/tmp/test_sb_cwd"
-        executor = SandboxExecutor(workspace_root=ws)
-        inside_path = os.path.join(ws, "subdir")
+    async def test_absolute_path_inside_workspace(self, tmp_path: Path):
+        executor = SandboxExecutor(workspace_root=str(tmp_path))
+        inside_path = os.path.join(str(tmp_path), "subdir")
         resolved = executor._resolve_cwd(inside_path)
         assert resolved == inside_path
 
-    async def test_absolute_path_outside_workspace_raises(self):
-        executor = SandboxExecutor(workspace_root="/tmp/test_sb_cwd")
+    async def test_absolute_path_outside_workspace_raises(self, tmp_path: Path):
+        executor = SandboxExecutor(workspace_root=str(tmp_path))
+        outside = str(tmp_path.parent / "outside_sb_dir")
         with pytest.raises(ValueError, match="outside"):
-            executor._resolve_cwd("/etc/passwd")
+            executor._resolve_cwd(outside)
 
-    async def test_relative_path_traversal_raises(self):
-        executor = SandboxExecutor(workspace_root="/tmp/test_sb_cwd")
+    async def test_relative_path_traversal_raises(self, tmp_path: Path):
+        executor = SandboxExecutor(workspace_root=str(tmp_path))
         with pytest.raises(ValueError, match="outside"):
-            executor._resolve_cwd("../../etc/passwd")
+            executor._resolve_cwd("../../outside_sb_dir")
 
 
 class TestSandboxExecutorExecuteCommand:
@@ -119,7 +126,9 @@ class TestSandboxExecutorExecuteCommand:
         executor = SandboxExecutor(workspace_root=str(tmp_path))
         await executor.start()
         try:
-            result = await executor.execute_command(["echo", "hello"])
+            result = await executor.execute_command(
+                [sys.executable, "-c", "print('hello')"]
+            )
             assert result.success is True
             assert "hello" in result.stdout
             assert result.exit_code == 0
@@ -130,7 +139,9 @@ class TestSandboxExecutorExecuteCommand:
         executor = SandboxExecutor(workspace_root=str(tmp_path))
         await executor.start()
         try:
-            result = await executor.execute_command(["false"])
+            result = await executor.execute_command(
+                [sys.executable, "-c", "raise SystemExit(1)"]
+            )
             assert result.success is False
             assert result.exit_code != 0
         finally:
@@ -152,7 +163,9 @@ class TestSandboxExecutorExecuteCommand:
         executor = SandboxExecutor(workspace_root=str(tmp_path), config=config)
         await executor.start()
         try:
-            result = await executor.execute_command(["sleep", "10"])
+            result = await executor.execute_command(
+                [sys.executable, "-c", "import time; time.sleep(10)"]
+            )
             assert result.timed_out is True
             assert result.success is False
         finally:
@@ -164,9 +177,11 @@ class TestSandboxExecutorExecuteCommand:
         executor = SandboxExecutor(workspace_root=str(tmp_path))
         await executor.start()
         try:
-            result = await executor.execute_command(["pwd"], cwd="subdir")
+            result = await executor.execute_command(
+                [sys.executable, "-c", "import os; print(os.getcwd())"], cwd="subdir"
+            )
             assert result.success is True
-            assert str(subdir) in result.stdout
+            assert os.path.normcase(str(subdir)) in os.path.normcase(result.stdout)
         finally:
             await executor.stop()
 
@@ -175,7 +190,8 @@ class TestSandboxExecutorExecuteCommand:
         await executor.start()
         try:
             result = await executor.execute_command(
-                ["printenv", "MY_TEST_VAR"], env={"MY_TEST_VAR": "test_value"},
+                [sys.executable, "-c", "import os; print(os.environ['MY_TEST_VAR'])"],
+                env={"MY_TEST_VAR": "test_value"},
             )
             assert result.success is True
             assert "test_value" in result.stdout
@@ -187,7 +203,8 @@ class TestSandboxExecutorExecuteCommand:
         await executor.start()
         try:
             result = await executor.execute_command(
-                ["cat"], stdin_data="hello from stdin",
+                [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"],
+                stdin_data="hello from stdin",
             )
             assert result.success is True
             assert "hello from stdin" in result.stdout
@@ -199,7 +216,10 @@ class TestSandboxExecutorExecuteCommand:
         await executor.start()
         try:
             result = await executor.execute_command(
-                ["bash", "-c", "echo err >&2 && echo out"],
+                [
+                    sys.executable, "-c",
+                    "import sys; sys.stderr.write('err\\n'); print('out')",
+                ],
             )
             assert result.success is True
             assert "err" in result.stderr
@@ -207,27 +227,27 @@ class TestSandboxExecutorExecuteCommand:
         finally:
             await executor.stop()
 
-    async def test_execute_not_started_raises(self):
-        executor = SandboxExecutor(workspace_root="/tmp/test_not_started")
+    async def test_execute_not_started_raises(self, tmp_path):
+        executor = SandboxExecutor(workspace_root=str(tmp_path))
         with pytest.raises(RuntimeError, match="not started"):
-            await executor.execute_command(["echo", "test"])
+            await executor.execute_command([sys.executable, "-c", "print('test')"])
 
 
 class TestSandboxExecutorBuildEnv:
-    def test_default_env(self):
-        executor = SandboxExecutor(workspace_root="/tmp/test_env")
+    def test_default_env(self, tmp_path):
+        executor = SandboxExecutor(workspace_root=str(tmp_path))
         env = executor._build_env(None)
         assert "PATH" in env
 
-    def test_env_overrides(self):
+    def test_env_overrides(self, tmp_path):
         config = SandboxExecutorConfig(env_overrides={"MY_VAR": "overridden"})
-        executor = SandboxExecutor(workspace_root="/tmp/test_env", config=config)
+        executor = SandboxExecutor(workspace_root=str(tmp_path), config=config)
         env = executor._build_env({"MY_VAR": "extra"})
         assert env["MY_VAR"] == "extra"
 
-    def test_config_env_overrides(self):
+    def test_config_env_overrides(self, tmp_path):
         config = SandboxExecutorConfig(env_overrides={"MY_VAR": "config_value"})
-        executor = SandboxExecutor(workspace_root="/tmp/test_env", config=config)
+        executor = SandboxExecutor(workspace_root=str(tmp_path), config=config)
         env = executor._build_env(None)
         assert env["MY_VAR"] == "config_value"
 
@@ -246,6 +266,7 @@ class TestSandboxExecutorTruncateOutput:
         assert truncated is True
 
 
+@requires_git
 class TestWorkspaceManagerCreate:
     async def test_create_workspace(self, tmp_path):
         workspace_root = str(tmp_path / "workspaces")
@@ -283,6 +304,7 @@ class TestWorkspaceManagerCreate:
             await manager.stop()
 
 
+@requires_git
 class TestWorkspaceManagerDestroy:
     async def test_destroy_workspace(self, tmp_path):
         workspace_root = str(tmp_path / "workspaces")
@@ -304,6 +326,7 @@ class TestWorkspaceManagerDestroy:
         await manager.destroy_workspace("nonexistent-agent")
 
 
+@requires_git
 class TestWorkspaceManagerLifecycle:
     async def test_start_creates_root(self, tmp_path):
         workspace_root = str(tmp_path / "new_root")
@@ -330,6 +353,7 @@ class TestWorkspaceManagerLifecycle:
             await manager.stop()
 
 
+@requires_git
 class TestAgentWorkspaceSnapshot:
     async def test_snapshot_with_changes(self, tmp_path):
         workspace_root = str(tmp_path / "workspaces")
@@ -361,6 +385,7 @@ class TestAgentWorkspaceSnapshot:
             await manager.stop()
 
 
+@requires_git
 class TestAgentWorkspaceDiff:
     async def test_diff_after_change(self, tmp_path):
         workspace_root = str(tmp_path / "workspaces")
@@ -399,6 +424,7 @@ class TestAgentWorkspaceDiff:
             await manager.stop()
 
 
+@requires_git
 class TestAgentWorkspaceRollback:
     async def test_rollback_restores_files(self, tmp_path):
         workspace_root = str(tmp_path / "workspaces")
@@ -455,6 +481,7 @@ class TestAgentWorkspaceRollback:
             await manager.stop()
 
 
+@requires_git
 class TestAgentWorkspaceStatus:
     async def test_status_clean(self, tmp_path):
         workspace_root = str(tmp_path / "workspaces")
@@ -502,6 +529,7 @@ class TestAgentWorkspaceStatus:
             await manager.stop()
 
 
+@requires_git
 class TestAgentWorkspaceListSnapshots:
     async def test_list_snapshots(self, tmp_path):
         workspace_root = str(tmp_path / "workspaces")

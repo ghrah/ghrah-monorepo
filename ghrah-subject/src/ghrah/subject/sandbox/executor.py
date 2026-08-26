@@ -8,6 +8,18 @@ from ghrah.abilities.paths import is_subpath
 
 __all__ = ["SandboxExecutor", "SandboxExecutorConfig", "CommandResult"]
 
+# Windows 可执行后缀：blocked 匹配时剥离，防 "shutdown.exe" 绕过。
+_WINDOWS_EXEC_SUFFIXES = (".exe", ".com", ".cmd", ".bat")
+
+
+def _normalize_base_command(command_name: str) -> str:
+    """归一化基础命令名：basename + 小写 + 剥离 Windows 可执行后缀。"""
+    base = os.path.basename(command_name).lower()
+    for suffix in _WINDOWS_EXEC_SUFFIXES:
+        if base.endswith(suffix):
+            return base[: -len(suffix)]
+    return base
+
 
 @dataclass
 class CommandResult:
@@ -41,6 +53,8 @@ class SandboxExecutorConfig:
     blocked_commands: set[str] = field(default_factory=lambda: {
         "rm", "rmdir", "mkfs", "dd", "format",
         "shutdown", "reboot", "kill", "killall",
+        # Windows 危险命令
+        "taskkill", "del", "rd", "reg", "regedit",
     })
     env_overrides: dict[str, str] = field(default_factory=dict)
 
@@ -178,8 +192,8 @@ class SandboxExecutor:
         """
         if not command:
             return False, "Empty command"
-        base = os.path.basename(command[0])
-        if base in self._config.blocked_commands:
+        base = _normalize_base_command(command[0])
+        if base in {name.lower() for name in self._config.blocked_commands}:
             return False, f"Command blocked: {base}"
         return True, ""
 

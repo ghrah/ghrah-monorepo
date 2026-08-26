@@ -22,6 +22,8 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ghrah.subject._fs import atomic_write_text
+
 if TYPE_CHECKING:
     from ghrah.subject.workspace.models import WorkspaceRecord
 
@@ -48,12 +50,7 @@ class MarkerData:
 
 
 def write_marker(dir_path: str, record: WorkspaceRecord) -> None:
-    """写结构化 JSON marker（幂等覆盖）。
-
-    Args:
-        dir_path: workspace 目录绝对路径。
-        record: 对应的 WorkspaceRecord。
-    """
+    """写结构化 JSON marker（幂等覆盖，原子替换落盘）。"""
     marker_path = os.path.join(dir_path, MARKER_FILENAME)
     payload = {
         "workspace_id": record.workspace_id,
@@ -62,9 +59,9 @@ def write_marker(dir_path: str, record: WorkspaceRecord) -> None:
         "created_at": record.created_at.isoformat(),
         "name": record.name,
     }
-    with open(marker_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False)
-        f.write("\n")
+    atomic_write_text(
+        marker_path, json.dumps(payload, ensure_ascii=False) + "\n"
+    )
 
 
 def read_marker(dir_path: str) -> MarkerData | None:

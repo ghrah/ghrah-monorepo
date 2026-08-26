@@ -14,6 +14,7 @@ from ghrah.subject.project.models import (
 )
 from ghrah.subject.project.store import ProjectStore
 from ghrah.subject.workspace.models import WorkspaceRecord
+from ghrah.subject.workspace.providers.git import path_to_locator
 
 # ─── fakes ───
 
@@ -21,7 +22,7 @@ from ghrah.subject.workspace.models import WorkspaceRecord
 @dataclass
 class _FakeAgentWorkspace:
     record: WorkspaceRecord
-    path: str = "/tmp/ws"
+    path: str = "ws"
 
 
 class _FakeWorkspaceManager:
@@ -113,6 +114,10 @@ class _FakeManifestStore:
     pass
 
 
+def _default_locator(tmp_path: Path) -> str:
+    return path_to_locator(str(tmp_path / "default"))
+
+
 # ─── fixtures ───
 
 
@@ -130,7 +135,7 @@ def _make_manager(
     store: ProjectStore,
     *,
     events: list[tuple[str, dict[str, Any]]] | None = None,
-    default_locator: str = "file:///tmp/default",
+    default_locator: str = "file:///workspaces/default",
     task_mgr: _FakeTaskMgr | None = None,
 ) -> ProjectManager:
     async def on_event(event_type: str, payload: dict[str, Any]) -> None:
@@ -154,10 +159,10 @@ class TestProjectCreate:
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
         events: list[tuple[str, dict[str, Any]]] = []
-        mgr = _make_manager(store, events=events, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, events=events, default_locator=_default_locator(tmp_path))
         result = await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": f"file://{tmp_path}/default"},
+            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
         )
         assert result["success"], result.get("error")
         project = result["data"]["project"]
@@ -186,9 +191,10 @@ class TestProjectGetList:
     async def test_get_and_list(
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
-        mgr = _make_manager(store, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         created = await mgr.handle_command(
-            "project_create", {"name": "P1", "default_workspace_locator": f"file://{tmp_path}/default"}
+            "project_create",
+            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
         )
         project_id = created["data"]["project"]["project_id"]
 
@@ -210,14 +216,14 @@ class TestProjectAddRemoveAgent:
     async def _create(self, mgr: ProjectManager, tmp_path: Path) -> dict[str, Any]:
         return await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": f"file://{tmp_path}/default"},
+            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
         )
 
     async def test_add_agent(
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
         events: list[tuple[str, dict[str, Any]]] = []
-        mgr = _make_manager(store, events=events, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, events=events, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
         project = created["data"]["project"]
         cluster_id = project["cluster_ids"][0]
@@ -245,7 +251,7 @@ class TestProjectAddRemoveAgent:
     async def test_add_agent_rejects_unknown_cluster(
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
-        mgr = _make_manager(store, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
         result = await mgr.handle_command(
             "project_add_agent",
@@ -261,7 +267,7 @@ class TestProjectAddRemoveAgent:
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
         events: list[tuple[str, dict[str, Any]]] = []
-        mgr = _make_manager(store, events=events, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, events=events, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
         project = created["data"]["project"]
         cluster_id = project["cluster_ids"][0]
@@ -285,14 +291,14 @@ class TestProjectStatusTransitions:
     async def _create(self, mgr: ProjectManager, tmp_path: Path) -> dict[str, Any]:
         return await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": f"file://{tmp_path}/default"},
+            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
         )
 
     async def test_pause_resume_stop(
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
         events: list[tuple[str, dict[str, Any]]] = []
-        mgr = _make_manager(store, events=events, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, events=events, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
         pid = created["data"]["project"]["project_id"]
         ct = mgr._cluster_transport  # type: ignore[attr-defined]
@@ -313,7 +319,7 @@ class TestProjectStatusTransitions:
     async def test_illegal_transition_rejected(
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
-        mgr = _make_manager(store, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
         pid = created["data"]["project"]["project_id"]
         # ACTIVE -> STOPPED 直接（合法），但 PAUSED -> ACTIVE 后再 PAUSED...
@@ -329,11 +335,11 @@ class TestProjectSetRecoveryAndDelete:
     async def _create(self, mgr: ProjectManager, tmp_path: Path) -> dict[str, Any]:
         return await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": f"file://{tmp_path}/default"},
+            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
         )
 
     async def test_set_recovery(self, store: ProjectStore, tmp_path: Path) -> None:
-        mgr = _make_manager(store, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
         pid = created["data"]["project"]["project_id"]
         result = await mgr.handle_command(
@@ -344,7 +350,7 @@ class TestProjectSetRecoveryAndDelete:
         assert result["data"]["project"]["recovery"] == RecoveryAction.PAUSE.value
 
     async def test_delete(self, store: ProjectStore, tmp_path: Path) -> None:
-        mgr = _make_manager(store, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
         pid = created["data"]["project"]["project_id"]
         result = await mgr.handle_command("project_delete", {"project_id": pid})
@@ -363,13 +369,13 @@ class TestProjectLinkTask:
     async def _create(self, mgr: ProjectManager, tmp_path: Path) -> dict[str, Any]:
         return await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": f"file://{tmp_path}/default"},
+            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
         )
 
     async def test_link_unlink_task(
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
-        mgr = _make_manager(store, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
         pid = created["data"]["project"]["project_id"]
         linked = await mgr.handle_command(
@@ -389,7 +395,7 @@ class TestProjectLinkTask:
     ) -> None:
         mgr = _make_manager(
             store,
-            default_locator=f"file://{tmp_path}/default",
+            default_locator=_default_locator(tmp_path),
             task_mgr=_FakeTaskMgr(task_exists=False),
         )
         created = await self._create(mgr, tmp_path)
@@ -403,7 +409,7 @@ class TestProjectLinkTask:
 
 class TestBootstrapMethods:
     async def test_bootstrap_default_project(self, store: ProjectStore, tmp_path: Path) -> None:
-        mgr = _make_manager(store, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         project = await mgr.bootstrap_default_project()
         assert project.name == "default"
         assert project.cluster_ids == ["default"]
@@ -415,7 +421,7 @@ class TestBootstrapMethods:
         assert loaded.name == "default"
 
     async def test_adopt_existing_agents(self, store: ProjectStore, tmp_path: Path) -> None:
-        mgr = _make_manager(store, default_locator=f"file://{tmp_path}/default")
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         project = await mgr.bootstrap_default_project()
         # 让 fake handle 返回现有 agent
         mgr._cluster_transport._handle._list = [  # type: ignore[attr-defined]

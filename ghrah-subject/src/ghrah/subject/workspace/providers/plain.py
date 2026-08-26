@@ -14,9 +14,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import shutil
 from typing import ClassVar
 
+from ghrah.subject._fs import is_writable, robust_rmtree
 from ghrah.subject.workspace.marker import read_marker, write_marker
 from ghrah.subject.workspace.models import AdoptResult, WorkspaceRecord, WorkspaceStatus
 from ghrah.subject.workspace.providers.base import WorkspaceCaps, WorkspaceProvider
@@ -73,12 +73,12 @@ class PlainWorkspaceProvider(WorkspaceProvider):
         """存在性 + 可写性。"""
         ws_path = locator_to_path(record.locator)
         exists = os.path.isdir(ws_path)
-        writable = os.access(ws_path, os.W_OK) if exists else False
+        writable = is_writable(ws_path) if exists else False
         return WorkspaceStatus(exists=exists, writable=writable, extra={})
 
     async def destroy(self, record: WorkspaceRecord) -> None:
-        """递归删除目录。"""
+        """递归删除目录（容忍只读内容，Windows 兼容）。"""
         ws_path = locator_to_path(record.locator)
         if os.path.exists(ws_path):
-            await asyncio.to_thread(shutil.rmtree, ws_path)
+            await asyncio.to_thread(robust_rmtree, ws_path)
         logger.info("Destroyed plain workspace %s at %s", record.workspace_id, ws_path)

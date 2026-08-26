@@ -14,6 +14,7 @@ from ghrah.manifest.errors import (
     ManifestValidationError,
 )
 from ghrah.manifest.parser import parse_ability_manifest, parse_agent_manifest, validate_manifest
+from ghrah.subject._fs import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +229,7 @@ class ManifestStore:
             )
 
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        atomic_write_text(path, content)
         logger.info("Wrote %s manifest: %s", expected_type, full_name)
 
     def _delete_entry(self, full_name: str, dir_kind: str) -> None:
