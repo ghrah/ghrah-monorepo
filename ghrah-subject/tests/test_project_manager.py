@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +50,9 @@ class _FakeWorkspaceManager:
         self._records[record.workspace_id] = record
         return _FakeAgentWorkspace(record=record)
 
+    async def unregister_workspace(self, workspace_id: str) -> None:
+        self._records.pop(workspace_id, None)
+
 
 class _FakeTaskMgr:
     def __init__(self, task_exists: bool = True) -> None:
@@ -67,9 +71,12 @@ class _FakeClusterTransport:
         self.ensured: list[str] = []
         self.shutdowns: list[str] = []
         self._handle = _FakeHandle()
+        self.fail_ensure = False
 
     async def ensure_cluster(self, cluster_id: str) -> _FakeHandle:
         self.ensured.append(cluster_id)
+        if self.fail_ensure:
+            raise RuntimeError("cluster unavailable")
         return self._handle
 
     def get_handle(self, cluster_id: str) -> _FakeHandle:
@@ -151,6 +158,7 @@ def _make_manager(
         on_event=on_event if events is not None else None,
         default_workspace_locator=default_locator,
         default_db_path_template="~/.ghrah/projects/{project_id}.db",
+        default_root_locator_template=str(store._db_path.parent / "roots/{project_id}"),
     )
 
 
@@ -162,11 +170,16 @@ class TestProjectCreate:
         mgr = _make_manager(store, events=events, default_locator=_default_locator(tmp_path))
         result = await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
+            {
+                "name": "P1",
+                "description": "Example project",
+                "default_workspace_locator": _default_locator(tmp_path),
+            },
         )
         assert result["success"], result.get("error")
         project = result["data"]["project"]
         assert project["name"] == "P1"
+        assert project["description"] == "Example project"
         assert len(project["cluster_ids"]) == 1
         assert len(project["workspaces"]) == 1
         assert project["workspaces"][0]["default_for_agents"] is True
@@ -180,12 +193,143 @@ class TestProjectCreate:
         assert not result["success"]
         assert "name" in (result["error"] or "")
 
-    async def test_create_requires_locator(self, store: ProjectStore) -> None:
-        mgr = _make_manager(store, default_locator="")
-        result = await mgr.handle_command("project_create", {"name": "P1"})
-        assert not result["success"]
-        assert "locator" in (result["error"] or "")
+    async def test_create_allows_no_writable_workspaces(self, store: ProjectStore) -> None:
+        mgr = _make_manager(store, default_locator="file:///legacy/default")
+        result = await mgr.handle_command(
+            "project_create", {"name": "P1", "writable_workspaces": []}
+        )
+        assert result["success"], result.get("error")
+        assert result["data"]["project"]["workspaces"] == []
 
+    async def test_create_multiple_writable_workspaces(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        mgr = _make_manager(store, default_locator="")
+        result = await mgr.handle_command(
+            "project_create",
+            {
+                "name": "P1",
+                "writable_workspaces": [
+                    {"locator": str(tmp_path / "source"), "name": "source"},
+                    {
+                        "locator": str(tmp_path / "output"),
+                        "name": "output",
+                        "role": "artifacts",
+                        "default_for_agents": True,
+                    },
+                ],
+            },
+        )
+        assert result["success"], result.get("error")
+        mounts = result["data"]["project"]["workspaces"]
+        assert len(mounts) == 2
+        assert [m["default_for_agents"] for m in mounts] == [False, True]
+
+    async def test_create_multiple_workspaces_requires_default(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        mgr = _make_manager(store, default_locator="")
+        result = await mgr.handle_command(
+            "project_create",
+            {
+                "name": "P1",
+                "writable_workspaces": [
+                    {"locator": str(tmp_path / "source")},
+                    {"locator": str(tmp_path / "output")},
+                ],
+            },
+        )
+        assert not result["success"]
+        assert "exactly one" in (result["error"] or "")
+
+    async def test_create_rejects_empty_workspace_locator(self, store: ProjectStore) -> None:
+        mgr = _make_manager(store, default_locator="")
+        result = await mgr.handle_command(
+            "project_create",
+            {"name": "P1", "writable_workspaces": [{"locator": "  "}]},
+        )
+        assert not result["success"]
+        assert "locator required" in (result["error"] or "")
+
+    async def test_create_rejects_root_workspace_overlap(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "private"
+        mgr = _make_manager(store, default_locator="")
+        result = await mgr.handle_command(
+            "project_create",
+            {
+                "name": "P1",
+                "project_root_locator": str(root),
+                "writable_workspaces": [{"locator": str(root / "source")}],
+            },
+        )
+        assert not result["success"]
+        assert "overlaps a writable Workspace" in (result["error"] or "")
+        assert not root.exists()
+
+    async def test_create_rejects_nested_project_roots(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        mgr = _make_manager(store, default_locator="")
+        first_root = tmp_path / "projects" / "one"
+        first = await mgr.handle_command(
+            "project_create",
+            {
+                "name": "P1",
+                "project_root_locator": str(first_root),
+                "writable_workspaces": [],
+            },
+        )
+        assert first["success"], first.get("error")
+        second = await mgr.handle_command(
+            "project_create",
+            {
+                "name": "P2",
+                "project_root_locator": str(first_root / "nested"),
+                "writable_workspaces": [],
+            },
+        )
+        assert not second["success"]
+        assert "Project Roots overlap" in (second["error"] or "")
+
+    async def test_concurrent_create_serializes_root_claim(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        mgr = _make_manager(store, default_locator="")
+        root = str(tmp_path / "exclusive")
+        first, second = await asyncio.gather(
+            mgr.handle_command(
+                "project_create",
+                {"name": "P1", "project_root_locator": root, "writable_workspaces": []},
+            ),
+            mgr.handle_command(
+                "project_create",
+                {"name": "P2", "project_root_locator": root, "writable_workspaces": []},
+            ),
+        )
+        assert sum(1 for result in (first, second) if result["success"]) == 1
+        assert len(await store.list()) == 1
+
+    async def test_create_rolls_back_root_workspace_and_record(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "private"
+        workspace = tmp_path / "source"
+        mgr = _make_manager(store, default_locator="")
+        mgr._cluster_transport.fail_ensure = True  # type: ignore[attr-defined]
+        result = await mgr.handle_command(
+            "project_create",
+            {
+                "name": "P1",
+                "project_root_locator": str(root),
+                "writable_workspaces": [{"locator": str(workspace)}],
+            },
+        )
+        assert not result["success"]
+        assert await store.list() == []
+        assert mgr._workspace_mgr.list_records() == []  # type: ignore[attr-defined]
+        assert not root.exists()
 
 class TestProjectGetList:
     async def test_get_and_list(
@@ -413,6 +557,8 @@ class TestBootstrapMethods:
         project = await mgr.bootstrap_default_project()
         assert project.name == "default"
         assert project.cluster_ids == ["default"]
+        assert project.project_root_locator.startswith("file://")
+        assert (Path(project.db_path).parent.parent / ".ghrah-project.json").is_file()
         assert len(project.workspaces) == 1
         assert project.workspaces[0].default_for_agents is True
         # 持久化

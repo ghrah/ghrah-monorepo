@@ -31,6 +31,7 @@ __all__ = [
     "RecoveryAction",
     "RecoverySpec",
     "WorkspaceMount",
+    "WritableWorkspaceSpec",
     "can_transition",
     "make_project_record",
     "normalize_status",
@@ -97,6 +98,17 @@ class WorkspaceMount(BaseModel):
                 f"(found {len(defaults)})"
             )
         return defaults[0] if defaults else None
+
+
+class WritableWorkspaceSpec(BaseModel):
+    """创建 Project 时使用的可读写 Workspace 输入。"""
+
+    model_config = ConfigDict(frozen=True)
+
+    locator: str
+    name: str = ""
+    role: str | None = None
+    default_for_agents: bool = False
 
 
 class AgentSpec(BaseModel):
@@ -185,6 +197,7 @@ class ProjectRecord(BaseModel):
     独立定义（不继承 ``ProjectInfoPayload``）以使用 subject 侧
     ``WorkspaceMount``/``AgentSpec`` 强类型与 ``IsolationSpec`` 扩展字段；
     ``to_wire()`` 输出 ``ProjectInfoPayload`` 形态 dict 保证 wire 一一对应：
+    - ``project_root_locator`` 是 Subject 独占内部状态 Root，不属于 workspaces；
     - 时间戳内部用 ``datetime(UTC)``，序列化为 ISO str。
     - ``recovery`` 内部用 ``RecoverySpec``，序列化为 ``RecoveryAction.value``。
     - ``version``（乐观锁）与 ``deleted_at``（软删）为 wire payload 全量字段。
@@ -194,6 +207,8 @@ class ProjectRecord(BaseModel):
 
     project_id: str
     name: str
+    description: str = ""
+    project_root_locator: str = ""
     manifest_ref: str = ""
     instance_manifest_dir: str = ""
     cluster_ids: list[str] = Field(default_factory=list)
@@ -253,6 +268,8 @@ class ProjectRecord(BaseModel):
 def make_project_record(
     *,
     name: str,
+    description: str = "",
+    project_root_locator: str = "",
     manifest_ref: str = "",
     instance_manifest_dir: str = ".ghrah/agents",
     db_path: str = "",
@@ -264,6 +281,8 @@ def make_project_record(
     return ProjectRecord(
         project_id=uuid4().hex,
         name=name,
+        description=description,
+        project_root_locator=project_root_locator,
         manifest_ref=manifest_ref,
         instance_manifest_dir=instance_manifest_dir,
         db_path=db_path,

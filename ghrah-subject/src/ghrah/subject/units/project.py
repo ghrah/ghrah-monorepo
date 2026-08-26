@@ -92,6 +92,7 @@ class ProjectUnit(SubjectUnit):
             on_event=self._emit_event,
             default_workspace_locator=self._config.project.default_workspace_locator,
             default_db_path_template=self._config.project.default_db_path_template,
+            default_root_locator_template=self._config.project.default_root_locator_template,
         )
         ctx.provide(PROJECT_MANAGER.name, self._manager)
 

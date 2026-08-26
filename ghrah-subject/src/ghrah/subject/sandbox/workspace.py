@@ -36,6 +36,7 @@ from ghrah.subject.workspace import (
 from ghrah.subject.workspace import (
     SnapshotInfo as _NewSnapshotInfo,
 )
+from ghrah.subject.workspace.marker import MARKER_FILENAME
 from ghrah.subject.workspace.providers.base import VersionedWorkspaceProvider
 
 if TYPE_CHECKING:
@@ -430,3 +431,21 @@ class WorkspaceManager:
             await self._persist(record)
         logger.info("Registered workspace %s (%s)", record.workspace_id, locator)
         return self._by_id[record.workspace_id]
+
+    async def unregister_workspace(self, workspace_id: str) -> None:
+        """移除注册关系但保留物理目录，供 Project 创建失败安全补偿。"""
+        workspace = self._by_id.pop(workspace_id, None)
+        if workspace is None:
+            return
+        stale_names = [name for name, wid in self._by_agent.items() if wid == workspace_id]
+        for name in stale_names:
+            self._by_agent.pop(name, None)
+        if self._store is not None:
+            await self._store.soft_delete(workspace_id)
+        try:
+            os.unlink(os.path.join(workspace.path, MARKER_FILENAME))
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.warning("Failed to remove workspace marker for %s", workspace_id)
+        logger.info("Unregistered workspace %s (%s)", workspace_id, workspace.record.locator)

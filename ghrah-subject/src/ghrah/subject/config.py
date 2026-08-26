@@ -144,10 +144,13 @@ class ProjectConfig:
             ``SubjectConfig.__post_init__`` 填充）。
         default_db_path_template: per-project 独立 DB 路径模板，``{project_id}``
             占位符由 ProjectManager 替换。
+        default_root_locator_template: 新 Project Root 模板，``{project_id}``
+            占位符由 ProjectManager 替换。
     """
 
     default_workspace_locator: str = ""
     default_db_path_template: str = "~/.ghrah/projects/{project_id}.db"
+    default_root_locator_template: str = "~/.ghrah/projects/{project_id}"
 
 
 @dataclass
@@ -409,9 +412,14 @@ class SubjectConfig:
             "GHRAH_SUBJECT_PROJECT_DEFAULT_DB_PATH_TEMPLATE",
             "~/.ghrah/projects/{project_id}.db",
         )
+        project_default_root_locator_template = os.environ.get(
+            "GHRAH_SUBJECT_PROJECT_DEFAULT_ROOT_LOCATOR_TEMPLATE",
+            "~/.ghrah/projects/{project_id}",
+        )
         project_slice = ProjectConfig(
             default_workspace_locator=project_default_workspace_locator,
             default_db_path_template=project_default_db_path_template,
+            default_root_locator_template=project_default_root_locator_template,
         )
 
         # recovery slice

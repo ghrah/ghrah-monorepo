@@ -50,9 +50,15 @@ class ProjectNotFoundError(Exception):
 
 
 _DDL = """
+CREATE TABLE IF NOT EXISTS subject_schema_versions (
+    component TEXT PRIMARY KEY,
+    version   INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS subject_projects (
     project_id            TEXT PRIMARY KEY,
     name                  TEXT NOT NULL,
+    description           TEXT NOT NULL DEFAULT '',
+    project_root_locator  TEXT NOT NULL DEFAULT '',
     manifest_ref          TEXT NOT NULL DEFAULT '',
     instance_manifest_dir TEXT NOT NULL DEFAULT '',
     cluster_ids           TEXT NOT NULL DEFAULT '[]',
@@ -75,6 +81,8 @@ CREATE INDEX IF NOT EXISTS idx_subject_projects_deleted ON subject_projects(dele
 _COLUMNS = (
     "project_id",
     "name",
+    "description",
+    "project_root_locator",
     "manifest_ref",
     "instance_manifest_dir",
     "cluster_ids",
@@ -93,6 +101,12 @@ _COLUMNS = (
 # JSON 列：复数资源与结构化字段经 json.dumps/json.loads 往返。
 # recovery 不在此列（单值字符串列）。
 _JSON_COLUMNS = ("cluster_ids", "workspaces", "agents", "task_ids", "isolation")
+_SCHEMA_COMPONENT = "project_store"
+_SCHEMA_VERSION = 2
+_MIGRATION_COLUMNS: dict[int, tuple[str, str]] = {
+    1: ("description", "TEXT NOT NULL DEFAULT ''"),
+    2: ("project_root_locator", "TEXT NOT NULL DEFAULT ''"),
+}
 
 
 def _record_to_row(record: ProjectRecord) -> dict[str, Any]:
@@ -146,8 +160,38 @@ class ProjectStore:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(_DDL)
+            await self._migrate(db)
             self._db = db
         logger.debug("ProjectStore started (db=%s)", self._db_path)
+
+    async def _migrate(self, db: aiosqlite.Connection) -> None:
+        """按 component version 幂等补齐 ProjectStore schema。"""
+        cursor = await db.execute(
+            "SELECT version FROM subject_schema_versions WHERE component = ?",
+            (_SCHEMA_COMPONENT,),
+        )
+        row = await cursor.fetchone()
+        current = int(row["version"]) if row is not None else 0
+        if current > _SCHEMA_VERSION:
+            raise RuntimeError(
+                f"ProjectStore schema {current} is newer than supported {_SCHEMA_VERSION}"
+            )
+        columns_cursor = await db.execute("PRAGMA table_info(subject_projects)")
+        known_columns = {str(r["name"]) for r in await columns_cursor.fetchall()}
+        for version in range(1, _SCHEMA_VERSION + 1):
+            column, declaration = _MIGRATION_COLUMNS[version]
+            if column not in known_columns:
+                await db.execute(
+                    f"ALTER TABLE subject_projects ADD COLUMN {column} {declaration}"  # noqa: S608
+                )
+                known_columns.add(column)
+            if version <= current:
+                continue
+            await db.execute(
+                "INSERT INTO subject_schema_versions(component, version) VALUES (?, ?) "
+                "ON CONFLICT(component) DO UPDATE SET version = excluded.version",
+                (_SCHEMA_COMPONENT, version),
+            )
 
     async def stop(self) -> None:
         async with self._lock:
@@ -238,6 +282,14 @@ class ProjectStore:
             return record.model_copy(update={"deleted_at": datetime.now(UTC)})
 
         await self.update(project_id, expected_version, _mark)
+
+    async def delete_uncommitted(self, project_id: str) -> None:
+        """创建事务补偿：硬删除尚未对外提交的 ProjectRecord。"""
+        async with self._lock:
+            db = self._require_db()
+            await db.execute(
+                "DELETE FROM subject_projects WHERE project_id = ?", (project_id,)
+            )
 
     # ─── 读取 ───
 

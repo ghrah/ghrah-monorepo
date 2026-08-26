@@ -200,8 +200,11 @@ def validate_workspace_locators_non_nested(locators: list[str]) -> None:
                 or b_norm.startswith(a_norm + "/")
                 or a_norm.startswith(b_norm + "/")
             ):
+                relation = "duplicate" if a_norm == b_norm else "nested"
                 raise ValueError(
-                    f"Workspace locators nest: {a_loc!r} vs {b_loc!r}"
+                    f"Workspace locators nest/duplicate ({relation}): "
+                    f"{a_loc!r} vs {b_loc!r}. "
+                    "Choose a different, non-overlapping workspace folder."
                 )
 
 

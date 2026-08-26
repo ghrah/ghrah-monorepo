@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -52,6 +53,11 @@ from ghrah.subject.project.models import (
     WorkspaceMount,
     can_transition,
     make_project_record,
+)
+from ghrah.subject.project.paths import (
+    ProjectPaths,
+    canonical_file_locator,
+    validate_project_path_boundaries,
 )
 from ghrah.subject.project.store import (
     ConcurrentModificationError,
@@ -105,6 +111,9 @@ class ProjectManager:
         default_workspace_locator: 首启 bootstrap 用的 default workspace locator
             （派生自 config.project.default_workspace_locator）。
         default_db_path_template: per-project DB 路径模板（``{project_id}`` 占位）。
+            兼容保留；新 Project 的 db_path 已由 Project Root 派生。
+        default_root_locator_template: 未显式传 Root 时使用的模板，支持
+            ``{project_id}`` 占位。
     """
 
     def __init__(
@@ -118,6 +127,7 @@ class ProjectManager:
         on_event: OnEvent | None = None,
         default_workspace_locator: str = "",
         default_db_path_template: str = "~/.ghrah/projects/{project_id}.db",
+        default_root_locator_template: str = "~/.ghrah/projects/{project_id}",
     ) -> None:
         self._store = store
         self._workspace_mgr = workspace_mgr
@@ -127,6 +137,8 @@ class ProjectManager:
         self._on_event = on_event
         self._default_workspace_locator = default_workspace_locator
         self._default_db_path_template = default_db_path_template
+        self._default_root_locator_template = default_root_locator_template
+        self._create_lock = asyncio.Lock()
 
     async def handle_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         handler = _HANDLERS.get(command)
@@ -159,6 +171,10 @@ class ProjectManager:
     def _db_path_for(self, project_id: str) -> str:
         return self._default_db_path_template.format(project_id=project_id)
 
+    def _root_locator_for(self, project_id: str, requested: str = "") -> str:
+        value = requested or self._default_root_locator_template.format(project_id=project_id)
+        return canonical_file_locator(value)
+
     def _validate_agent(self, agent: AgentSpec, project: ProjectRecord) -> None:
         """agent_name cluster 内唯一 + cluster_id 属本 project + path_grants 校验。"""
         if agent.cluster_id not in project.cluster_ids:
@@ -173,55 +189,140 @@ class ProjectManager:
     # ─── 命令 handlers ───
 
     async def _handle_create(self, payload: dict[str, Any]) -> dict[str, Any]:
+        async with self._create_lock:
+            return await self._handle_create_locked(payload)
+
+    async def _handle_create_locked(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectCreatePayload.model_validate(payload)
-        if not p.name:
+        if not p.name.strip():
             return _err("name required")
-        locator = p.default_workspace_locator or self._default_workspace_locator
-        if not locator:
-            return _err("default_workspace_locator required (config empty)")
-        locator = _normalize_locator(locator)
+        workspace_inputs = list(p.writable_workspaces)
+        if "writable_workspaces" not in p.model_fields_set:
+            # 兼容旧客户端：仅在新字段完全缺席时映射 legacy/default locator。
+            legacy_locator = (
+                p.default_workspace_locator.strip() or self._default_workspace_locator
+            )
+            if legacy_locator:
+                workspace_inputs = [
+                    {
+                        "locator": legacy_locator,
+                        "name": p.default_workspace_name or "default",
+                        "role": "default",
+                        "default_for_agents": True,
+                    }
+                ]
+
+        normalized_workspaces: list[dict[str, Any]] = []
+        for item in workspace_inputs:
+            raw = item if isinstance(item, dict) else item.model_dump()
+            raw_locator = str(raw["locator"]).strip()
+            if not raw_locator:
+                return _err("writable_workspaces locator required")
+            locator = _normalize_locator(raw_locator)
+            normalized_workspaces.append({**raw, "locator": locator})
+        defaults = [w for w in normalized_workspaces if w["default_for_agents"]]
+        if len(normalized_workspaces) == 1 and not defaults:
+            normalized_workspaces[0]["default_for_agents"] = True
+        elif len(defaults) > 1 or (len(normalized_workspaces) > 1 and not defaults):
+            return _err("writable_workspaces must have exactly one default_for_agents workspace")
+
         record = make_project_record(
-            name=p.name,
+            name=p.name.strip(),
+            description=p.description.strip(),
             manifest_ref=p.manifest_ref,
             instance_manifest_dir=p.instance_manifest_dir,
-            db_path=self._db_path_for("default"),  # 占位，upsert 前替换
         )
-        record = record.model_copy(update={"db_path": self._db_path_for(record.project_id)})
-        cluster_id = uuid4().hex
-        # workspace locator 跨 project 禁嵌套校验
-        await self._check_locator_non_nested(locator)
-        ws = await self._workspace_mgr.register_workspace(
-            locator, name=p.default_workspace_name or "default"
-        )
-        mount = WorkspaceMount(
-            workspace_id=ws.record.workspace_id,
-            role="default",
-            default_for_agents=True,
-        )
-        WorkspaceMount.validate_single_default([mount])
+        root_locator = self._root_locator_for(record.project_id, p.project_root_locator)
+        project_paths = ProjectPaths.from_locator(root_locator)
         record = record.model_copy(
             update={
-                "cluster_ids": [cluster_id],
-                "workspaces": [mount],
-                "recovery": RecoverySpec(on_restart=RecoveryAction(p.recovery)),
+                "project_root_locator": root_locator,
+                "db_path": str(project_paths.project_db_path),
             }
         )
-        await self._store.upsert(record)
-        # 建 default cluster（init_cluster 由 transport 连接建立自动发）
-        await self._cluster_transport.ensure_cluster(cluster_id)
-        await self._emit("project_created", record)
+        cluster_id = uuid4().hex
+        await self._check_create_paths(
+            root_locator, [str(w["locator"]) for w in normalized_workspaces]
+        )
+
+        receipt = None
+        registered_ids: list[str] = []
+        stored = False
+        cluster_attempted = False
+        try:
+            receipt = project_paths.initialize(record.project_id)
+            mounts: list[WorkspaceMount] = []
+            known_ids = {r.workspace_id for r in self._workspace_mgr.list_records()}
+            for item in normalized_workspaces:
+                ws = await self._workspace_mgr.register_workspace(
+                    str(item["locator"]), name=str(item.get("name") or "default")
+                )
+                if ws.record.workspace_id not in known_ids:
+                    registered_ids.append(ws.record.workspace_id)
+                    known_ids.add(ws.record.workspace_id)
+                mounts.append(
+                    WorkspaceMount(
+                        workspace_id=ws.record.workspace_id,
+                        role=item.get("role"),
+                        default_for_agents=bool(item["default_for_agents"]),
+                    )
+                )
+            WorkspaceMount.validate_single_default(mounts)
+            record = record.model_copy(
+                update={
+                    "cluster_ids": [cluster_id],
+                    "workspaces": mounts,
+                    "recovery": RecoverySpec(on_restart=RecoveryAction(p.recovery)),
+                }
+            )
+            await self._store.upsert(record)
+            stored = True
+            cluster_attempted = True
+            await self._cluster_transport.ensure_cluster(cluster_id)
+        except Exception as exc:  # noqa: BLE001 — 创建事务在此统一补偿
+            if cluster_attempted:
+                try:
+                    if self._cluster_transport.has_cluster(cluster_id):
+                        await self._cluster_transport.shutdown_cluster(cluster_id)
+                except Exception:  # noqa: BLE001
+                    logger.warning("create rollback: cluster shutdown failed", exc_info=True)
+            if stored:
+                try:
+                    await self._store.delete_uncommitted(record.project_id)
+                except Exception:  # noqa: BLE001
+                    logger.warning("create rollback: project delete failed", exc_info=True)
+            for workspace_id in reversed(registered_ids):
+                try:
+                    await self._workspace_mgr.unregister_workspace(workspace_id)
+                except Exception:  # noqa: BLE001
+                    logger.warning("create rollback: workspace unregister failed", exc_info=True)
+            if receipt is not None:
+                project_paths.rollback_initialize(receipt)
+            return _err(f"project creation failed: {exc}")
+
+        try:
+            await self._emit("project_created", record)
+        except Exception:  # noqa: BLE001 — 资源已提交，事件失败不反向销毁
+            logger.exception("project_created event delivery failed for %s", record.project_id)
         return _ok({"project": record.to_wire()})
 
-    async def _check_locator_non_nested(self, locator: str) -> None:
-        """校验新 locator 与所有已挂载 workspace locator 互不嵌套。"""
-        existing_locators: list[str] = []
-        for r in await self._store.list():
-            for mount in r.workspaces:
+    async def _check_create_paths(
+        self, root_locator: str, workspace_locators: list[str]
+    ) -> None:
+        records = await self._store.list()
+        existing_roots = [r.project_root_locator for r in records if r.project_root_locator]
+        existing_workspaces: list[str] = []
+        for project in records:
+            for mount in project.workspaces:
                 rec = self._workspace_mgr.get_record(mount.workspace_id)
                 if rec is not None:
-                    existing_locators.append(rec.locator)
-        existing_locators.append(locator)
-        validate_workspace_locators_non_nested(existing_locators)
+                    existing_workspaces.append(rec.locator)
+        validate_workspace_locators_non_nested(existing_workspaces + workspace_locators)
+        validate_project_path_boundaries(
+            root_locator=root_locator,
+            existing_root_locators=existing_roots,
+            workspace_locators=existing_workspaces + workspace_locators,
+        )
 
     async def _handle_update(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectUpdatePayload.model_validate(payload)
@@ -234,6 +335,8 @@ class ProjectManager:
             updates: dict[str, Any] = {}
             if p.name is not None:
                 updates["name"] = p.name
+            if p.description is not None:
+                updates["description"] = p.description
             if p.manifest_ref is not None:
                 updates["manifest_ref"] = p.manifest_ref
             if p.instance_manifest_dir is not None:
@@ -459,29 +562,72 @@ class ProjectManager:
     # ─── bootstrap 高层方法（决策 2，供 S4.6 reconcile） ───
 
     async def bootstrap_default_project(self) -> ProjectRecord:
+        async with self._create_lock:
+            return await self._bootstrap_default_project_locked()
+
+    async def _bootstrap_default_project_locked(self) -> ProjectRecord:
         """建 default project（1 default cluster + 1 default workspace + init_cluster）。"""
         locator = self._default_workspace_locator
         if not locator:
             raise ValueError("default_workspace_locator not configured")
         locator = _normalize_locator(locator)
-        record = make_project_record(
-            name="default",
-            instance_manifest_dir=".ghrah/agents",
-            db_path=self._db_path_for("default"),
+        record = make_project_record(name="default", instance_manifest_dir=".ghrah/agents")
+        root_locator = self._root_locator_for(record.project_id)
+        project_paths = ProjectPaths.from_locator(root_locator)
+        record = record.model_copy(
+            update={
+                "project_root_locator": root_locator,
+                "db_path": str(project_paths.project_db_path),
+            }
         )
-        record = record.model_copy(update={"db_path": self._db_path_for(record.project_id)})
         cluster_id = "default"
-        ws = await self._workspace_mgr.register_workspace(locator, name="default")
-        mount = WorkspaceMount(
-            workspace_id=ws.record.workspace_id,
-            role="default",
-            default_for_agents=True,
-        )
-        WorkspaceMount.validate_single_default([mount])
-        record = record.model_copy(update={"cluster_ids": [cluster_id], "workspaces": [mount]})
-        await self._store.upsert(record)
-        await self._cluster_transport.ensure_cluster(cluster_id)
-        await self._emit("project_created", record)
+        await self._check_create_paths(root_locator, [locator])
+        receipt = None
+        registered_id: str | None = None
+        stored = False
+        cluster_attempted = False
+        try:
+            receipt = project_paths.initialize(record.project_id)
+            known_ids = {r.workspace_id for r in self._workspace_mgr.list_records()}
+            ws = await self._workspace_mgr.register_workspace(locator, name="default")
+            if ws.record.workspace_id not in known_ids:
+                registered_id = ws.record.workspace_id
+            mount = WorkspaceMount(
+                workspace_id=ws.record.workspace_id,
+                role="default",
+                default_for_agents=True,
+            )
+            record = record.model_copy(
+                update={"cluster_ids": [cluster_id], "workspaces": [mount]}
+            )
+            await self._store.upsert(record)
+            stored = True
+            cluster_attempted = True
+            await self._cluster_transport.ensure_cluster(cluster_id)
+        except Exception:
+            if cluster_attempted:
+                try:
+                    if self._cluster_transport.has_cluster(cluster_id):
+                        await self._cluster_transport.shutdown_cluster(cluster_id)
+                except Exception:  # noqa: BLE001
+                    logger.warning("bootstrap rollback: cluster shutdown failed", exc_info=True)
+            if stored:
+                try:
+                    await self._store.delete_uncommitted(record.project_id)
+                except Exception:  # noqa: BLE001
+                    logger.warning("bootstrap rollback: project delete failed", exc_info=True)
+            if registered_id is not None:
+                try:
+                    await self._workspace_mgr.unregister_workspace(registered_id)
+                except Exception:  # noqa: BLE001
+                    logger.warning("bootstrap rollback: workspace unregister failed", exc_info=True)
+            if receipt is not None:
+                project_paths.rollback_initialize(receipt)
+            raise
+        try:
+            await self._emit("project_created", record)
+        except Exception:  # noqa: BLE001
+            logger.exception("bootstrap project_created event delivery failed")
         return record
 
     async def adopt_existing_agents(self, project_id: str, cluster_id: str) -> list[AgentSpec]:

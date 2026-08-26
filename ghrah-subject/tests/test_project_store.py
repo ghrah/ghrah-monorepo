@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -68,12 +69,46 @@ class TestCrudAndRoundtrip:
         await s.stop()
 
     async def test_upsert_and_get(self, store: ProjectStore) -> None:
-        record = make_project_record(name="P1")
+        record = make_project_record(
+            name="P1",
+            description="Description",
+            project_root_locator="file:///private/p1",
+        )
         await store.upsert(record)
         got = await store.get(record.project_id)
         assert got is not None
         assert got.name == "P1"
+        assert got.description == "Description"
+        assert got.project_root_locator == "file:///private/p1"
         assert got.project_id == record.project_id
+
+    async def test_migrates_legacy_columns(self, tmp_path: Path) -> None:
+        db_path = tmp_path / "legacy.db"
+        with sqlite3.connect(db_path) as db:
+            db.execute(
+                "CREATE TABLE subject_projects ("
+                "project_id TEXT PRIMARY KEY, name TEXT NOT NULL, "
+                "manifest_ref TEXT NOT NULL DEFAULT '', "
+                "instance_manifest_dir TEXT NOT NULL DEFAULT '', "
+                "cluster_ids TEXT NOT NULL DEFAULT '[]', "
+                "workspaces TEXT NOT NULL DEFAULT '[]', db_path TEXT NOT NULL DEFAULT '', "
+                "agents TEXT NOT NULL DEFAULT '[]', task_ids TEXT NOT NULL DEFAULT '[]', "
+                "isolation TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL, "
+                "recovery TEXT NOT NULL DEFAULT 'resume', created_at TEXT NOT NULL, "
+                "updated_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, deleted_at TEXT)"
+            )
+        migrated = ProjectStore(db_path)
+        await migrated.start()
+        try:
+            with sqlite3.connect(db_path) as db:
+                columns = {row[1] for row in db.execute("PRAGMA table_info(subject_projects)")}
+                version = db.execute(
+                    "SELECT version FROM subject_schema_versions WHERE component = 'project_store'"
+                ).fetchone()
+            assert {"description", "project_root_locator"} <= columns
+            assert version == (2,)
+        finally:
+            await migrated.stop()
 
     async def test_get_missing_returns_none(self, store: ProjectStore) -> None:
         assert await store.get("nonexistent") is None

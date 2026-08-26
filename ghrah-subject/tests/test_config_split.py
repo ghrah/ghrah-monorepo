@@ -212,6 +212,7 @@ class TestFromEnv:
             "GHRAH_SUBJECT_TRANSPORT_CORE_KIND",
             "GHRAH_SUBJECT_TRANSPORT_OBSERVER_KIND",
             "GHRAH_SUBJECT_ENABLED_UNITS",
+            "GHRAH_SUBJECT_PROJECT_DEFAULT_ROOT_LOCATOR_TEMPLATE",
         ]
         for key in env_keys:
             monkeypatch.delenv(key, raising=False)
@@ -224,6 +225,7 @@ class TestFromEnv:
         assert config.transport.core == "websocket"
         assert config.transport.observer == "websocket"
         assert config.enabled_third_party_units == []
+        assert config.project.default_root_locator_template == "~/.ghrah/projects/{project_id}"
         assert "GHRAH_SUBJECT_SANDBOX_DEFAULT_TIMEOUT" not in caplog.text
 
     def test_from_env_flat_fields(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -237,6 +239,17 @@ class TestFromEnv:
         assert config.db_path == str(tmp_path / "env.db")
         assert config.manifest_root == str(tmp_path / "env-man")
         assert config.log_level == "DEBUG"
+
+    def test_from_env_project_root_template(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(
+            "GHRAH_SUBJECT_PROJECT_DEFAULT_ROOT_LOCATOR_TEMPLATE",
+            "/srv/ghrah/projects/{project_id}",
+        )
+        config = SubjectConfig.from_env()
+        assert (
+            config.project.default_root_locator_template
+            == "/srv/ghrah/projects/{project_id}"
+        )
 
     def test_from_env_sandbox_timeout_fallback_to_core(
         self, monkeypatch: pytest.MonkeyPatch
