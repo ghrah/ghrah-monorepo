@@ -107,8 +107,10 @@ class TestEndToEndSmoke:
             # 经 Observer 命令路径查 chain_history（ledger unit 路由）
             result = await bridge_command(ctx, "get_chain_history", {"agent_name": "ledger-smoke"})
             assert result["success"]
-            # 新 agent 无迭代 → 空链（auto_persist 由 spawn context 配置声明）
-            assert result["data"]["nodes"] == []
+            # P2a 新契约：spawn 即首次 persist——根节点当场落库可读
+            nodes = result["data"]["nodes"]
+            assert len(nodes) == 1
+            assert nodes[0]["parent_id"] is None
 
     async def test_health_check_via_observer_path(self, tmp_path: Path) -> None:
         """health_check 经 Observer 命令路径直达 CoreUnit。"""

@@ -10,10 +10,18 @@ ValidationError 收窄；纯 store + 回调，不依赖 SubjectContext，便于�
 send 双路径收敛（Room 计划附录）：协议面（human/Mock ``room_send`` 命令）与
 实现面（agent 经 Core send ability → ``ctx.serial("command/room_send")``）
 都汇入 ``append_log``——分配 seq、落库、广播 ROOM_LOG_APPENDED。
+
+human 消息投递（投递回路补全）：``room_send``（author_type=human）落账后，
+经注入的 ``deliver`` 回调（RoomUnit 接线 ``ctx.serial("command/send_message")``
+→ CoreUnit → Supervisor.send）把消息送达 room 内 agent 成员。投递为
+fire-and-forget：不阻塞回执、失败不重试、落账仍为权威；author_type=agent
+不投递（作者即发送者，agent 回复由其对端 send ability 走 Supervisor 投递）。
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -41,8 +49,11 @@ from ghrah.subject.room.models import (
 )
 from ghrah.subject.room.store import ConcurrentModificationError, RoomStore
 
+logger = logging.getLogger(__name__)
+
 OnEvent = Callable[[str, dict[str, Any]], Awaitable[None]]
 ProjectExists = Callable[[str], Awaitable[bool]]
+Deliver = Callable[[str, str, str], Awaitable[dict[str, Any]]]
 
 __all__ = ["RoomManager"]
 
@@ -64,10 +75,12 @@ class RoomManager:
         *,
         on_event: OnEvent | None = None,
         project_exists: ProjectExists | None = None,
+        deliver: Deliver | None = None,
     ) -> None:
         self._store = store
         self._on_event = on_event
         self._project_exists = project_exists
+        self._deliver = deliver
 
     @property
     def store(self) -> RoomStore:
@@ -270,9 +283,70 @@ class RoomManager:
         error = self._validate_targets(room, p.data.get("targets"))
         if error is not None:
             return _err(error)
-        return await self.append_log(
+        result = await self.append_log(
             p.room_id, author=p.author, author_type=p.author_type, data=p.data
         )
+        if result.get("success") and p.author_type == RoomSubjectType.HUMAN:
+            self._schedule_delivery(room, p)
+        return result
+
+    def _schedule_delivery(self, room: RoomRecord, p: RoomSendPayload) -> None:
+        """human 消息落账成功后 fire-and-forget 投递给 room 内 agent。
+
+        投递对象：data.targets（已校验 ⊆ agent 成员）优先；缺省整室 agent
+        成员；恒排除作者。不阻塞 room_send 回执，失败仅记日志不重试。
+        """
+        if self._deliver is None:
+            return
+        message = p.data.get("message")
+        if not isinstance(message, str) or not message:
+            logger.warning(
+                "room_send: skip delivery (no message) room=%s author=%s",
+                p.room_id,
+                p.author,
+            )
+            return
+        targets = self._resolve_delivery_targets(room, p)
+        for target in targets:
+            try:
+                asyncio.get_running_loop().create_task(
+                    self._deliver_one(target, sender=p.author, content=message)
+                )
+            except RuntimeError:
+                logger.warning(
+                    "room_send: no running loop, delivery skipped room=%s target=%s",
+                    p.room_id,
+                    target,
+                )
+
+    @staticmethod
+    def _resolve_delivery_targets(room: RoomRecord, p: RoomSendPayload) -> list[str]:
+        data_targets = p.data.get("targets")
+        agent_members = [
+            m.subject for m in room.members if m.subject_type == RoomSubjectType.AGENT
+        ]
+        if isinstance(data_targets, list) and data_targets:
+            member_set = set(agent_members)
+            targets = [t for t in data_targets if t in member_set]
+        else:
+            targets = list(agent_members)
+        return [t for t in targets if t != p.author]
+
+    async def _deliver_one(self, target: str, *, sender: str, content: str) -> None:
+        try:
+            result = await self._deliver(target, sender, content)  # type: ignore[misc]
+        except Exception:
+            logger.exception(
+                "room delivery failed: target=%s sender=%s", target, sender
+            )
+            return
+        if not result.get("success"):
+            logger.warning(
+                "room delivery rejected: target=%s sender=%s error=%s",
+                target,
+                sender,
+                result.get("error"),
+            )
 
     @staticmethod
     def _validate_targets(room: RoomRecord, targets: Any) -> str | None:

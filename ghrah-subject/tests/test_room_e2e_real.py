@@ -8,12 +8,18 @@ RoomUnit（非 mock），覆盖：
 - 真实后端 CRUD/成员/seq/事件（经 bridge_command Observer 命令路径）；
 - send ability 真实回路（agent execute_ability → CoreUnit → SerialRoomBridge
   → ctx.serial command/room_get|room_send → RoomUnit append_log）；
-- RoomLog 持久化跨重启（同 db_path 重装读回）。
+- RoomLog 持久化跨重启（同 db_path 重装读回）；
+- human 消息投递回路（room_send(human) → RoomUnit deliver → ctx.serial
+  command/send_message → CoreUnit → Supervisor.send → agent receive）+
+  spawn 即持久化取证（ghrah.db 建表 + agents 行）。
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import asyncio
+import sqlite3
+import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -48,6 +54,18 @@ async def _stack(tmp_path: Path) -> AsyncIterator[Context]:
 def _data(result: dict[str, Any]) -> dict[str, Any]:
     assert result["success"], result
     return result["data"]
+
+
+async def _wait_for(
+    predicate: Callable[[], bool], timeout: float = 5.0, interval: float = 0.05
+) -> None:
+    """轮询直到 predicate 为真或超时（fire-and-forget 投递的确定性等待）。"""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(interval)
+    raise AssertionError(f"condition not met within {timeout}s")
 
 
 async def _make_project(ctx: Context, name: str = "demo") -> str:
@@ -218,3 +236,97 @@ class TestRoomRealEndToEnd:
             assert log["count"] == 1
             assert log["entries"][0]["data"]["message"] == "persisted"
             assert log["entries"][0]["seq"] == 1
+
+    async def test_human_send_delivery_and_spawn_persistence(
+        self, tmp_path: Path
+    ) -> None:
+        """投递回路冒烟（D1/D2）。
+
+        - D2：spawn 即持久化——ghrah.db 建表 + agents 行落库（WAL 只读连接
+          直查真相源）；
+        - D1：room_send(human) 落账后 fire-and-forget 投递 → agent receive()
+          入史（无 LLM 环境下迭代可能失败，但消息入史发生在 LLM 初始化前，
+          为确定性投递证据；回复质量不在断言范围）。
+        """
+        config = _config(tmp_path)
+        async with _stack(tmp_path) as ctx:
+            project_id = await _make_project(ctx)
+            room = _data(
+                await bridge_command(
+                    ctx, "room_create", {"project_id": project_id, "name": "test"}
+                )
+            )["room"]
+
+            spawn = await bridge_command(
+                ctx,
+                "spawn_agent",
+                {"config": {"name": "planner", "system_prompt": "test", "max_iterations": 1}},
+            )
+            assert spawn["success"], spawn.get("error")
+
+            # D2：Core sqlite 真相源 spawn 即建表 + agents 行
+            conn = sqlite3.connect(f"file:{config.core_db_path}?mode=ro", uri=True)
+            try:
+                tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
+                }
+                assert {"runs", "agents", "nodes", "chain_meta"} <= tables
+                agent_rows = [
+                    row[0] for row in conn.execute("SELECT agent_name FROM agents")
+                ]
+                assert agent_rows == ["planner"]
+            finally:
+                conn.close()
+
+            join = await bridge_command(
+                ctx,
+                "room_join",
+                {
+                    "room_id": room["room_id"],
+                    "subject": "planner",
+                    "subject_type": "agent",
+                },
+            )
+            assert join["success"], join.get("error")
+
+            send = await bridge_command(
+                ctx,
+                "room_send",
+                {
+                    "room_id": room["room_id"],
+                    "author": "human:yuki",
+                    "author_type": "human",
+                    "data": {"message": "你好", "targets": ["planner"]},
+                },
+            )
+            assert send["success"], send.get("error")
+
+            # D1：投递为 fire-and-forget，轮询 agent 入史
+            supervisor = ctx.get("supervisor")
+            actor = supervisor._registry.get_info("planner").actor_handle
+
+            def delivered() -> bool:
+                return len(actor._message_history) > 0
+
+            await _wait_for(delivered, timeout=5.0)
+            received = actor._message_history[0]
+            assert received.content == "你好"
+            assert received.sender == "human:yuki"
+
+            # author_type=agent 不投递（send ability 路径自担 Supervisor 投递）
+            agent_send = await bridge_command(
+                ctx,
+                "room_send",
+                {
+                    "room_id": room["room_id"],
+                    "author": "planner",
+                    "author_type": "agent",
+                    "data": {"message": "ack"},
+                },
+            )
+            assert agent_send["success"], agent_send.get("error")
+            await asyncio.sleep(0.3)
+            assert len(actor._message_history) == 1

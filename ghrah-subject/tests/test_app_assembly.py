@@ -107,11 +107,15 @@ class TestAssembleSubject:
             assert actor._context_manager.persistence is not None
             assert str(actor._context_manager.persistence.db_path) == config.core_db_path
 
-            # ledger 读侧直连连通（同文件 WAL 双连接；新 agent 无迭代 → 空链。
-            # agents 表登记发生在首次 save_node；有迭代落库的端到端归任务 7 冒烟）
+            # ledger 读侧直连连通（同文件 WAL 双连接）。P2a 新契约：spawn 即
+            # connect + 首次 persist——根节点（system prompt 快照）与 agents
+            # 行当场落库（非旧「首次 save_node 才登记」语义）
             ledger = ctx.get(LEDGER.name)
             await ledger.start()
-            assert await ledger.get_chain_history("ledger-probe") == []
+            history = await ledger.get_chain_history("ledger-probe")
+            assert len(history) == 1
+            assert history[0].parent_id is None
+            assert await ledger.list_agents() == ["ledger-probe"]
             await ledger.stop()
 
     async def test_reconcile_disabled_leaves_no_report(self, tmp_path: Path) -> None:

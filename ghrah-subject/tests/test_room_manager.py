@@ -404,3 +404,158 @@ async def test_unknown_command(tmp_path: Path) -> None:
         assert "unknown command" in result["error"]
     finally:
         await m.store.stop()
+
+
+# ─── human 消息投递（投递回路补全：fire-and-forget + targets 解析） ───
+
+
+async def _delivery_manager(
+    tmp_path: Path,
+    deliveries: list[tuple[str, str, str]],
+    events: list[tuple[str, dict[str, Any]]] | None = None,
+) -> RoomManager:
+    store = RoomStore(tmp_path / "rooms.db")
+    await store.start()
+
+    async def on_event(event_type: str, payload: dict[str, Any]) -> None:
+        if events is not None:
+            events.append((event_type, payload))
+
+    async def project_exists(project_id: str) -> bool:
+        return project_id in PROJECT_IDS
+
+    async def deliver(target: str, sender: str, content: str) -> dict[str, Any]:
+        deliveries.append((target, sender, content))
+        return {"success": True, "data": {"content": "ok"}, "error": None}
+
+    return RoomManager(
+        store, on_event=on_event, project_exists=project_exists, deliver=deliver
+    )
+
+
+async def _join(m: RoomManager, room_id: str, subject: str, subject_type: str) -> None:
+    result = await m.handle_command(
+        "room_join",
+        {"room_id": room_id, "subject": subject, "subject_type": subject_type},
+    )
+    assert result["success"], result
+
+
+async def _drain_delivery_tasks() -> None:
+    import asyncio
+
+    for task in asyncio.all_tasks():
+        if task is not asyncio.current_task() and not task.done():
+            await asyncio.wait([task], timeout=2.0)
+
+
+async def test_human_send_delivers_to_targets(tmp_path: Path) -> None:
+    """data.targets 优先：只投递 targets 内的 agent 成员，排除作者。"""
+    deliveries: list[tuple[str, str, str]] = []
+    m = await _delivery_manager(tmp_path, deliveries)
+    try:
+        room = await _make_room(m)
+        await _join(m, room["room_id"], "architect", "agent")
+        await _join(m, room["room_id"], "frontend-dev", "agent")
+
+        result = await m.handle_command(
+            "room_send",
+            {
+                "room_id": room["room_id"],
+                "author": "human:yuki",
+                "author_type": "human",
+                "data": {"message": "你好", "targets": ["architect"]},
+            },
+        )
+        assert result["success"], result
+        await _drain_delivery_tasks()
+        assert deliveries == [("architect", "human:yuki", "你好")]
+    finally:
+        await m.store.stop()
+
+
+async def test_human_send_broadcasts_to_all_agents_when_no_targets(tmp_path: Path) -> None:
+    """缺省 targets：整室 agent 成员投递；human 成员与作者排除。"""
+    deliveries: list[tuple[str, str, str]] = []
+    m = await _delivery_manager(tmp_path, deliveries)
+    try:
+        room = await _make_room(m)
+        await _join(m, room["room_id"], "architect", "agent")
+        await _join(m, room["room_id"], "frontend-dev", "agent")
+        await _join(m, room["room_id"], "human:yuki", "human")
+
+        result = await m.handle_command(
+            "room_send",
+            {
+                "room_id": room["room_id"],
+                "author": "human:yuki",
+                "author_type": "human",
+                "data": {"message": "hi all"},
+            },
+        )
+        assert result["success"], result
+        await _drain_delivery_tasks()
+        assert sorted(deliveries) == [
+            ("architect", "human:yuki", "hi all"),
+            ("frontend-dev", "human:yuki", "hi all"),
+        ]
+    finally:
+        await m.store.stop()
+
+
+async def test_agent_send_not_delivered(tmp_path: Path) -> None:
+    """author_type=agent 不投递（作者即发送者，回路由对端 send ability 承担）。"""
+    deliveries: list[tuple[str, str, str]] = []
+    m = await _delivery_manager(tmp_path, deliveries)
+    try:
+        room = await _make_room(m)
+        await _join(m, room["room_id"], "architect", "agent")
+        await _join(m, room["room_id"], "frontend-dev", "agent")
+
+        result = await m.handle_command(
+            "room_send",
+            {
+                "room_id": room["room_id"],
+                "author": "architect",
+                "author_type": "agent",
+                "data": {"message": "done", "targets": ["frontend-dev"]},
+            },
+        )
+        assert result["success"], result
+        await _drain_delivery_tasks()
+        assert deliveries == []
+    finally:
+        await m.store.stop()
+
+
+async def test_delivery_failure_does_not_affect_room_send(tmp_path: Path) -> None:
+    """投递异常/被拒：fire-and-forget，不阻断回执、不重试。"""
+    deliveries: list[tuple[str, str, str]] = []
+    store = RoomStore(tmp_path / "rooms.db")
+    await store.start()
+
+    async def deliver(target: str, sender: str, content: str) -> dict[str, Any]:
+        deliveries.append((target, sender, content))
+        if target == "bad":
+            raise RuntimeError("boom")
+        return {"success": False, "data": None, "error": "rejected"}
+
+    m = RoomManager(store, deliver=deliver)
+    try:
+        room = await _make_room(m)
+        await _join(m, room["room_id"], "bad", "agent")
+        result = await m.handle_command(
+            "room_send",
+            {
+                "room_id": room["room_id"],
+                "author": "human:yuki",
+                "author_type": "human",
+                "data": {"message": "x"},
+            },
+        )
+        assert result["success"], result
+        assert result["data"]["entry"]["seq"] == 1
+        await _drain_delivery_tasks()
+        assert deliveries == [("bad", "human:yuki", "x")]
+    finally:
+        await m.store.stop()

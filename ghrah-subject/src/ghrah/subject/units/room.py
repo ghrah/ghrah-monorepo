@@ -60,10 +60,29 @@ class RoomUnit(SubjectUnit):
             )
             return bool(result.get("success"))
 
+        async def deliver(target: str, sender: str, content: str) -> dict[str, Any]:
+            """human 消息投递：经宿主 serial 命令面 → CoreUnit send_message
+            （Supervisor.send）送达 agent。CoreUnit 未挂载时 serial 返回
+            None，按 Unknown command 语义返回失败（投递侧仅记日志）。"""
+            if self._ctx is None:
+                return {"success": False, "data": None, "error": "RoomUnit not initialized"}
+            result = await self._ctx.serial(
+                "command/send_message",
+                {"target": target, "content": content, "sender": sender},
+            )
+            if not isinstance(result, dict):
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "Unknown command: send_message (core unit not mounted?)",
+                }
+            return result
+
         self._manager = RoomManager(
             self._store,
             on_event=self._emit_event,
             project_exists=project_exists,
+            deliver=deliver,
         )
         ctx.provide(ROOM_MANAGER.name, self._manager)
         ctx.provide(ROOM_STORE.name, self._store)
