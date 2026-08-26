@@ -106,9 +106,13 @@ function closeTab(tab: WorkspaceTab) {
       </div>
 
       <div class="workspace-content">
-        <!-- KeepAlive 保留 ActionChain 增量缓存，同时让隐藏面板停止渲染更新。 -->
+        <!-- KeepAlive 保留 ActionChain 增量缓存，同时让隐藏面板停止渲染更新。
+             key 必须绑定 tab id：KeepAlive 以 vnode.key 为缓存键，若 key 恒为 0，
+             ChatPanel 与 ActionChainPanel 会互相覆盖缓存条目，切回时 type 与
+             component 不匹配，activate 分支 unmount 旧组件时
+             parentComponent.ctx.deactivate 不存在 → TypeError，界面卡死。 -->
         <KeepAlive>
-          <component :is="activePanel" v-if="activePanel" />
+          <component :is="activePanel" v-if="activePanel" :key="activeTabId" />
         </KeepAlive>
         <div v-if="!activeTab" class="workspace-empty">
           <div class="empty-mark">⌘</div>

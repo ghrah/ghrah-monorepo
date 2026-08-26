@@ -11,12 +11,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { createPinia, setActivePinia } from "pinia";
 
-import {
-  MockServer,
-  MockState,
-  demoScenario,
-  runScenario,
-} from "../../mock-server/dist/index.js";
+import { MockServer, MockState, demoScenario, runScenario } from "../../mock-server/dist/index.js";
 import {
   ObserverClient,
   connectStores,
@@ -107,9 +102,17 @@ async function main() {
   );
   check("room history via get_room_log", historyOk);
 
-  chat.addPendingEntry({ to: arch.room_id, content: "smoke hello", agentName: "", roomId: arch.room_id });
+  chat.addPendingEntry({
+    to: arch.room_id,
+    content: "smoke hello",
+    agentName: "",
+    roomId: arch.room_id,
+  });
   const sendRes = await client.roomSend(arch.room_id, { message: "smoke hello" });
-  check("room_send COMMAND_RESULT success + entry echoed", sendRes.success && !!sendRes.data?.entry);
+  check(
+    "room_send COMMAND_RESULT success + entry echoed",
+    sendRes.success && !!sendRes.data?.entry,
+  );
   const echoOk = await waitFor(
     "ROOM_LOG_APPENDED confirms pending entry",
     () =>
@@ -120,7 +123,10 @@ async function main() {
 
   // ── 6. seq 单调 ──
   const seqs = (rooms.logs.get(arch.room_id) ?? []).map((e) => e.seq);
-  check("room log seq strictly increasing", seqs.every((s, i) => i === 0 || s > seqs[i - 1]));
+  check(
+    "room log seq strictly increasing",
+    seqs.every((s, i) => i === 0 || s > seqs[i - 1]),
+  );
 
   // ── 6.5 定向发信（data.targets 约定）──
   const targetedRes = await client.roomSend(arch.room_id, {
@@ -136,13 +142,14 @@ async function main() {
     message: "to nobody",
     targets: ["ghost"],
   });
-  check("invalid target rejected", !badTarget.success && /target not in room/.test(badTarget.error ?? ""));
-  const scenarioTargeted = await waitFor(
-    "scenario targeted message in frontend room",
-    () =>
-      (rooms.logs.get(roomByName("frontend")?.room_id) ?? []).some(
-        (e) => Array.isArray(e.data?.targets) && e.data.targets.includes("frontend"),
-      ),
+  check(
+    "invalid target rejected",
+    !badTarget.success && /target not in room/.test(badTarget.error ?? ""),
+  );
+  const scenarioTargeted = await waitFor("scenario targeted message in frontend room", () =>
+    (rooms.logs.get(roomByName("frontend")?.room_id) ?? []).some(
+      (e) => Array.isArray(e.data?.targets) && e.data.targets.includes("frontend"),
+    ),
   );
   check("scenario targeted entry visible in room log", scenarioTargeted);
 
@@ -156,15 +163,11 @@ async function main() {
       },
     ],
   });
-  check(
-    "project_create success",
-    newProject.success && !!newProject.data?.project?.project_id,
-  );
+  check("project_create success", newProject.success && !!newProject.data?.project?.project_id);
   const smokeProjectId = newProject.data?.project?.project_id;
   if (smokeProjectId) {
-    const projectSynced = await waitFor(
-      "new project in store (PROJECT_CREATED)",
-      () => projects.projects.has(smokeProjectId),
+    const projectSynced = await waitFor("new project in store (PROJECT_CREATED)", () =>
+      projects.projects.has(smokeProjectId),
     );
     check("PROJECT_CREATED updates projects store", projectSynced);
 
@@ -172,30 +175,22 @@ async function main() {
     const smokeRoomId = newRoom.data?.room?.room_id;
     check("room_create success", newRoom.success && !!smokeRoomId);
     if (smokeRoomId) {
-      const roomSynced = await waitFor(
-        "new room in store (ROOM_CREATED)",
-        () => rooms.rooms.has(smokeRoomId),
+      const roomSynced = await waitFor("new room in store (ROOM_CREATED)", () =>
+        rooms.rooms.has(smokeRoomId),
       );
       check("ROOM_CREATED updates rooms store", roomSynced);
 
       const join = await client.joinRoom(smokeRoomId, "architect", "agent");
       check("room_join success", join.success);
-      const memberJoined = await waitFor(
-        "architect visible in smoke-room members",
-        () =>
-          (rooms.rooms.get(smokeRoomId)?.members ?? []).some(
-            (m) => m.subject === "architect",
-          ),
+      const memberJoined = await waitFor("architect visible in smoke-room members", () =>
+        (rooms.rooms.get(smokeRoomId)?.members ?? []).some((m) => m.subject === "architect"),
       );
       check("ROOM_MEMBER_JOINED updates store", memberJoined);
 
       const leave = await client.leaveRoom(smokeRoomId, "architect");
       const memberLeft = await waitFor(
         "architect removed from smoke-room members",
-        () =>
-          !(rooms.rooms.get(smokeRoomId)?.members ?? []).some(
-            (m) => m.subject === "architect",
-          ),
+        () => !(rooms.rooms.get(smokeRoomId)?.members ?? []).some((m) => m.subject === "architect"),
       );
       check("room_leave success + ROOM_MEMBER_LEFT updates store", leave.success && memberLeft);
     }
@@ -210,7 +205,11 @@ async function main() {
   check("per-agent chain received", chainOk);
 
   // ── 8. HITL 单路径：scenario 12.6s 处 backend 触发 deploy 审批 ──
-  const hitlOk = await waitFor("hitl_request received", () => hitl.pendingRequests.length > 0, 25_000);
+  const hitlOk = await waitFor(
+    "hitl_request received",
+    () => hitl.pendingRequests.length > 0,
+    25_000,
+  );
   check("HITL_REQUEST received", hitlOk);
   if (hitlOk) {
     const req = hitl.pendingRequests[0];

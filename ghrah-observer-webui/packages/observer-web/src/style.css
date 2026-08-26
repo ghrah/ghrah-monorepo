@@ -511,6 +511,10 @@ button:focus-visible,
   min-width: 0;
   flex: 1;
   overflow-x: auto;
+  /* overflow-x 设为 auto 后 overflow-y 计算值变为 auto（非 visible），
+     active tab 的 ::after 指示条（bottom: -1px, height: 2px）向下探出 1px
+     会被当作可滚动内容 → 出现 1px 高度的纵向滚动条。纵向应裁剪而非滚动。 */
+  overflow-y: hidden;
   scrollbar-width: thin;
 }
 

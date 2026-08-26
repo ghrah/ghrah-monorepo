@@ -666,17 +666,15 @@ describe("connectStores", () => {
       const nodeA = { id: "na", ability_names: ["conversation"] };
       const nodeB = { id: "nb", ability_names: ["send"] };
 
-      const spy = vi
-        .spyOn(client, "getChainHistory")
-        .mockImplementation((name: string) => {
-          const nodes = name === "agent-1" ? [nodeA] : [nodeB];
-          return Promise.resolve({
-            request_id: "r",
-            success: true,
-            original_command: CommandType.GET_CHAIN_HISTORY,
-            data: { nodes },
-          } as Awaited<ReturnType<typeof client.getChainHistory>>);
-        });
+      const spy = vi.spyOn(client, "getChainHistory").mockImplementation((name: string) => {
+        const nodes = name === "agent-1" ? [nodeA] : [nodeB];
+        return Promise.resolve({
+          request_id: "r",
+          success: true,
+          original_command: CommandType.GET_CHAIN_HISTORY,
+          data: { nodes },
+        } as Awaited<ReturnType<typeof client.getChainHistory>>);
+      });
 
       internals(client)._dispatch(
         SystemType.COMMAND_RESULT,

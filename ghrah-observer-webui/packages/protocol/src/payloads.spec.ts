@@ -37,6 +37,8 @@ import {
   PersistListPayloadSchema,
   PersistLoadPayloadSchema,
   PersistSavePayloadSchema,
+  ProjectCreatePayloadSchema,
+  ProjectUpdatePayloadSchema,
   RegisterAbilityPayloadSchema,
   SendMessagePayloadSchema,
   ShutdownClusterPayloadSchema,
@@ -57,6 +59,26 @@ import {
   WorkspaceSnapshotPayloadSchema,
   WorkspaceStatusPayloadSchema,
 } from "./payloads.js";
+
+describe("Project payload schemas", () => {
+  it("rejects removed legacy create fields", () => {
+    expect(() =>
+      ProjectCreatePayloadSchema.parse({
+        name: "demo",
+        default_workspace_locator: "/tmp/demo",
+      }),
+    ).toThrow();
+  });
+
+  it("rejects removed compatibility update fields", () => {
+    expect(() =>
+      ProjectUpdatePayloadSchema.parse({
+        project_id: "project-1",
+        instance_manifest_dir: "/tmp/manifests",
+      }),
+    ).toThrow();
+  });
+});
 
 describe("AgentConfigPayloadSchema", () => {
   it("parses with required name only", () => {

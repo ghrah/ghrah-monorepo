@@ -343,9 +343,7 @@ export class MockState {
         return fail("invalid targets: expected string[]");
       }
       for (const t of targets as string[]) {
-        const isMember = room.members.some(
-          (m) => m.subject === t && m.subject_type === "agent",
-        );
+        const isMember = room.members.some((m) => m.subject === t && m.subject_type === "agent");
         if (!isMember) return fail(`target not in room: ${t}`);
       }
     }

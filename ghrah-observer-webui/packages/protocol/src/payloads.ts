@@ -553,22 +553,26 @@ export const ProjectInfoPayloadSchema = z.object({
   deleted_at: z.string().nullable().optional(),
 });
 
-export const ProjectCreatePayloadSchema = z.object({
-  name: z.string(),
-  description: z.string().optional().default(""),
-  project_root_locator: z.string().optional().default(""),
-  writable_workspaces: z.array(WritableWorkspaceSpecSchema).optional().default([]),
-  manifest_ref: z.string().optional().default(""),
-  recovery: RecoveryActionSchema.optional().default("resume"),
-});
+export const ProjectCreatePayloadSchema = z
+  .object({
+    name: z.string(),
+    description: z.string().optional().default(""),
+    project_root_locator: z.string().optional().default(""),
+    writable_workspaces: z.array(WritableWorkspaceSpecSchema).optional().default([]),
+    manifest_ref: z.string().optional().default(""),
+    recovery: RecoveryActionSchema.optional().default("resume"),
+  })
+  .strict();
 
-export const ProjectUpdatePayloadSchema = z.object({
-  project_id: z.string(),
-  name: z.string().nullable().optional(),
-  description: z.string().nullable().optional(),
-  manifest_ref: z.string().nullable().optional(),
-  expected_version: z.number().int().nullable().optional(),
-});
+export const ProjectUpdatePayloadSchema = z
+  .object({
+    project_id: z.string(),
+    name: z.string().nullable().optional(),
+    description: z.string().nullable().optional(),
+    manifest_ref: z.string().nullable().optional(),
+    expected_version: z.number().int().nullable().optional(),
+  })
+  .strict();
 
 export const ProjectIdPayloadSchema = z.object({
   project_id: z.string(),
