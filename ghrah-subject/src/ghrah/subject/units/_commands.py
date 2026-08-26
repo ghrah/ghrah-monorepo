@@ -11,6 +11,7 @@ from ghrah.protocol.types import (  # type: ignore[import-untyped]
     MANIFEST_COMMANDS,
     PROJECT_COMMANDS,
     RECONCILE_COMMANDS,
+    ROOM_COMMANDS,
     TASK_COMMANDS,
     WORKSPACE_COMMANDS,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "MANIFEST_COMMANDS",
     "PROJECT_COMMANDS",
     "RECONCILE_COMMANDS",
+    "ROOM_COMMANDS",
     "TASK_COMMANDS",
     "WORKSPACE_COMMANDS",
 ]

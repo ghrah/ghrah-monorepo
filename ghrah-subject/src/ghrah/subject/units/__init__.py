@@ -27,9 +27,13 @@ async def mount_builtin_units(
 
     聚合裁决后收敛：coexistence = 6（sandbox/manifest_store/ledger/workspace/
     task/desired_state——读写侧均不依赖已剔除的四件套）；full = 6 +
-    observer/core_cluster_registry/project/recovery = 10。**逐个挂载并等
+    observer/core_cluster_registry/project/room/recovery = 11。**逐个挂载并等
     ACTIVE**（对齐旧 engine 顺序 start 语义；实测并发挂载会让多个 store
     同时打开同一 SQLite 文件触发 ``database is locked``）。
+
+    RoomUnit 在 ProjectUnit 之后（requires PROJECT_MANAGER）、CoreUnit 经
+    registry 懒挂载必然在后——满足 Room 计划附录「RoomUnit 先于 CoreUnit
+    挂载」的装配顺序要求（send 回路唯一跨 unit 耦合点）。
     """
 
     if profile not in {"coexistence", "full"}:
@@ -56,6 +60,7 @@ async def mount_builtin_units(
         from ghrah.subject.units.core_cluster import CoreClusterRegistryUnit
         from ghrah.subject.units.project import ProjectUnit
         from ghrah.subject.units.recovery import RecoveryUnit
+        from ghrah.subject.units.room import RoomUnit
         from ghrah.subject.units.websocket_observer_endpoint import (
             WebSocketObserverEndpointUnit,
         )
@@ -65,6 +70,7 @@ async def mount_builtin_units(
                 WebSocketObserverEndpointUnit(config),
                 CoreClusterRegistryUnit(config),
                 ProjectUnit(config),
+                RoomUnit(config),
                 RecoveryUnit(config),
             ]
         )

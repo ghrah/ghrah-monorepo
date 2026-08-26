@@ -71,6 +71,7 @@ async def test_full_assembly_all_fibers_active(
             "websocket_observer_endpoint",
             "core_cluster_registry",
             "project",
+            "room",
             "recovery",
         }
 
@@ -82,4 +83,6 @@ async def test_full_assembly_all_fibers_active(
         assert ctx.get("observer_event_bus") is not None
         assert ctx.get("core_cluster_registry") is not None
         assert ctx.get("project_manager") is not None
+        assert ctx.get("room_manager") is not None
+        assert ctx.get("room_store") is not None
         assert ctx.get("reconciliation_service") is not None

@@ -24,6 +24,8 @@ from ghrah.subject.workspace.models import WorkspaceRecord
 
 if TYPE_CHECKING:
     from ghrah.subject.project.models import AgentSpec, ProjectRecord
+    from ghrah.subject.room.manager import RoomManager
+    from ghrah.subject.room.store import RoomStore
 
 __all__ = [
     "COMMAND_BRIDGE",
@@ -38,6 +40,8 @@ __all__ = [
     "OBSERVER_EVENT_BUS",
     "PROJECT_MANAGER",
     "RECONCILIATION_SERVICE",
+    "ROOM_MANAGER",
+    "ROOM_STORE",
     "SANDBOX_EXECUTOR",
     "SESSION_REGISTRY",
     "TASK_MANAGER",
@@ -49,6 +53,7 @@ __all__ = [
     "CoreClusterRegistryService",
     "ObserverEventBus",
     "ProjectManagerService",
+    "RoomManagerService",
     "SubjectServiceKey",
     "TaskManagerService",
     "WorkspaceService",
@@ -119,6 +124,33 @@ class ProjectManagerService(Protocol):
         project.agents desired-state，返回列表。"""
 
 
+class RoomManagerService(Protocol):
+    """Room command orchestration contract exposed to runtime dispatch.
+
+    send 收敛点（Room 计划附录双调用方分流）：Core send ability 经
+    ``ctx.serial("command/room_send", ...)``（handle_command）或本服务直调
+    ``append_log`` 落账，两路径同语义。
+    """
+
+    async def handle_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Dispatch a room command. Returns a dispatcher-shape result dict."""
+
+    async def append_log(
+        self,
+        room_id: str,
+        *,
+        author: str,
+        author_type: Any,
+        data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """分配 seq → 落库 → 广播 ROOM_LOG_APPENDED。"""
+
+    async def resolve_recipients(
+        self, room_ids: list[str], extra_targets: list[str] | None = None
+    ) -> dict[str, Any]:
+        """recipients = Σ room agent 成员 ∪ extra_targets 去重（send ability 用）。"""
+
+
 class ClusterHandle(Protocol):
     """单 cluster 的 Core 接入门面契约（spawn/terminate/list_agents）。"""
 
@@ -181,6 +213,8 @@ TASK_MANAGER = SubjectServiceKey[TaskManagerService]("task_manager")
 TASK_STORE = SubjectServiceKey[TaskStore]("task_store", TaskStore)
 CORE_CLUSTER_REGISTRY = SubjectServiceKey[CoreClusterRegistryService]("core_cluster_registry")
 PROJECT_MANAGER = SubjectServiceKey[ProjectManagerService]("project_manager")
+ROOM_MANAGER = SubjectServiceKey[RoomManagerService]("room_manager")
+ROOM_STORE = SubjectServiceKey["RoomStore"]("room_store")
 
 # Reserved for future integrations. The keys are intentionally real so
 # dependency declarations can be written before the concrete services exist.
