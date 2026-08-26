@@ -148,7 +148,13 @@ async function main() {
 
   // ── 6.6 UI 管理面链路：project_create → room_create → join/leave ──
   const newProject = await client.createProject("smoke-project", {
-    defaultWorkspaceLocator: "/tmp/ghrah-smoke-project",
+    writableWorkspaces: [
+      {
+        locator: "/tmp/ghrah-smoke-project",
+        name: "default",
+        defaultForAgents: true,
+      },
+    ],
   });
   check(
     "project_create success",

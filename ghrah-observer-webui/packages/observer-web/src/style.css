@@ -425,6 +425,56 @@ button:focus-visible,
   line-height: 1.4;
 }
 
+.project-workspace-heading,
+.project-workspace-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-workspace-heading {
+  justify-content: space-between;
+}
+
+.project-workspace-add,
+.project-workspace-remove {
+  border: 0;
+  background: transparent;
+  color: #6875d8;
+  cursor: pointer;
+}
+
+.project-workspace-row {
+  margin-bottom: 8px;
+}
+
+.project-workspace-name {
+  max-width: 92px;
+}
+
+.project-summary {
+  display: grid;
+  gap: 5px;
+  margin: 8px 10px;
+  padding: 9px;
+  border: 1px solid #e1e5ec;
+  border-radius: 8px;
+  color: #626979;
+  font-size: 10px;
+}
+
+.project-summary p {
+  margin: 0;
+}
+
+.project-summary code {
+  overflow: hidden;
+  color: #343947;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .project-create-cancel {
   width: 30px;
   padding: 0;

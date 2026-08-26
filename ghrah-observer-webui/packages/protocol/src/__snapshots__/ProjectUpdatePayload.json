@@ -3,6 +3,5 @@
   "name": "ghrah-demo-v2",
   "description": "Updated project description",
   "manifest_ref": null,
-  "instance_manifest_dir": null,
   "expected_version": 3
 }

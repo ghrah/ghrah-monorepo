@@ -8,8 +8,8 @@ import type {
   HITLRequestPayload,
   ManifestAbilityEventPayload,
   ManifestAgentEventPayload,
-  ProjectEventPayload,
   ProjectAgentEventPayload,
+  ProjectEventPayload,
   ProjectInfoPayload,
   RoomDeletedEventPayload,
   RoomEventPayload,
@@ -235,7 +235,12 @@ export function connectStores(
     await Promise.all(
       agentNames.map(async (name) => {
         try {
-          const res = await client.getChainHistory(name);
+          const projectId = projects.projectList.find((project) =>
+            project.agents.some((agent) => agent.name === name),
+          )?.project_id;
+          const res = projectId
+            ? await client.getChainHistory(name, undefined, projectId)
+            : await client.getChainHistory(name);
           if (!res.success || !res.data) return;
           const nodes = (res.data as Record<string, unknown>).nodes;
           if (Array.isArray(nodes)) {

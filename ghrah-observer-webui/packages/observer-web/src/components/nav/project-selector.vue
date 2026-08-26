@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useProjectsStore } from "@ghrah/observer-core";
-import { nextTick, ref } from "vue";
+import { computed, nextTick, ref } from "vue";
 import { useObserver } from "@/composables/useObserver";
 
 const projects = useProjectsStore();
@@ -9,17 +9,20 @@ const { switchProject, createProject, error } = useObserver();
 const creating = ref(false);
 const newName = ref("");
 const newDescription = ref("");
-const newWorkspaceLocator = ref("");
-const newWorkspaceName = ref("default");
+const newProjectRoot = ref("");
+const newWorkspaces = ref<Array<{ locator: string; name: string }>>([]);
 const busy = ref(false);
 const nameInput = ref<HTMLInputElement | null>(null);
+const activeProject = computed(() =>
+  projects.activeProjectId ? projects.projects.get(projects.activeProjectId) : undefined,
+);
 
 function startCreate() {
   creating.value = true;
   newName.value = "";
   newDescription.value = "";
-  newWorkspaceLocator.value = "";
-  newWorkspaceName.value = "default";
+  newProjectRoot.value = "";
+  newWorkspaces.value = [];
   void nextTick(() => nameInput.value?.focus());
 }
 
@@ -27,20 +30,36 @@ function cancelCreate() {
   creating.value = false;
   newName.value = "";
   newDescription.value = "";
-  newWorkspaceLocator.value = "";
-  newWorkspaceName.value = "default";
+  newProjectRoot.value = "";
+  newWorkspaces.value = [];
+}
+
+function addWorkspace() {
+  newWorkspaces.value.push({
+    locator: "",
+    name: newWorkspaces.value.length ? "workspace" : "default",
+  });
+}
+
+function removeWorkspace(index: number) {
+  newWorkspaces.value.splice(index, 1);
 }
 
 async function submitCreate() {
   const name = newName.value.trim();
-  const workspaceLocator = newWorkspaceLocator.value.trim();
-  if (!name || !workspaceLocator || busy.value) return;
+  if (!name || busy.value) return;
+  if (newWorkspaces.value.some((workspace) => !workspace.locator.trim())) return;
   busy.value = true;
   try {
     const result = await createProject(name, {
       description: newDescription.value.trim(),
-      defaultWorkspaceLocator: workspaceLocator,
-      defaultWorkspaceName: newWorkspaceName.value.trim() || "default",
+      projectRootLocator: newProjectRoot.value.trim() || undefined,
+      writableWorkspaces: newWorkspaces.value.map((workspace, index) => ({
+        locator: workspace.locator.trim(),
+        name: workspace.name.trim() || `workspace-${index + 1}`,
+        role: index === 0 ? "default" : "workspace",
+        defaultForAgents: index === 0,
+      })),
     });
     if (result?.success) {
       // PROJECT_CREATED 事件驱动 store 后选定新 project
@@ -88,6 +107,20 @@ async function submitCreate() {
 
     <p v-else class="project-empty">No projects</p>
 
+    <div v-if="activeProject" class="project-summary">
+      <strong>{{ activeProject.name }}</strong>
+      <p v-if="activeProject.description">{{ activeProject.description }}</p>
+      <span>Internal Project Root</span>
+      <code :title="activeProject.project_root_locator">
+        {{ activeProject.project_root_locator || "Legacy project — migration pending" }}
+      </code>
+      <small v-if="activeProject.project_root_locator" class="project-derived-paths">
+        Internal stores: db/tasks.sqlite3 · db/rooms.sqlite3 · db/action-chains.sqlite3 ·
+        manifests/agents
+      </small>
+      <small>{{ activeProject.workspaces?.length ?? 0 }} writable workspace(s)</small>
+    </div>
+
     <div class="project-add-area">
       <span class="project-divider" />
       <button
@@ -133,33 +166,68 @@ async function submitCreate() {
             class="project-create-input project-create-textarea"
             @keydown.esc="cancelCreate"
           />
-          <label for="new-project-workspace">Default workspace folder</label>
+          <label for="new-project-root">Internal Project Root</label>
           <input
-            id="new-project-workspace"
-            v-model="newWorkspaceLocator"
+            id="new-project-root"
+            v-model="newProjectRoot"
             type="text"
-            placeholder="/absolute/path/to/project"
+            placeholder="Auto-generated under ~/.ghrah/projects"
             class="project-create-input"
             @keydown.esc="cancelCreate"
           />
           <p class="project-create-hint">
-            Use a unique folder that does not contain, or sit inside, another project's workspace.
+            Private Subject data. Agents cannot access this folder as a workspace.
           </p>
-          <label for="new-project-workspace-name">Workspace name</label>
-          <input
-            id="new-project-workspace-name"
-            v-model="newWorkspaceName"
-            type="text"
-            placeholder="default"
-            class="project-create-input"
-            @keydown.esc="cancelCreate"
-          />
+          <div class="project-workspace-heading">
+            <label>Writable workspaces</label>
+            <button type="button" class="project-workspace-add" @click="addWorkspace">
+              + Add
+            </button>
+          </div>
+          <p v-if="newWorkspaces.length === 0" class="project-create-hint">
+            None. Agents will start without a default writable folder.
+          </p>
+          <div
+            v-for="(workspace, index) in newWorkspaces"
+            :key="index"
+            class="project-workspace-row"
+          >
+            <input
+              v-model="workspace.name"
+              type="text"
+              :aria-label="`Workspace ${index + 1} name`"
+              placeholder="Workspace name"
+              class="project-create-input project-workspace-name"
+            />
+            <input
+              v-model="workspace.locator"
+              type="text"
+              :aria-label="`Workspace ${index + 1} path`"
+              placeholder="/absolute/path/to/workspace"
+              class="project-create-input"
+            />
+            <button
+              type="button"
+              class="project-workspace-remove"
+              :aria-label="`Remove workspace ${index + 1}`"
+              @click="removeWorkspace(index)"
+            >
+              ×
+            </button>
+          </div>
+          <p v-if="newWorkspaces.length > 0" class="project-create-hint">
+            The first workspace is the default for agents. Workspaces cannot overlap Project Roots.
+          </p>
         </div>
         <div class="project-create-actions">
           <button
             type="submit"
             class="btn-primary"
-            :disabled="busy || !newName.trim() || !newWorkspaceLocator.trim()"
+            :disabled="
+              busy ||
+              !newName.trim() ||
+              newWorkspaces.some((workspace) => !workspace.locator.trim())
+            "
           >
             {{ busy ? "…" : "Create" }}
           </button>

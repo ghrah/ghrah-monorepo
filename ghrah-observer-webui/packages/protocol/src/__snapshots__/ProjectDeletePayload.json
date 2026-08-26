@@ -1,4 +1,5 @@
 {
   "project_id": "proj-001",
-  "force": false
+  "force": false,
+  "purge_storage": false
 }

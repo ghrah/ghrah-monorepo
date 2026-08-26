@@ -68,7 +68,11 @@ describe("ProjectSelector", () => {
     expect(input.exists()).toBe(true);
     await input.setValue("demo-project");
     await wrapper.find('textarea[placeholder="What is this project for?"]').setValue("Demo app");
-    await wrapper.find('input[placeholder="/absolute/path/to/project"]').setValue("/work/demo");
+    await wrapper
+      .find('input[placeholder="Auto-generated under ~/.ghrah/projects"]')
+      .setValue("/private/demo");
+    await wrapper.find("button.project-workspace-add").trigger("click");
+    await wrapper.find('input[aria-label="Workspace 1 path"]').setValue("/work/demo");
     createProjectMock.mockResolvedValue({
       success: true,
       data: { project: { project_id: "p9", name: "demo-project" } },
@@ -76,8 +80,15 @@ describe("ProjectSelector", () => {
     await wrapper.find("form").trigger("submit.prevent");
     expect(createProjectMock).toHaveBeenCalledWith("demo-project", {
       description: "Demo app",
-      defaultWorkspaceLocator: "/work/demo",
-      defaultWorkspaceName: "default",
+      projectRootLocator: "/private/demo",
+      writableWorkspaces: [
+        {
+          locator: "/work/demo",
+          name: "default",
+          role: "default",
+          defaultForAgents: true,
+        },
+      ],
     });
     expect(switchProjectMock).toHaveBeenCalledWith("p9");
     // 成功后表单收起
@@ -88,7 +99,6 @@ describe("ProjectSelector", () => {
     const wrapper = mount(ProjectSelector);
     await wrapper.find('button[title="New project"]').trigger("click");
     await wrapper.find('input[placeholder="Project name"]').setValue("dup");
-    await wrapper.find('input[placeholder="/absolute/path/to/project"]').setValue("/work/dup");
     createProjectMock.mockResolvedValue({
       success: false,
       error: "project already exists",
@@ -97,6 +107,22 @@ describe("ProjectSelector", () => {
     expect(errorRef.value).toBe("project already exists");
     // 失败时表单保留（用户可重试/取消）
     expect(wrapper.find('input[placeholder="Project name"]').exists()).toBe(true);
+  });
+
+  it("creates a project with no writable workspaces", async () => {
+    const wrapper = mount(ProjectSelector);
+    await wrapper.find('button[title="New project"]').trigger("click");
+    await wrapper.find('input[placeholder="Project name"]').setValue("private-project");
+    createProjectMock.mockResolvedValue({
+      success: true,
+      data: { project: { project_id: "p10", name: "private-project" } },
+    });
+    await wrapper.find("form").trigger("submit.prevent");
+    expect(createProjectMock).toHaveBeenCalledWith("private-project", {
+      description: "",
+      projectRootLocator: undefined,
+      writableWorkspaces: [],
+    });
   });
 
   it("cancels creation via esc", async () => {

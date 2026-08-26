@@ -500,9 +500,13 @@ describe("ObserverClient", () => {
 
     it("deleteProject sends project_delete", async () => {
       await connectClient(client, mockWs);
-      const parsed = await runRequest(client.deleteProject("p1", true));
+      const parsed = await runRequest(client.deleteProject("p1", true, true));
       expect(parsed.type).toBe(CommandType.PROJECT_DELETE);
-      expect(parsed.payload).toEqual({ project_id: "p1", force: true });
+      expect(parsed.payload).toEqual({
+        project_id: "p1",
+        force: true,
+        purge_storage: true,
+      });
     });
   });
 

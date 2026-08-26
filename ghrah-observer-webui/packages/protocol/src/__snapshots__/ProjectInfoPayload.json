@@ -4,7 +4,6 @@
   "description": "Collaborative demo project",
   "project_root_locator": "file:///srv/ghrah/projects/proj-001",
   "manifest_ref": "ghrah/demo",
-  "instance_manifest_dir": ".ghrah/agents",
   "cluster_ids": ["cluster-1"],
   "workspaces": [
     {
@@ -13,7 +12,6 @@
       "default_for_agents": true
     }
   ],
-  "db_path": "/data/projects/proj-001.db",
   "agents": [
     {
       "name": "architect",

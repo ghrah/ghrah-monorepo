@@ -11,8 +11,5 @@
     }
   ],
   "manifest_ref": "ghrah/demo",
-  "default_workspace_locator": "/srv/workspaces/demo",
-  "default_workspace_name": "demo",
-  "instance_manifest_dir": ".ghrah/agents",
   "recovery": "resume"
 }

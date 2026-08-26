@@ -22,10 +22,6 @@ export interface CreateProjectOptions {
     role?: string | null;
     defaultForAgents?: boolean;
   }>;
-  /** @deprecated Use writableWorkspaces. */
-  defaultWorkspaceLocator?: string;
-  /** @deprecated Use writableWorkspaces. */
-  defaultWorkspaceName?: string;
 }
 
 export class ObserverClient extends ServerClient {
@@ -162,9 +158,14 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async getChainHistory(agentName: string, limit?: number): Promise<CommandResultPayload> {
+  async getChainHistory(
+    agentName: string,
+    limit?: number,
+    projectId?: string,
+  ): Promise<CommandResultPayload> {
     const payload: Record<string, unknown> = { agent_name: agentName };
     if (limit != null) payload["limit"] = limit;
+    if (projectId != null) payload["project_id"] = projectId;
 
     const msg: ServerMessage = {
       type: CommandType.GET_CHAIN_HISTORY,
@@ -646,13 +647,6 @@ export class ObserverClient extends ServerClient {
           : {}),
       }));
     }
-    if (options.defaultWorkspaceLocator) {
-      payload["default_workspace_locator"] = options.defaultWorkspaceLocator;
-    }
-    if (options.defaultWorkspaceName) {
-      payload["default_workspace_name"] = options.defaultWorkspaceName;
-    }
-
     const msg: ServerMessage = {
       type: CommandType.PROJECT_CREATE,
       payload,
@@ -709,9 +703,14 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async deleteProject(projectId: string, force?: boolean): Promise<CommandResultPayload> {
+  async deleteProject(
+    projectId: string,
+    force?: boolean,
+    purgeStorage?: boolean,
+  ): Promise<CommandResultPayload> {
     const payload: Record<string, unknown> = { project_id: projectId };
     if (force != null) payload["force"] = force;
+    if (purgeStorage != null) payload["purge_storage"] = purgeStorage;
 
     const msg: ServerMessage = {
       type: CommandType.PROJECT_DELETE,
@@ -784,7 +783,7 @@ export class ObserverClient extends ServerClient {
 
   protected async _syncInitialState(): Promise<void> {
     try {
-      await this.listAgents();
+      await this.listProjects();
     } catch {
       // 静默忽略初始同步失败
     }
@@ -794,7 +793,7 @@ export class ObserverClient extends ServerClient {
       // 静默忽略初始同步失败
     }
     try {
-      await this.listProjects();
+      await this.listAgents();
     } catch {
       // 静默忽略初始同步失败
     }

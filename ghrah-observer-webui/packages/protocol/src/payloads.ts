@@ -475,7 +475,10 @@ export const TaskBlockPayloadSchema = z.object({
 
 export const TaskListPayloadSchema = z.object({
   agent_name: z.string().nullable().optional(),
-  status: z.union([TaskStatusSchema, z.array(TaskStatusSchema)]).nullable().optional(),
+  status: z
+    .union([TaskStatusSchema, z.array(TaskStatusSchema)])
+    .nullable()
+    .optional(),
   parent_id: z.string().nullable().optional(),
   project_id: z.string().nullable().optional(),
   include_terminal: z.boolean().optional().default(true),
@@ -538,10 +541,8 @@ export const ProjectInfoPayloadSchema = z.object({
   description: z.string().optional().default(""),
   project_root_locator: z.string().optional().default(""),
   manifest_ref: z.string().optional().default(""),
-  instance_manifest_dir: z.string().optional().default(""),
   cluster_ids: z.array(z.string()).optional().default([]),
   workspaces: z.array(WorkspaceMountSchema).optional().default([]),
-  db_path: z.string().optional().default(""),
   agents: z.array(AgentSpecSchema).optional().default([]),
   task_ids: z.array(z.string()).optional().default([]),
   status: ProjectStatusSchema.optional().default("active"),
@@ -558,9 +559,6 @@ export const ProjectCreatePayloadSchema = z.object({
   project_root_locator: z.string().optional().default(""),
   writable_workspaces: z.array(WritableWorkspaceSpecSchema).optional().default([]),
   manifest_ref: z.string().optional().default(""),
-  default_workspace_locator: z.string().optional().default(""),
-  default_workspace_name: z.string().optional().default(""),
-  instance_manifest_dir: z.string().optional().default(".ghrah/agents"),
   recovery: RecoveryActionSchema.optional().default("resume"),
 });
 
@@ -569,7 +567,6 @@ export const ProjectUpdatePayloadSchema = z.object({
   name: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
   manifest_ref: z.string().nullable().optional(),
-  instance_manifest_dir: z.string().nullable().optional(),
   expected_version: z.number().int().nullable().optional(),
 });
 
@@ -580,6 +577,7 @@ export const ProjectIdPayloadSchema = z.object({
 export const ProjectDeletePayloadSchema = z.object({
   project_id: z.string(),
   force: z.boolean().optional().default(false),
+  purge_storage: z.boolean().optional().default(false),
 });
 
 export const ProjectListPayloadSchema = z.object({
