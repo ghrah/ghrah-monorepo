@@ -483,6 +483,12 @@ class SendMessagePayload(BaseModel):
     content: str
     sender: str = "user"
     timeout: float | None = None
+    metadata: dict[str, Any] | None = None
+    """扩展元数据（透传至 AgentMessage.metadata；如 Room 投递写入 room_id）。
+
+    回复归属推导经链节点 messages_delta（receive 侧将 metadata 合入用户
+    ChatMessage），非回复消息回传。
+    """
 
 
 class BroadcastMessagePayload(BaseModel):
