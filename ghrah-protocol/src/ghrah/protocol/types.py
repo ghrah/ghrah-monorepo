@@ -14,7 +14,7 @@ import uuid
 from enum import StrEnum
 from typing import Any, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -1190,6 +1190,8 @@ class ProjectInfoPayload(BaseModel):
 class ProjectCreatePayload(BaseModel):
     """project_create 命令载荷。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     description: str = ""
     project_root_locator: str = ""
@@ -1200,6 +1202,8 @@ class ProjectCreatePayload(BaseModel):
 
 class ProjectUpdatePayload(BaseModel):
     """project_update 命令载荷（乐观锁）。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     project_id: str
     name: str | None = None
