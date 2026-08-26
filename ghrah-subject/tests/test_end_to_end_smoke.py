@@ -37,7 +37,7 @@ def _config(tmp_path: Path) -> SubjectConfig:
         db_path=str(tmp_path / "subject.db"),
         manifest_root=str(tmp_path / "manifests"),
         project_slice=ProjectConfig(
-            default_workspace_locator=str(tmp_path / "ws/projects/default"),
+            bootstrap_workspace_locator=str(tmp_path / "ws/projects/default"),
             default_root_locator_template=str(tmp_path / "projects/{project_id}"),
         ),
     )

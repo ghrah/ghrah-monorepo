@@ -138,7 +138,7 @@ class ProjectConfig:
     """project Unit 配置切片。
 
     Attributes:
-        default_workspace_locator: default project 首启 bootstrap 用的工作区
+        bootstrap_workspace_locator: default project 首启 bootstrap 用的工作区
             locator（git 类型，``file://`` 解析）。空串表示派生自
             ``sandbox.workspace_root + "/projects/default"``（由
             ``SubjectConfig.__post_init__`` 填充）。
@@ -146,7 +146,7 @@ class ProjectConfig:
             占位符由 ProjectManager 替换。
     """
 
-    default_workspace_locator: str = ""
+    bootstrap_workspace_locator: str = ""
     default_root_locator_template: str = "~/.ghrah/projects/{project_id}"
 
 
@@ -257,10 +257,10 @@ class SubjectConfig:
         )
         self._manifest = manifest_slice or ManifestConfig(manifest_root=self.manifest_root)
         self._hitl = hitl_slice or self.hitl_policy
-        # project slice：default_workspace_locator 为空时派生自 sandbox.workspace_root
+        # project slice：bootstrap_workspace_locator 为空时派生自 sandbox.workspace_root
         # + "/projects/default"（flat 兼容真相）。
         self._project = project_slice or ProjectConfig(
-            default_workspace_locator=(
+            bootstrap_workspace_locator=(
                 ""
                 if not self._sandbox.workspace_root
                 else self._sandbox.workspace_root.rstrip("/") + "/projects/default"
@@ -323,9 +323,9 @@ class SubjectConfig:
         - GHRAH_SUBJECT_ABILITY_HITL_TIMEOUT（回退 GHRAH_SUBJECT_CORE_COMMAND_TIMEOUT）
         - GHRAH_SUBJECT_TRANSPORT_CORE_KIND / GHRAH_SUBJECT_TRANSPORT_OBSERVER_KIND
         - GHRAH_SUBJECT_ENABLED_UNITS（逗号分隔，第三方 Unit allowlist）
-        - GHRAH_SUBJECT_PROJECT_DEFAULT_WORKSPACE_LOCATOR
+        - GHRAH_SUBJECT_PROJECT_BOOTSTRAP_WORKSPACE_LOCATOR
           （空→派生自 sandbox.workspace_root + "/projects/default"）
-        - GHRAH_SUBJECT_PROJECT_DEFAULT_DB_PATH_TEMPLATE
+        - GHRAH_SUBJECT_PROJECT_DEFAULT_ROOT_LOCATOR_TEMPLATE
         - GHRAH_SUBJECT_RECOVERY_ENABLED
         - GHRAH_SUBJECT_RECOVERY_SUBJECT_ID
         - GHRAH_SUBJECT_RECOVERY_ON_UNKNOWN_WORKSPACE（resume|pause|drop）
@@ -401,16 +401,16 @@ class SubjectConfig:
             "GHRAH_SUBJECT_WORKSPACE_ROOT", os.path.expanduser("~/ghrah-workspace")
         )
 
-        # project slice：default_workspace_locator 空时由 __post_init__ 派生。
-        project_default_workspace_locator = os.environ.get(
-            "GHRAH_SUBJECT_PROJECT_DEFAULT_WORKSPACE_LOCATOR", ""
+        # project slice：bootstrap_workspace_locator 空时由 __post_init__ 派生。
+        project_bootstrap_workspace_locator = os.environ.get(
+            "GHRAH_SUBJECT_PROJECT_BOOTSTRAP_WORKSPACE_LOCATOR", ""
         )
         project_default_root_locator_template = os.environ.get(
             "GHRAH_SUBJECT_PROJECT_DEFAULT_ROOT_LOCATOR_TEMPLATE",
             "~/.ghrah/projects/{project_id}",
         )
         project_slice = ProjectConfig(
-            default_workspace_locator=project_default_workspace_locator,
+            bootstrap_workspace_locator=project_bootstrap_workspace_locator,
             default_root_locator_template=project_default_root_locator_template,
         )
 

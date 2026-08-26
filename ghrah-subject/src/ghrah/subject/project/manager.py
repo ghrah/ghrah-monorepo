@@ -108,8 +108,8 @@ class ProjectManager:
         cluster_registry: CoreClusterRegistryService（ensure_cluster + get_handle）。
         manifest_store: ManifestStore（实例 manifest 渲染协调，MVP 跳过）。
         on_event: 事件回调（unit 注入）。
-        default_workspace_locator: 首启 bootstrap 用的 default workspace locator
-            （派生自 config.project.default_workspace_locator）。
+        bootstrap_workspace_locator: 首启 bootstrap 用的 workspace locator
+            （派生自 config.project.bootstrap_workspace_locator）。
         default_root_locator_template: 未显式传 Root 时使用的模板，支持
             ``{project_id}`` 占位。
     """
@@ -123,7 +123,7 @@ class ProjectManager:
         manifest_store: ManifestStore,
         *,
         on_event: OnEvent | None = None,
-        default_workspace_locator: str = "",
+        bootstrap_workspace_locator: str = "",
         default_root_locator_template: str = "~/.ghrah/projects/{project_id}",
     ) -> None:
         self._store = store
@@ -132,7 +132,7 @@ class ProjectManager:
         self._cluster_transport = cluster_registry
         self._manifest_store = manifest_store
         self._on_event = on_event
-        self._default_workspace_locator = default_workspace_locator
+        self._bootstrap_workspace_locator = bootstrap_workspace_locator
         self._default_root_locator_template = default_root_locator_template
         self._create_lock = asyncio.Lock()
 
@@ -606,9 +606,9 @@ class ProjectManager:
 
     async def _bootstrap_default_project_locked(self) -> ProjectRecord:
         """建 default project（1 default cluster + 1 default workspace + init_cluster）。"""
-        locator = self._default_workspace_locator
+        locator = self._bootstrap_workspace_locator
         if not locator:
-            raise ValueError("default_workspace_locator not configured")
+            raise ValueError("bootstrap_workspace_locator not configured")
         locator = _normalize_locator(locator)
         record = make_project_record(name="default")
         root_locator = self._root_locator_for(record.project_id)

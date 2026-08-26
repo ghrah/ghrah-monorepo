@@ -44,7 +44,7 @@ def _config(
             bootstrap_default_project=True,
         ),
         project_slice=ProjectConfig(
-            default_workspace_locator=str(tmp_path / "ws/projects/default"),
+            bootstrap_workspace_locator=str(tmp_path / "ws/projects/default"),
             default_root_locator_template=str(tmp_path / "projects/{project_id}"),
         ),
     )
@@ -114,15 +114,17 @@ class TestAssembleSubject:
                 "project_list", {}
             )
             project = project_result["data"]["projects"][0]
-            project_db_path = ProjectPaths.from_locator(
+            action_chain_db_path = ProjectPaths.from_locator(
                 project["project_root_locator"]
             ).action_chain_db_path
-            assert str(actor._context_manager.persistence.db_path) == str(project_db_path)
+            assert str(actor._context_manager.persistence.db_path) == str(
+                action_chain_db_path
+            )
 
             # ledger 读侧直连连通（同文件 WAL 双连接）。P2a 新契约：spawn 即
             # connect + 首次 persist——根节点（system prompt 快照）与 agents
             # 行当场落库（非旧「首次 save_node 才登记」语义）
-            ledger = ActionChainLedger(project_db_path)
+            ledger = ActionChainLedger(action_chain_db_path)
             await ledger.start()
             history = await ledger.get_chain_history("ledger-probe")
             assert len(history) == 1

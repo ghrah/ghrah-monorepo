@@ -169,7 +169,7 @@ def _make_manager(
         _FakeClusterTransport(),
         _FakeManifestStore(),
         on_event=on_event if events is not None else None,
-        default_workspace_locator=default_locator,
+        bootstrap_workspace_locator=default_locator,
         default_root_locator_template=str(store._db_path.parent / "roots/{project_id}"),
     )
 
@@ -206,12 +206,27 @@ class TestProjectCreate:
         assert "name" in (result["error"] or "")
 
     async def test_create_allows_no_writable_workspaces(self, store: ProjectStore) -> None:
-        mgr = _make_manager(store, default_locator="file:///legacy/default")
+        mgr = _make_manager(store, default_locator="file:///bootstrap/default")
         result = await mgr.handle_command(
             "project_create", {"name": "P1", "writable_workspaces": []}
         )
         assert result["success"], result.get("error")
         assert result["data"]["project"]["workspaces"] == []
+
+    async def test_create_rejects_removed_workspace_fields(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        mgr = _make_manager(store)
+        result = await mgr.handle_command(
+            "project_create",
+            {
+                "name": "P1",
+                "default_workspace_locator": _default_locator(tmp_path),
+            },
+        )
+        assert not result["success"]
+        assert "default_workspace_locator" in (result["error"] or "")
+        assert await store.list() == []
 
     async def test_create_multiple_writable_workspaces(
         self, store: ProjectStore, tmp_path: Path

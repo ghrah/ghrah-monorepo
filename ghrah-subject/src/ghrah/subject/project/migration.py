@@ -188,7 +188,7 @@ async def migrate_legacy_action_chains(
     *,
     dry_run: bool = False,
 ) -> ActionChainMigrationReport:
-    """Copy uniquely owned chains; keep the legacy DB for one compatibility window."""
+    """Copy uniquely owned development data; retain the source as rollback evidence."""
     return await asyncio.to_thread(_migrate_sync, Path(legacy_path), projects, dry_run)
 
 
