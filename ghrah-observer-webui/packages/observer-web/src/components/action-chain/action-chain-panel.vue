@@ -2,17 +2,20 @@
 import { useActionChainsStore, useAgentsStore } from "@ghrah/observer-core";
 import { computed } from "vue";
 import ActionNodeRow from "./action-node.vue";
-import { buildTree, type TreeRow } from "./build-tree.js";
+import { createTreeCache, type TreeRow } from "./build-tree.js";
 
 const chains = useActionChainsStore();
 const agents = useAgentsStore();
 
 const selectedAgentName = computed(() => agents.selectedAgentName);
 
+// per-agent 树缓存（性能红线 2）：append-only 增长走增量补建，切换 agent 不清缓存
+const treeCache = createTreeCache();
+
 const rows = computed<TreeRow[]>(() => {
   const name = selectedAgentName.value;
   if (!name) return [];
-  return buildTree(chains.getChain(name));
+  return treeCache.rowsFor(name, chains.getChain(name));
 });
 </script>
 

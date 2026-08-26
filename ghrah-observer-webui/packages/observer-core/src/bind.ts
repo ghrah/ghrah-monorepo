@@ -21,6 +21,7 @@ import type {
 } from "@ghrah/protocol";
 import { CommandType, EventType, SystemType } from "@ghrah/protocol";
 import type { ObserverClient } from "./client.js";
+import { createFrameBatcher, type FrameBatcher } from "./frame-batcher.js";
 import { useActionChainsStore } from "./stores/action-chains.js";
 import { useAgentsStore } from "./stores/agents.js";
 import { useChangesStore } from "./stores/changes.js";
@@ -34,7 +35,15 @@ import { useTasksStore } from "./stores/tasks.js";
 
 type AgentListItem = { name: string; config: AgentConfigPayload };
 
-export function connectStores(client: ObserverClient): () => void {
+export interface ConnectStoresOptions {
+  /** 高频事件合帧 batcher（性能红线 4）；默认 rAF/微任务合帧。 */
+  batcher?: FrameBatcher;
+}
+
+export function connectStores(
+  client: ObserverClient,
+  options: ConnectStoresOptions = {},
+): () => void {
   const connection = useConnectionStore();
   const agents = useAgentsStore();
   const chains = useActionChainsStore();
@@ -45,6 +54,8 @@ export function connectStores(client: ObserverClient): () => void {
   const rooms = useRoomsStore();
   const projects = useProjectsStore();
   const tasks = useTasksStore();
+  // 高频事件（ACTION_CHAIN_UPDATED / ROOM_LOG_APPENDED）经 batcher 合帧分发
+  const batcher = options.batcher ?? createFrameBatcher();
 
   client.onConnected(() => {
     connection.setConnected();
@@ -66,8 +77,10 @@ export function connectStores(client: ObserverClient): () => void {
     const payload = msg.payload as ActionChainUpdatedPayload;
     const node = payload.node;
     if (!node) return;
-    chains.onActionChainUpdated(payload);
-    changes.onActionChainNode(payload.agent_name, node);
+    batcher.add(() => {
+      chains.onActionChainUpdated(payload);
+      changes.onActionChainNode(payload.agent_name, node);
+    });
   });
 
   client.on(EventType.HITL_REQUEST, (msg: ServerMessage) => {
@@ -144,8 +157,10 @@ export function connectStores(client: ObserverClient): () => void {
   client.on(EventType.ROOM_LOG_APPENDED, (msg: ServerMessage) => {
     const payload = msg.payload as RoomLogEventPayload;
     if (!payload.entry) return;
-    rooms.onRoomLogAppended(payload);
-    chat.onRoomLogAppended(payload.entry);
+    batcher.add(() => {
+      rooms.onRoomLogAppended(payload);
+      chat.onRoomLogAppended(payload.entry);
+    });
   });
 
   // ── Project 事件 ──
@@ -213,5 +228,6 @@ export function connectStores(client: ObserverClient): () => void {
     for (const et of eventTypes) client.off(et);
     client.off(SystemType.COMMAND_RESULT);
     client.clearLifecycleCallbacks();
+    batcher.cancel();
   };
 }

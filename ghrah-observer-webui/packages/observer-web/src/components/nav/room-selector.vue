@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { useProjectsStore, useRoomsStore } from "@ghrah/observer-core";
+import { useAgentsStore, useProjectsStore, useRoomsStore } from "@ghrah/observer-core";
 import type { RoomInfoPayload } from "@ghrah/protocol";
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useObserver } from "@/composables/useObserver";
 
 const rooms = useRoomsStore();
 const projects = useProjectsStore();
-const { switchRoom } = useObserver();
+const agents = useAgentsStore();
+const { switchRoom, createRoom, joinRoom, leaveRoom, error } = useObserver();
 
 const visibleRooms = computed<RoomInfoPayload[]>(() => {
   const list = rooms.roomList;
@@ -32,11 +33,138 @@ function isMultiRoom(subject: string): boolean {
 function initial(subject: string): string {
   return subject.slice(0, 1).toUpperCase();
 }
+
+// ── 创建 room（active project 域内） ──
+
+const creating = ref(false);
+const newName = ref("");
+const busy = ref(false);
+
+function startCreate() {
+  creating.value = true;
+  newName.value = "";
+}
+
+function cancelCreate() {
+  creating.value = false;
+  newName.value = "";
+}
+
+async function submitCreate() {
+  const name = newName.value.trim();
+  const projectId = projects.activeProjectId;
+  if (!name || busy.value) return;
+  if (!projectId) {
+    error.value = "请先选择一个 project";
+    return;
+  }
+  busy.value = true;
+  try {
+    const result = await createRoom(projectId, name);
+    if (result?.success) {
+      const created = (result.data as { room?: { room_id: string } } | undefined)?.room;
+      if (created?.room_id) await switchRoom(created.room_id);
+      cancelCreate();
+    } else if (result && !result.success) {
+      error.value = result.error ?? "创建失败";
+    }
+  } finally {
+    busy.value = false;
+  }
+}
+
+// ── 成员管理（active room） ──
+
+const activeRoom = computed(() => rooms.activeRoom);
+const showMembers = ref(false);
+const addOpen = ref(false);
+const memberBusy = ref(false);
+
+/** 候选成员 = 当前 active agents 中尚未入室者。 */
+const candidateAgents = computed<string[]>(() => {
+  const room = activeRoom.value;
+  if (!room) return [];
+  const inRoom = new Set(room.members.map((m) => m.subject));
+  return agents.activeAgents.map((a) => a.name).filter((n) => !inRoom.has(n));
+});
+
+async function addMember(subject: string) {
+  const room = activeRoom.value;
+  if (!room || memberBusy.value) return;
+  memberBusy.value = true;
+  try {
+    const result = await joinRoom(room.room_id, subject, "agent");
+    if (result && !result.success) {
+      error.value = result.error ?? "加入失败";
+    }
+  } finally {
+    memberBusy.value = false;
+    addOpen.value = false;
+  }
+}
+
+async function removeMember(subject: string) {
+  const room = activeRoom.value;
+  if (!room || memberBusy.value) return;
+  memberBusy.value = true;
+  try {
+    const result = await leaveRoom(room.room_id, subject);
+    if (result && !result.success) {
+      error.value = result.error ?? "移除失败";
+    }
+  } finally {
+    memberBusy.value = false;
+  }
+}
 </script>
 
 <template>
   <div class="p-3 border-b border-gray-200 dark:border-gray-700">
-    <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">Rooms</h3>
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Rooms</h3>
+      <div class="flex items-center gap-1">
+        <button
+          v-if="activeRoom"
+          class="btn-secondary text-xs px-2 py-0.5"
+          :title="showMembers ? 'Hide members' : 'Manage members'"
+          @click="showMembers = !showMembers"
+        >
+          👥 {{ activeRoom.members.length }}
+        </button>
+        <button
+          v-if="!creating"
+          class="btn-primary text-xs px-2 py-0.5"
+          title="New room"
+          @click="startCreate"
+        >
+          + New
+        </button>
+      </div>
+    </div>
+
+    <form v-if="creating" class="mb-2 flex gap-1" @submit.prevent="submitCreate">
+      <input
+        v-model="newName"
+        type="text"
+        placeholder="Room name"
+        class="flex-1 min-w-0 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        @keydown.esc="cancelCreate"
+      />
+      <button
+        type="submit"
+        class="btn-primary text-xs px-2 py-1"
+        :disabled="busy || !newName.trim()"
+      >
+        {{ busy ? "…" : "Create" }}
+      </button>
+      <button
+        type="button"
+        class="btn-secondary text-xs px-2 py-1"
+        @click="cancelCreate"
+      >
+        ✕
+      </button>
+    </form>
 
     <ul v-if="visibleRooms.length > 0" class="space-y-1">
       <li
@@ -73,5 +201,63 @@ function initial(subject: string): string {
     </ul>
 
     <p v-else class="text-gray-400 dark:text-gray-600 text-sm italic">No rooms</p>
+
+    <!-- 成员管理（active room） -->
+    <div
+      v-if="activeRoom && showMembers"
+      class="mt-2 p-2 border border-gray-200 dark:border-gray-700 rounded bg-gray-50 dark:bg-gray-800 text-xs"
+    >
+      <div class="font-semibold text-gray-600 dark:text-gray-300 mb-1">
+        {{ activeRoom.name }} 成员
+      </div>
+      <ul class="space-y-0.5 mb-2">
+        <li
+          v-for="member in activeRoom.members"
+          :key="member.subject"
+          class="flex items-center justify-between gap-1"
+        >
+          <span class="truncate" :title="member.subject">
+            {{ member.subject_type === "human" ? "👤" : "🤖" }} {{ member.subject }}
+          </span>
+          <button
+            class="text-red-500 hover:text-red-700 dark:hover:text-red-400 px-1"
+            title="移出 room"
+            :disabled="memberBusy"
+            @click="removeMember(member.subject)"
+          >
+            ✕
+          </button>
+        </li>
+        <li v-if="activeRoom.members.length === 0" class="text-gray-400 dark:text-gray-600 italic">
+          暂无成员
+        </li>
+      </ul>
+
+      <div class="relative">
+        <button
+          class="btn-secondary text-xs px-2 py-0.5 w-full"
+          :disabled="memberBusy || candidateAgents.length === 0"
+          @click="addOpen = !addOpen"
+        >
+          + 添加成员
+        </button>
+        <ul
+          v-if="addOpen && candidateAgents.length > 0"
+          class="absolute z-10 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg"
+        >
+          <li
+            v-for="name in candidateAgents"
+            :key="name"
+            class="px-2 py-1 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900 text-gray-700 dark:text-gray-200"
+            @click="addMember(name)"
+          >
+            🤖 {{ name }}
+          </li>
+        </ul>
+        <p v-if="addOpen && candidateAgents.length === 0" class="text-gray-400 dark:text-gray-600 mt-1 italic">
+          当前 agents 均已入室
+        </p>
+      </div>
+    </div>
   </div>
 </template>

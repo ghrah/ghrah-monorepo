@@ -146,6 +146,53 @@ async function main() {
   );
   check("scenario targeted entry visible in room log", scenarioTargeted);
 
+  // ── 6.6 UI 管理面链路：project_create → room_create → join/leave ──
+  const newProject = await client.createProject("smoke-project");
+  check(
+    "project_create success",
+    newProject.success && !!newProject.data?.project?.project_id,
+  );
+  const smokeProjectId = newProject.data?.project?.project_id;
+  if (smokeProjectId) {
+    const projectSynced = await waitFor(
+      "new project in store (PROJECT_CREATED)",
+      () => projects.projects.has(smokeProjectId),
+    );
+    check("PROJECT_CREATED updates projects store", projectSynced);
+
+    const newRoom = await client.createRoom(smokeProjectId, "smoke-room");
+    const smokeRoomId = newRoom.data?.room?.room_id;
+    check("room_create success", newRoom.success && !!smokeRoomId);
+    if (smokeRoomId) {
+      const roomSynced = await waitFor(
+        "new room in store (ROOM_CREATED)",
+        () => rooms.rooms.has(smokeRoomId),
+      );
+      check("ROOM_CREATED updates rooms store", roomSynced);
+
+      const join = await client.joinRoom(smokeRoomId, "architect", "agent");
+      check("room_join success", join.success);
+      const memberJoined = await waitFor(
+        "architect visible in smoke-room members",
+        () =>
+          (rooms.rooms.get(smokeRoomId)?.members ?? []).some(
+            (m) => m.subject === "architect",
+          ),
+      );
+      check("ROOM_MEMBER_JOINED updates store", memberJoined);
+
+      const leave = await client.leaveRoom(smokeRoomId, "architect");
+      const memberLeft = await waitFor(
+        "architect removed from smoke-room members",
+        () =>
+          !(rooms.rooms.get(smokeRoomId)?.members ?? []).some(
+            (m) => m.subject === "architect",
+          ),
+      );
+      check("room_leave success + ROOM_MEMBER_LEFT updates store", leave.success && memberLeft);
+    }
+  }
+
   // ── 7. per-agent ActionChain ──
   const chainOk = await waitFor(
     "action_chain_updated for architect",

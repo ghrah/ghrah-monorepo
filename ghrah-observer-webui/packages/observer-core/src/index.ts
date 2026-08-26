@@ -1,5 +1,11 @@
-export { connectStores } from "./bind.js";
+export { connectStores, type ConnectStoresOptions } from "./bind.js";
 export { ObserverClient } from "./client.js";
+export {
+  createFrameBatcher,
+  createSyncBatcher,
+  type FrameBatcher,
+  type ScheduleFn,
+} from "./frame-batcher.js";
 export {
   type ChatEntry,
   type ChatEntryKind,

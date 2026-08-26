@@ -106,11 +106,18 @@ export const useRoomsStore = defineStore("ghrah-rooms", () => {
     rooms.value = new Map(list.map((r) => [r.room_id, r]));
   }
 
-  /** 替换式灌入（供 room_get_log 结果用）。 */
+  /** 灌入 room_get_log 结果（按 id 并集去重 + seq 排序）。
+   *
+   * 并集而非整替：合帧分发下，get_log 回执与本帧内已落地的增量事件可能交错，
+   * 整替会丢掉回执窗口之外的已见条目（append-only 语义下并集幂等安全）。
+   */
   function setRoomLog(roomId: string, entries: RoomLogEntryPayload[]) {
+    const existing = logs.value.get(roomId) ?? [];
+    const byId = new Map(existing.map((e) => [e.id, e] as const));
+    for (const e of entries) byId.set(e.id, e);
     logs.value.set(
       roomId,
-      [...entries].sort((a, b) => a.seq - b.seq),
+      [...byId.values()].sort((a, b) => a.seq - b.seq),
     );
     touchLog(roomId);
   }

@@ -1,14 +1,25 @@
 // @vitest-environment happy-dom
 
-import { useProjectsStore, useRoomsStore } from "@ghrah/observer-core";
+import { useAgentsStore, useProjectsStore, useRoomsStore } from "@ghrah/observer-core";
 import type { RoomInfoPayload } from "@ghrah/protocol";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ref } from "vue";
 
 const switchRoomMock = vi.fn();
+const createRoomMock = vi.fn();
+const joinRoomMock = vi.fn();
+const leaveRoomMock = vi.fn();
+const errorRef = ref<string | null>(null);
 vi.mock("@/composables/useObserver", () => ({
-  useObserver: () => ({ switchRoom: switchRoomMock }),
+  useObserver: () => ({
+    switchRoom: switchRoomMock,
+    createRoom: createRoomMock,
+    joinRoom: joinRoomMock,
+    leaveRoom: leaveRoomMock,
+    error: errorRef,
+  }),
 }));
 
 import RoomSelector from "./room-selector.vue";
@@ -31,6 +42,10 @@ describe("RoomSelector", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     switchRoomMock.mockReset();
+    createRoomMock.mockReset();
+    joinRoomMock.mockReset();
+    leaveRoomMock.mockReset();
+    errorRef.value = null;
   });
 
   it("shows empty state when no rooms", () => {
@@ -111,5 +126,117 @@ describe("RoomSelector", () => {
     const items = wrapper.findAll("li");
     expect(items[0].classes().join(" ")).not.toContain("bg-blue-100");
     expect(items[1].classes().join(" ")).toContain("bg-blue-100");
+  });
+
+  // ── 创建 room ──
+
+  it("creates a room in the active project and switches to it", async () => {
+    const projects = useProjectsStore();
+    projects.setProjectsFromList([
+      { project_id: "p1", name: "demo" } as never,
+    ]);
+    projects.setActiveProject("p1");
+
+    const wrapper = mount(RoomSelector);
+    await wrapper.find('button[title="New room"]').trigger("click");
+    await wrapper.find('input[placeholder="Room name"]').setValue("architecture");
+    createRoomMock.mockResolvedValue({
+      success: true,
+      data: { room: { room_id: "r9", name: "architecture" } },
+    });
+    await wrapper.find("form").trigger("submit.prevent");
+    expect(createRoomMock).toHaveBeenCalledWith("p1", "architecture");
+    expect(switchRoomMock).toHaveBeenCalledWith("r9");
+    expect(wrapper.find('input[placeholder="Room name"]').exists()).toBe(false);
+  });
+
+  it("refuses room creation without an active project", async () => {
+    const wrapper = mount(RoomSelector);
+    await wrapper.find('button[title="New room"]').trigger("click");
+    await wrapper.find('input[placeholder="Room name"]').setValue("orphan");
+    await wrapper.find("form").trigger("submit.prevent");
+    expect(createRoomMock).not.toHaveBeenCalled();
+    expect(errorRef.value).toContain("project");
+  });
+
+  it("propagates creation failure", async () => {
+    const projects = useProjectsStore();
+    projects.setProjectsFromList([{ project_id: "p1", name: "d" } as never]);
+    projects.setActiveProject("p1");
+
+    const wrapper = mount(RoomSelector);
+    await wrapper.find('button[title="New room"]').trigger("click");
+    await wrapper.find('input[placeholder="Room name"]').setValue("dup");
+    createRoomMock.mockResolvedValue({ success: false, error: "boom" });
+    await wrapper.find("form").trigger("submit.prevent");
+    expect(errorRef.value).toBe("boom");
+    expect(wrapper.find('input[placeholder="Room name"]').exists()).toBe(true);
+  });
+
+  // ── 成员管理（active room） ──
+
+  it("manages members of the active room: remove and add", async () => {
+    const rooms = useRoomsStore();
+    const agents = useAgentsStore();
+    rooms.setRoomsFromList([room("r1", "p1", "arch", ["architect"])]);
+    rooms.setActiveRoom("r1");
+    // active agents：architect（已在室）+ tester（候选）
+    agents.setAgentsFromList([
+      { name: "architect", config: {} as never },
+      { name: "tester", config: {} as never },
+    ]);
+
+    const wrapper = mount(RoomSelector);
+    await wrapper.vm.$nextTick();
+
+    // 默认不显示成员管理面板
+    expect(wrapper.text()).not.toContain("成员");
+
+    // 打开面板
+    await wrapper.find('button[title="Manage members"]').trigger("click");
+    expect(wrapper.text()).toContain("arch 成员");
+    expect(wrapper.text()).toContain("architect");
+
+    // 移除成员
+    leaveRoomMock.mockResolvedValue({ success: true, data: {} });
+    const removeBtn = wrapper
+      .findAll("button")
+      .find((b) => b.attributes("title") === "移出 room");
+    expect(removeBtn).toBeDefined();
+    await removeBtn!.trigger("click");
+    expect(leaveRoomMock).toHaveBeenCalledWith("r1", "architect");
+
+    // 添加成员：候选 = 不在室内的 active agents（tester）
+    joinRoomMock.mockResolvedValue({ success: true, data: {} });
+    const addBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("添加成员"));
+    expect(addBtn).toBeDefined();
+    await addBtn!.trigger("click");
+    await wrapper.vm.$nextTick();
+    const candidate = wrapper
+      .findAll("li")
+      .find((li) => li.text().includes("tester") && li.text().includes("🤖"));
+    expect(candidate).toBeDefined();
+    await candidate!.trigger("click");
+    expect(joinRoomMock).toHaveBeenCalledWith("r1", "tester", "agent");
+  });
+
+  it("member candidates exclude agents already in the room", async () => {
+    const rooms = useRoomsStore();
+    const agents = useAgentsStore();
+    rooms.setRoomsFromList([room("r1", "p1", "arch", ["architect"])]);
+    rooms.setActiveRoom("r1");
+    agents.setAgentsFromList([{ name: "architect", config: {} as never }]);
+
+    const wrapper = mount(RoomSelector);
+    await wrapper.vm.$nextTick();
+    await wrapper.find('button[title="Manage members"]').trigger("click");
+    // 唯一 active agent 已在室 → 添加按钮禁用
+    const addBtn = wrapper
+      .findAll("button")
+      .find((b) => b.text().includes("添加成员"));
+    expect(addBtn).toBeDefined();
+    expect(addBtn!.attributes("disabled")).toBeDefined();
   });
 });

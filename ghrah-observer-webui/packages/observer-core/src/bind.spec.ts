@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectStores } from "./bind.js";
 import { ObserverClient } from "./client.js";
+import { createFrameBatcher, createSyncBatcher, type FrameBatcher } from "./frame-batcher.js";
 import { useActionChainsStore } from "./stores/action-chains.js";
 import { useAgentsStore } from "./stores/agents.js";
 import { useChangesStore } from "./stores/changes.js";
@@ -90,14 +91,14 @@ describe("connectStores", () => {
 
   let skipSyncInitialState: ReturnType<typeof vi.spyOn<any, any>> | null = null;
 
-  async function connectClient(opts: { skipSync?: boolean } = {}) {
+  async function connectClient(opts: { skipSync?: boolean; batcher?: FrameBatcher } = {}) {
     const { skipSync = true } = opts;
     if (skipSync) {
       skipSyncInitialState = vi
         .spyOn(client as any, "_syncInitialState")
         .mockResolvedValue(undefined);
     }
-    disconnect = connectStores(client);
+    disconnect = connectStores(client, { batcher: opts.batcher ?? createSyncBatcher() });
     const connectPromise = client.connect();
     mockWs.onopen!();
     await connectPromise;
@@ -111,7 +112,7 @@ describe("connectStores", () => {
 
     it("sets connection to reconnecting on reconnect", () => {
       const store = useConnectionStore();
-      disconnect = connectStores(client);
+      disconnect = connectStores(client, { batcher: createSyncBatcher() });
       client.onReconnecting(() => store.setReconnecting());
       internals(client)._notifyReconnecting();
       expect(store.state).toBe("reconnecting");
@@ -931,6 +932,135 @@ describe("connectStores", () => {
       expect(listRoomsSpy).toHaveBeenCalled();
       const manifestsStore = useManifestsStore();
       expect(manifestsStore.agents.size).toBe(0);
+    });
+  });
+
+  // ── 性能红线 4：高频事件合帧分发 ──
+  describe("high-frequency frame batching", () => {
+    function makeManualBatcher(): { batcher: FrameBatcher; drain: () => void } {
+      const pending: Array<() => void> = [];
+      const batcher = createFrameBatcher((flush) => {
+        pending.push(flush);
+      });
+      return {
+        batcher,
+        drain: () => {
+          const fns = pending.splice(0, pending.length);
+          for (const fn of fns) fn();
+        },
+      };
+    }
+
+    it("coalesces a burst of room_log_appended into one flush (order preserved)", async () => {
+      const manual = makeManualBatcher();
+      await connectClient({ batcher: manual.batcher });
+      const roomsStore = useRoomsStore();
+      roomsStore.setRoomsFromList([
+        {
+          room_id: "r1",
+          project_id: "p1",
+          name: "arch",
+          members: [],
+        } as never,
+      ]);
+
+      for (let i = 1; i <= 20; i++) {
+        internals(client)._dispatch(
+          EventType.ROOM_LOG_APPENDED,
+          makeMsg(EventType.ROOM_LOG_APPENDED, {
+            entry: {
+              id: `e${i}`,
+              room_id: "r1",
+              seq: i,
+              author: "agent-1",
+              author_type: "agent",
+              timestamp: 1750000000 + i,
+              data: { message: `m${i}` },
+            },
+          }),
+        );
+      }
+      // 未 flush 前 store 不更新（合帧：一条不漏但只渲染一帧）
+      expect(roomsStore.logs.get("r1")).toBeUndefined();
+
+      manual.drain();
+
+      const log = roomsStore.logs.get("r1") ?? [];
+      expect(log).toHaveLength(20);
+      // FIFO 顺序保持（seq 递增）
+      expect(log.map((e) => e.seq)).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
+    });
+
+    it("coalesces action_chain_updated bursts per frame", async () => {
+      const manual = makeManualBatcher();
+      await connectClient({ batcher: manual.batcher });
+      const chainsStore = useActionChainsStore();
+
+      for (let i = 0; i < 10; i++) {
+        internals(client)._dispatch(
+          EventType.ACTION_CHAIN_UPDATED,
+          makeMsg(EventType.ACTION_CHAIN_UPDATED, {
+            agent_name: "agent-1",
+            node: { id: `n${i}`, parent_id: null, timestamp: `2026-08-25T00:00:${i}Z` },
+          }),
+        );
+      }
+      expect(chainsStore.getChain("agent-1")).toHaveLength(0);
+      manual.drain();
+      expect(chainsStore.getChain("agent-1")).toHaveLength(10);
+    });
+
+    it("unbind cancels pending batched events (no store writes after disconnect)", async () => {
+      const manual = makeManualBatcher();
+      await connectClient({ batcher: manual.batcher });
+      const roomsStore = useRoomsStore();
+
+      internals(client)._dispatch(
+        EventType.ROOM_LOG_APPENDED,
+        makeMsg(EventType.ROOM_LOG_APPENDED, {
+          entry: {
+            id: "e1",
+            room_id: "r1",
+            seq: 1,
+            author: "a",
+            author_type: "agent",
+            timestamp: 1750000000,
+            data: {},
+          },
+        }),
+      );
+      disconnect();
+      manual.drain();
+      expect(roomsStore.logs.size).toBe(0);
+    });
+
+    it("setRoomLog union-merges with entries already landed this frame", () => {
+      const roomsStore = useRoomsStore();
+      roomsStore.setRoomLog("r1", [
+        {
+          id: "e6",
+          room_id: "r1",
+          seq: 6,
+          author: "a",
+          author_type: "agent",
+          timestamp: 6,
+          data: {},
+        },
+      ]);
+      // get_log 回执只覆盖 1-5：并集保留已见 6
+      roomsStore.setRoomLog("r1", [
+        {
+          id: "e1",
+          room_id: "r1",
+          seq: 1,
+          author: "a",
+          author_type: "agent",
+          timestamp: 1,
+          data: {},
+        },
+      ]);
+      const log = roomsStore.logs.get("r1") ?? [];
+      expect(log.map((e) => e.seq)).toEqual([1, 6]);
     });
   });
 });

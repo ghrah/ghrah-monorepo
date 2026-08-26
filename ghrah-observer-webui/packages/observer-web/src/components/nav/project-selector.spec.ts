@@ -5,10 +5,17 @@ import type { ProjectInfoPayload } from "@ghrah/protocol";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ref } from "vue";
 
 const switchProjectMock = vi.fn();
+const createProjectMock = vi.fn();
+const errorRef = ref<string | null>(null);
 vi.mock("@/composables/useObserver", () => ({
-  useObserver: () => ({ switchProject: switchProjectMock }),
+  useObserver: () => ({
+    switchProject: switchProjectMock,
+    createProject: createProjectMock,
+    error: errorRef,
+  }),
 }));
 
 import ProjectSelector from "./project-selector.vue";
@@ -21,6 +28,8 @@ describe("ProjectSelector", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     switchProjectMock.mockReset();
+    createProjectMock.mockReset();
+    errorRef.value = null;
   });
 
   it("shows empty state when no projects", () => {
@@ -50,5 +59,44 @@ describe("ProjectSelector", () => {
     const items = wrapper.findAll("li");
     expect(items[0].classes().join(" ")).toContain("bg-blue-100");
     expect(items[1].classes().join(" ")).not.toContain("bg-blue-100");
+  });
+
+  it("creates a project from inline form and selects it", async () => {
+    const wrapper = mount(ProjectSelector);
+    await wrapper.find('button[title="New project"]').trigger("click");
+    const input = wrapper.find('input[placeholder="Project name"]');
+    expect(input.exists()).toBe(true);
+    await input.setValue("demo-project");
+    createProjectMock.mockResolvedValue({
+      success: true,
+      data: { project: { project_id: "p9", name: "demo-project" } },
+    });
+    await wrapper.find("form").trigger("submit.prevent");
+    expect(createProjectMock).toHaveBeenCalledWith("demo-project");
+    expect(switchProjectMock).toHaveBeenCalledWith("p9");
+    // 成功后表单收起
+    expect(wrapper.find('input[placeholder="Project name"]').exists()).toBe(false);
+  });
+
+  it("shows backend error when creation fails", async () => {
+    const wrapper = mount(ProjectSelector);
+    await wrapper.find('button[title="New project"]').trigger("click");
+    await wrapper.find('input[placeholder="Project name"]').setValue("dup");
+    createProjectMock.mockResolvedValue({
+      success: false,
+      error: "project already exists",
+    });
+    await wrapper.find("form").trigger("submit.prevent");
+    expect(errorRef.value).toBe("project already exists");
+    // 失败时表单保留（用户可重试/取消）
+    expect(wrapper.find('input[placeholder="Project name"]').exists()).toBe(true);
+  });
+
+  it("cancels creation via esc", async () => {
+    const wrapper = mount(ProjectSelector);
+    await wrapper.find('button[title="New project"]').trigger("click");
+    await wrapper.find('input[placeholder="Project name"]').trigger("keydown.esc");
+    expect(wrapper.find('input[placeholder="Project name"]').exists()).toBe(false);
+    expect(createProjectMock).not.toHaveBeenCalled();
   });
 });

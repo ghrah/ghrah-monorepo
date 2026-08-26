@@ -181,6 +181,14 @@ export function useObserver() {
     return withClient((c) => c.createRoom(projectId, name));
   }
 
+  async function joinRoom(roomId: string, subject: string, subjectType: "agent" | "human") {
+    return withClient((c) => c.joinRoom(roomId, subject, subjectType));
+  }
+
+  async function leaveRoom(roomId: string, subject: string) {
+    return withClient((c) => c.leaveRoom(roomId, subject));
+  }
+
   /** 拉取 room 历史；bind 的 ROOM_GET_LOG 处理会把结果灌入 rooms store。 */
   async function getRoomLog(roomId: string) {
     const result = await withClient((c) => c.getRoomLog(roomId));
@@ -340,6 +348,8 @@ export function useObserver() {
     roomSend,
     listRooms,
     createRoom,
+    joinRoom,
+    leaveRoom,
     getRoomLog,
     listProjects,
     createProject,
