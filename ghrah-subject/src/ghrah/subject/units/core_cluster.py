@@ -22,7 +22,6 @@ from typing import Any
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.core_cluster.registry import (
     CoreClusterRegistry,
-    build_spawn_materializer,
     default_core_unit_factory,
 )
 from ghrah.subject.runtime.service_keys import (
@@ -46,7 +45,9 @@ class CoreClusterRegistryUnit(SubjectUnit):
         unit_factory: Callable[[str], Any] | None = None,
     ) -> None:
         self._config = config
-        self._unit_factory = unit_factory or default_core_unit_factory(config)
+        # 测试可注入假工厂；生产默认工厂在 init 时构造（需 ctx 取 MANIFEST_STORE
+        # 注入 CoreUnitConfig.manifest_store，对齐 Core 独立库 runner 范式）。
+        self._unit_factory = unit_factory
         self._registry: CoreClusterRegistry | None = None
         self._meta = UnitMeta(
             name="core_cluster_registry",
@@ -67,10 +68,12 @@ class CoreClusterRegistryUnit(SubjectUnit):
 
     async def init(self, ctx: Any) -> None:
         store = ctx.get(MANIFEST_STORE.name)
-        workspace = ctx.get(WORKSPACE_SERVICE.name)
+        if self._unit_factory is None:
+            # 生产默认工厂：注入 manifest_store（从 ctx 取），
+            # 供 CoreUnit 内部解析 manifest_ref spawn。
+            self._unit_factory = default_core_unit_factory(self._config, manifest_store=store)
         registry = CoreClusterRegistry(
             unit_factory=self._unit_factory,
-            spawn_materializer=build_spawn_materializer(store, workspace),
         )
         registry.bind(ctx)
         self._registry = registry

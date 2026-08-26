@@ -13,28 +13,23 @@ CoreUnit 实例（``ctx.plugin(mount_unit(unit))``，热插拔 API 的首个真�
 
 ``CoreUnitHandle`` duck-type 现有 ``ClusterHandle`` 消费面
 （spawn_agent/list_agents/terminate_agent/is_connected），命令经
-``unit.handle_command`` 进程内直达 CoreUnit（spawn 前经物化器展开
-manifest_ref，逻辑平移自旧 ``units/cluster_transport.py``）。
+``unit.handle_command`` 进程内直达 CoreUnit。manifest_ref 的解析/物化
+由 CoreUnit 内部完成（对齐 Core 独立库 runner 范式，不经 wire DTO 往返）；
+subject 仅注入 ManifestStore（``CoreUnitConfig.manifest_store``）。
 """
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from ghrah.manifest.resolver import ManifestResolver  # type: ignore[import-untyped]
 from ghrah.protocol.types import (
-    AbilityDefinitionPayload,
-    AgentConfigPayload,
     SpawnAgentPayload,
     TerminateAgentPayload,
 )
-from ghrah.subject.manifest_store.store import ManifestStore
 from ghrah.subject.runtime.ouroboros_bridge import mount_unit, wait_active
 from ghrah.subject.unit.base import CommandContext
-from ghrah.subject.units._helpers import materialize_permission_params
 
 if TYPE_CHECKING:
     from ouroboros import Context, Fiber  # type: ignore[import-untyped]
@@ -44,14 +39,10 @@ if TYPE_CHECKING:
 __all__ = [
     "CoreClusterRegistry",
     "CoreUnitHandle",
-    "SpawnMaterializer",
-    "build_spawn_materializer",
     "default_core_unit_factory",
 ]
 
 logger = logging.getLogger(__name__)
-
-SpawnMaterializer = Callable[[SpawnAgentPayload], SpawnAgentPayload]
 
 _INTERNAL_CMD_CTX = CommandContext.internal()
 
@@ -68,12 +59,10 @@ class CoreUnitHandle:
         registry: CoreClusterRegistry,
         cluster_id: str,
         unit: Any,
-        spawn_materializer: SpawnMaterializer | None,
     ) -> None:
         self._registry = registry
         self._cluster_id = cluster_id
         self._unit = unit
-        self._spawn_materializer = spawn_materializer
         self._alive = True
 
     @property
@@ -86,11 +75,9 @@ class CoreUnitHandle:
         return self._alive
 
     async def spawn_agent(self, payload: SpawnAgentPayload) -> dict[str, Any]:
-        """经进程内 CoreUnit 发 spawn_agent（manifest_ref 先经物化器展开）。"""
+        """经进程内 CoreUnit 发 spawn_agent（manifest_ref 由 CoreUnit 内部解析）。"""
         if not self._alive:
             return {"success": False, "error": f"cluster '{self._cluster_id}' is shut down"}
-        if self._spawn_materializer is not None and payload.manifest_ref:
-            payload = self._spawn_materializer(payload)
         return await self._dispatch("spawn_agent", payload.model_dump(mode="json"))
 
     async def list_agents(self) -> list[dict[str, Any]]:
@@ -149,10 +136,8 @@ class CoreClusterRegistry:
         self,
         *,
         unit_factory: Callable[[str], Any],
-        spawn_materializer: SpawnMaterializer | None = None,
     ) -> None:
         self._unit_factory = unit_factory
-        self._spawn_materializer = spawn_materializer
         self._ctx: Context | None = None
         self._clusters: dict[str, _ClusterEntry] = {}
 
@@ -175,7 +160,7 @@ class CoreClusterRegistry:
         unit = self._unit_factory(cluster_id)
         fiber = self._ctx.plugin(mount_unit(unit))
         await wait_active(fiber, timeout=10.0)
-        handle = CoreUnitHandle(self, cluster_id, unit, self._spawn_materializer)
+        handle = CoreUnitHandle(self, cluster_id, unit)
         self._clusters[cluster_id] = _ClusterEntry(unit, fiber, handle)
         logger.info("CoreClusterRegistry: mounted cluster '%s'", cluster_id)
         return handle
@@ -205,11 +190,19 @@ class CoreClusterRegistry:
             await self.shutdown_cluster(cluster_id)
 
 
-def default_core_unit_factory(config: SubjectConfig) -> Callable[[str], Any]:
+def default_core_unit_factory(
+    config: SubjectConfig,
+    manifest_store: Any = None,
+) -> Callable[[str], Any]:
     """生产工厂：cluster_id → CoreUnit（CoreUnitConfig 从 SubjectConfig 派生）。
 
     persistence_factory 注入 Core sqlite（``core_db_path``，与 ledger 读侧
     同源派生）——agent 链真相源落 Core 内建 backend（聚合裁决 D-C）。
+
+    ``manifest_store`` 注入 CoreUnitConfig.manifest_store，供 CoreUnit 内部
+    解析 manifest_ref spawn（对齐 Core 独立库 runner 范式）。由
+    ``CoreClusterRegistryUnit.init`` 从 ctx 取 ``MANIFEST_STORE`` 后传入
+    （挂载顺序保证 store 先于 CoreUnit，见 mount_builtin_units）。
     """
     from ghrah.context.persistence.sqlite_backend import (  # type: ignore[import-untyped]
         SqliteBackend,
@@ -232,75 +225,8 @@ def default_core_unit_factory(config: SubjectConfig) -> Callable[[str], Any]:
             auto_approve_abilities=tuple(config.hitl_policy.auto_approve_abilities),
             require_approval_by_default=config.hitl_policy.require_approval_by_default,
             persistence_factory=persistence_factory,
+            manifest_store=manifest_store,
         )
         return create_core_unit(core_config)
 
     return factory
-
-
-# ----------------------------------------------------------------
-# spawn 物化器（平移自旧 units/cluster_transport.py，逻辑零改动）
-# ----------------------------------------------------------------
-
-
-def build_spawn_materializer(store: ManifestStore, workspace: Any) -> SpawnMaterializer:
-    """构造 spawn 物化器：带 manifest_ref 的 payload → 展开后的 SpawnAgentPayload。
-
-    manifest_ref 置 None、abilities 填充、config 从解析结果重建；权限参数
-    物化（allowed/denied paths 相对 workspace_root 解析）。
-    """
-
-    def materialize(payload: SpawnAgentPayload) -> SpawnAgentPayload:
-        manifest_ref = payload.manifest_ref
-        if not manifest_ref:
-            return payload
-        runtime_name = payload.config.name or None
-        manifest = store.get_agent(manifest_ref)
-        resolved = ManifestResolver(store).resolve(manifest, runtime_name=runtime_name)
-        workspace_root = workspace.resolve_agent_path(resolved.config.name)
-
-        expanded_abilities: list[AbilityDefinitionPayload] = []
-        for ability in resolved.abilities:
-            implementation = ability.implementation
-            if implementation.type == "builtin" and implementation.handler:
-                expanded_abilities.append(
-                    AbilityDefinitionPayload(
-                        ability_type=implementation.handler,
-                        params=materialize_permission_params(
-                            implementation.handler,
-                            ability.permissions,
-                            workspace_root,
-                        ),
-                    )
-                )
-                continue
-            logger.warning(
-                "Skipping non-builtin ability '%s' (type=%s) in manifest spawn",
-                ability.ability_name,
-                implementation.type,
-            )
-
-        return SpawnAgentPayload(
-            config=_agent_config_to_payload(resolved.config),
-            abilities=expanded_abilities if expanded_abilities else None,
-            manifest_ref=None,
-        )
-
-    return materialize
-
-
-def _agent_config_to_payload(config: Any) -> AgentConfigPayload:
-    """从解析后的 AgentConfig 构造 AgentConfigPayload（对齐旧实现）。"""
-    return AgentConfigPayload(
-        name=config.name,
-        agent_config_name=config.agent_config_name,
-        description=config.description,
-        system_prompt=config.system_prompt,
-        max_iterations=config.max_iterations,
-        communication_timeout=config.communication_timeout,
-        window=dataclasses.asdict(config.window) if config.window else None,
-        context=dataclasses.asdict(config.context) if config.context else None,
-        model_overrides=(
-            dataclasses.asdict(config.model_overrides) if config.model_overrides else None
-        ),
-    )

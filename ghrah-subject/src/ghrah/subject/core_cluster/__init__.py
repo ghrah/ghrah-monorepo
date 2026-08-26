@@ -9,15 +9,11 @@ from __future__ import annotations
 from ghrah.subject.core_cluster.registry import (
     CoreClusterRegistry,
     CoreUnitHandle,
-    SpawnMaterializer,
-    build_spawn_materializer,
     default_core_unit_factory,
 )
 
 __all__ = [
     "CoreClusterRegistry",
     "CoreUnitHandle",
-    "SpawnMaterializer",
-    "build_spawn_materializer",
     "default_core_unit_factory",
 ]

@@ -22,7 +22,6 @@ from ouroboros_testutil import wait_active
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.core_cluster.registry import (
     CoreClusterRegistry,
-    build_spawn_materializer,
 )
 from ghrah.subject.manifest_store.store import ManifestStore
 from ghrah.subject.runtime.ouroboros_bridge import mount_unit
@@ -191,7 +190,7 @@ class TestCoreClusterRegistryUnit:
             await registry.stop()
             await ctx.__aexit__(None, None, None)
 
-    async def test_spawn_materialization_passthrough(self, tmp_path: Path) -> None:
+    async def test_spawn_manifest_ref_passthrough_to_core_unit(self, tmp_path: Path) -> None:
         ctx, _, registry, created = await _boot(tmp_path)
 
         def by_id(cluster_id: str) -> _FakeCoreUnit:
@@ -206,16 +205,11 @@ class TestCoreClusterRegistryUnit:
             result = await handle.spawn_agent(payload)
             assert result["success"], result.get("error")
 
-            # 假 CoreUnit 收到的是已物化 payload：manifest_ref 置 None、abilities 填充
+            # manifest_ref 原样直通 CoreUnit（解析由 CoreUnit 内部完成，
+            # 物化器已下沉 Core，handle 不再展开）
             command, sent = by_id("default").commands[-1]
             assert command == "spawn_agent"
-            assert sent["manifest_ref"] is None
-            ability_types = [a["ability_type"] for a in sent["abilities"]]
-            assert "read_file" in ability_types
-            # 物化：allowed_paths 相对 workspace_root 展开
-            read_file = next(a for a in sent["abilities"] if a["ability_type"] == "read_file")
-            assert read_file["params"]["allowed_paths"]
-            assert read_file["params"]["allowed_paths"][0].startswith(str(tmp_path / "workspace"))
+            assert sent["manifest_ref"] == "ghrah.coder"
         finally:
             await registry.stop()
             await ctx.__aexit__(None, None, None)
@@ -272,14 +266,3 @@ class TestCoreClusterRegistryUnit:
             assert not registry.has_cluster("secondary")
             assert all(u.stopped for u in created)
             await ctx.__aexit__(None, None, None)
-
-
-class TestBuildSpawnMaterializer:
-    async def test_no_manifest_ref_passthrough(self, tmp_path: Path) -> None:
-        store = _manifest_store(tmp_path)
-        workspace = _FakeWorkspaceService(str(tmp_path / "workspace"))
-        materializer = build_spawn_materializer(store, workspace)
-        payload = SpawnAgentPayload(
-            config=AgentConfigPayload(name="plain", system_prompt=""),
-        )
-        assert materializer(payload) is payload
