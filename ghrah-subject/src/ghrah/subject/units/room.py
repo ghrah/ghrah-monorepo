@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Any
 
 from ghrah.subject.config import SubjectConfig
+from ghrah.subject.project.scoped_stores import ProjectScopedRoomStore
 from ghrah.subject.room.manager import RoomManager
-from ghrah.subject.room.store import RoomStore
 from ghrah.subject.runtime.service_keys import PROJECT_MANAGER, ROOM_MANAGER, ROOM_STORE
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units._commands import ROOM_COMMANDS
@@ -30,7 +30,7 @@ class RoomUnit(SubjectUnit):
     def __init__(self, config: SubjectConfig) -> None:
         self._config = config
         self._ctx: Any | None = None
-        self._store: RoomStore | None = None
+        self._store: ProjectScopedRoomStore | None = None
         self._manager: RoomManager | None = None
         self._meta = UnitMeta(
             name="room",
@@ -51,8 +51,20 @@ class RoomUnit(SubjectUnit):
 
     async def init(self, ctx: Any) -> None:
         self._ctx = ctx
-        self._store = RoomStore(self._config.persistence.db_path)
         project_manager = ctx.get(PROJECT_MANAGER.name)
+
+        async def project_roots() -> dict[str, str]:
+            result = await project_manager.handle_command("project_list", {})
+            projects = (result.get("data") or {}).get("projects", [])
+            return {
+                p["project_id"]: p["project_root_locator"]
+                for p in projects
+                if p.get("project_root_locator")
+            }
+
+        self._store = ProjectScopedRoomStore(
+            self._config.persistence.db_path, project_roots
+        )
 
         async def project_exists(project_id: str) -> bool:
             result = await project_manager.handle_command(
@@ -98,6 +110,7 @@ class RoomUnit(SubjectUnit):
     async def start(self) -> None:
         if self._store is not None:
             await self._store.start()
+            await self._store.migrate_all()
 
     async def stop(self) -> None:
         if self._store is not None:

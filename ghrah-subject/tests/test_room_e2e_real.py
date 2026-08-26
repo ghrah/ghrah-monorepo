@@ -27,6 +27,7 @@ from typing import Any
 from ouroboros import Context  # type: ignore[import-untyped]
 
 from ghrah.subject.config import RecoveryConfig, SubjectConfig
+from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.runtime.assembly import assemble_subject
 from ghrah.subject.runtime.ouroboros_bridge import bridge_command
 
@@ -207,7 +208,6 @@ class TestRoomRealEndToEnd:
 
     async def test_room_log_persistence_across_restart(self, tmp_path: Path) -> None:
         """RoomLog 持久化：同 db_path 重装 assemble_subject 后 get_log 读回。"""
-        config = _config(tmp_path)
         room_id: str
 
         async with _stack(tmp_path) as ctx:
@@ -248,7 +248,6 @@ class TestRoomRealEndToEnd:
           入史（无 LLM 环境下迭代可能失败，但消息入史发生在 LLM 初始化前，
           为确定性投递证据；回复质量不在断言范围）。
         """
-        config = _config(tmp_path)
         async with _stack(tmp_path) as ctx:
             project_id = await _make_project(ctx)
             room = _data(
@@ -264,8 +263,14 @@ class TestRoomRealEndToEnd:
             )
             assert spawn["success"], spawn.get("error")
 
-            # D2：Core sqlite 真相源 spawn 即建表 + agents 行
-            conn = sqlite3.connect(f"file:{config.core_db_path}?mode=ro", uri=True)
+            # D2：Core sqlite 真相源已按 Project Root 隔离。
+            project = _data(
+                await bridge_command(ctx, "project_get", {"project_id": project_id})
+            )["project"]
+            core_db_path = ProjectPaths.from_locator(
+                project["project_root_locator"]
+            ).action_chain_db_path
+            conn = sqlite3.connect(f"file:{core_db_path}?mode=ro", uri=True)
             try:
                 tables = {
                     row[0]
@@ -305,7 +310,9 @@ class TestRoomRealEndToEnd:
             assert send["success"], send.get("error")
 
             # D1：投递为 fire-and-forget，轮询 agent 入史
-            supervisor = ctx.get("supervisor")
+            # （supervisor 由 CoreUnit 实例自持，经 registry handle 取证）
+            registry = ctx.get("core_cluster_registry")
+            supervisor = registry.get_handle(project["cluster_ids"][0])._unit.supervisor
             actor = supervisor._registry.get_info("planner").actor_handle
 
             def delivered() -> bool:

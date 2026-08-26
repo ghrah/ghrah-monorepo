@@ -150,7 +150,6 @@ class TestProjectRecord:
         assert record.workspaces == []
         assert record.agents == []
         assert record.task_ids == []
-        assert record.db_path == ""
         assert record.recovery.on_restart is RecoveryAction.RESUME
         assert isinstance(record.isolation, IsolationSpec)
         assert isinstance(record.created_at, datetime)
@@ -162,7 +161,6 @@ class TestProjectRecord:
             name="P1",
             cluster_ids=["c1"],
             workspaces=[WorkspaceMount(workspace_id="ws-1", default_for_agents=True)],
-            db_path="/data/p1.db",
             agents=[AgentSpec(name="a1", cluster_id="c1")],
             task_ids=["t1"],
         )
@@ -172,7 +170,6 @@ class TestProjectRecord:
         assert payload_fields <= set(wire.keys())
         assert wire["project_id"] == "p1"
         assert wire["cluster_ids"] == ["c1"]
-        assert wire["db_path"] == "/data/p1.db"
         assert wire["status"] == "active"
         assert wire["recovery"] == "resume"
         assert isinstance(wire["created_at"], str)
@@ -223,17 +220,13 @@ class TestMakeProjectRecord:
         assert record.workspaces == []
         assert record.agents == []
         assert record.task_ids == []
-        assert record.instance_manifest_dir == ".ghrah/agents"
-        assert record.db_path == ""
         assert record.created_at == record.updated_at
 
     def test_custom_args(self) -> None:
         record = make_project_record(
             name="P1",
             manifest_ref="default",
-            db_path="/data/p.db",
             recovery=RecoverySpec(on_restart=RecoveryAction.DROP),
         )
         assert record.manifest_ref == "default"
-        assert record.db_path == "/data/p.db"
         assert record.recovery.on_restart is RecoveryAction.DROP

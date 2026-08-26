@@ -210,10 +210,8 @@ class ProjectRecord(BaseModel):
     description: str = ""
     project_root_locator: str = ""
     manifest_ref: str = ""
-    instance_manifest_dir: str = ""
     cluster_ids: list[str] = Field(default_factory=list)
     workspaces: list[WorkspaceMount] = Field(default_factory=list)
-    db_path: str = ""
     agents: list[AgentSpec] = Field(default_factory=list)
     task_ids: list[str] = Field(default_factory=list)
     isolation: IsolationSpec = Field(default_factory=IsolationSpec)
@@ -257,7 +255,7 @@ class ProjectRecord(BaseModel):
         """输出 ``ProjectInfoPayload`` 形态 dict。
 
         recovery 为 ``RecoveryAction.value`` 字符串，时间戳 ISO str，含
-        version/deleted_at/cluster_ids/workspaces/db_path/agents/task_ids。
+        version/deleted_at/cluster_ids/workspaces/agents/task_ids。
         本 dict 为 ``ProjectInfoPayload`` 的**超集**：额外含 ``isolation`` 字段
         （protocol payload schema 不含该键）。Core/Observer 反序列化时 Pydantic
         默认 ``extra='ignore'`` 忽略该键，故安全；subject 侧内部使用 isolation。
@@ -271,8 +269,6 @@ def make_project_record(
     description: str = "",
     project_root_locator: str = "",
     manifest_ref: str = "",
-    instance_manifest_dir: str = ".ghrah/agents",
-    db_path: str = "",
     recovery: RecoverySpec | None = None,
 ) -> ProjectRecord:
     """创建新 project 记录：生成 project_id（uuid4 hex）、status=ACTIVE、
@@ -284,8 +280,6 @@ def make_project_record(
         description=description,
         project_root_locator=project_root_locator,
         manifest_ref=manifest_ref,
-        instance_manifest_dir=instance_manifest_dir,
-        db_path=db_path,
         status=ProjectStatus.ACTIVE,
         recovery=recovery if recovery is not None else RecoverySpec(),
         created_at=now,

@@ -9,8 +9,9 @@ from __future__ import annotations
 from typing import Any
 
 from ghrah.subject.config import SubjectConfig
-from ghrah.subject.runtime.service_keys import TASK_MANAGER, TASK_STORE
-from ghrah.subject.task import TaskManager, TaskStore
+from ghrah.subject.project.scoped_stores import ProjectScopedTaskStore
+from ghrah.subject.runtime.service_keys import PROJECT_MANAGER, TASK_MANAGER, TASK_STORE
+from ghrah.subject.task import TaskManager
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units._commands import TASK_COMMANDS
 
@@ -29,7 +30,7 @@ class TaskUnit(SubjectUnit):
     def __init__(self, config: SubjectConfig) -> None:
         self._config = config
         self._ctx: Any | None = None
-        self._store: TaskStore | None = None
+        self._store: ProjectScopedTaskStore | None = None
         self._manager: TaskManager | None = None
         self._meta = UnitMeta(
             name="task",
@@ -49,7 +50,24 @@ class TaskUnit(SubjectUnit):
 
     async def init(self, ctx: Any) -> None:
         self._ctx = ctx
-        self._store = TaskStore(self._config.persistence.db_path)
+        async def project_roots() -> dict[str, str]:
+            try:
+                manager = ctx.get(PROJECT_MANAGER.name)
+            except Exception:  # noqa: BLE001 — ProjectUnit 在本 Unit 之后挂载
+                return {}
+            if manager is None:
+                return {}
+            result = await manager.handle_command("project_list", {})
+            projects = (result.get("data") or {}).get("projects", [])
+            return {
+                p["project_id"]: p["project_root_locator"]
+                for p in projects
+                if p.get("project_root_locator")
+            }
+
+        self._store = ProjectScopedTaskStore(
+            self._config.persistence.db_path, project_roots
+        )
         self._manager = TaskManager(self._store, on_event=self._emit_event)
         ctx.provide(TASK_MANAGER.name, self._manager)
         ctx.provide(TASK_STORE.name, self._store)

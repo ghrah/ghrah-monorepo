@@ -383,3 +383,22 @@ class TaskStore:
                 (new_id, now, *params),
             )
             return int(cursor.rowcount)
+
+    async def list_for_migration(self, project_id: str) -> TaskRecordList:
+        """返回指定 Project 的全部记录（含终态与软删），供物理拆库。"""
+        async with self._lock:
+            db = self._require_db()
+            cursor = await db.execute(
+                "SELECT * FROM subject_tasks WHERE project_id = ? ORDER BY created_at",
+                (project_id,),
+            )
+            return [_row_to_record(row) for row in await cursor.fetchall()]
+
+    async def delete_project_records(self, project_id: str) -> int:
+        """迁移成功后删除旧库中指定 Project 的 Task。"""
+        async with self._lock:
+            db = self._require_db()
+            cursor = await db.execute(
+                "DELETE FROM subject_tasks WHERE project_id = ?", (project_id,)
+            )
+            return int(cursor.rowcount)

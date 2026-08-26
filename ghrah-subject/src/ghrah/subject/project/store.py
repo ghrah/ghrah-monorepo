@@ -6,7 +6,7 @@
 
 独立 aiosqlite 连接到主库（``ctx.config.persistence.db_path``，由调用方传入）。
 ``subject_projects`` 存全局 project 注册表（决策 14：per-project 业务 DB 由
-``ProjectRecord.db_path`` 字段指向，本 store 不连接业务 DB）。JSON 列保存
+本 store 不连接 Project Root 内业务 DB。JSON 列保存
 复数资源（cluster_ids/workspaces/agents/task_ids/isolation）；``recovery`` 存
 单值字符串（``RecoveryAction.value``，利于 SQL 过滤）。
 
@@ -60,10 +60,8 @@ CREATE TABLE IF NOT EXISTS subject_projects (
     description           TEXT NOT NULL DEFAULT '',
     project_root_locator  TEXT NOT NULL DEFAULT '',
     manifest_ref          TEXT NOT NULL DEFAULT '',
-    instance_manifest_dir TEXT NOT NULL DEFAULT '',
     cluster_ids           TEXT NOT NULL DEFAULT '[]',
     workspaces            TEXT NOT NULL DEFAULT '[]',
-    db_path               TEXT NOT NULL DEFAULT '',
     agents                TEXT NOT NULL DEFAULT '[]',
     task_ids              TEXT NOT NULL DEFAULT '[]',
     isolation             TEXT NOT NULL DEFAULT '{}',
@@ -84,10 +82,8 @@ _COLUMNS = (
     "description",
     "project_root_locator",
     "manifest_ref",
-    "instance_manifest_dir",
     "cluster_ids",
     "workspaces",
-    "db_path",
     "agents",
     "task_ids",
     "isolation",

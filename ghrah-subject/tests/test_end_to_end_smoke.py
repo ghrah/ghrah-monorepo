@@ -26,7 +26,7 @@ from pathlib import Path
 from ghrah.protocol.types import EventType
 from ouroboros import Context  # type: ignore[import-untyped]
 
-from ghrah.subject.config import SubjectConfig
+from ghrah.subject.config import ProjectConfig, SubjectConfig
 from ghrah.subject.runtime.assembly import assemble_subject
 from ghrah.subject.runtime.ouroboros_bridge import bridge_command
 
@@ -36,6 +36,10 @@ def _config(tmp_path: Path) -> SubjectConfig:
         workspace_root=str(tmp_path / "ws"),
         db_path=str(tmp_path / "subject.db"),
         manifest_root=str(tmp_path / "manifests"),
+        project_slice=ProjectConfig(
+            default_workspace_locator=str(tmp_path / "ws/projects/default"),
+            default_root_locator_template=str(tmp_path / "projects/{project_id}"),
+        ),
     )
 
 

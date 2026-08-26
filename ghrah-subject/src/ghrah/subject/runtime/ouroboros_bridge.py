@@ -84,6 +84,9 @@ def mount_unit(
         return disposer
 
     apply.inject = list(inject)  # type: ignore[attr-defined]
+    # fiber 命名：默认 "apply" 会被 Ouroboros 归一为 None（名字回退 <root>），
+    # 动态挂载多实例时冲突/错误无法区分身份——以 unit.meta.name 命名。
+    apply.__name__ = unit.meta.name
     return apply
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -100,10 +101,6 @@ class ProjectPaths:
         return self.root / "db"
 
     @property
-    def project_db_path(self) -> Path:
-        return self.db_dir / "project.sqlite3"
-
-    @property
     def task_db_path(self) -> Path:
         return self.db_dir / "tasks.sqlite3"
 
@@ -139,6 +136,12 @@ class ProjectPaths:
                 raise ValueError(f"Project Root is not a directory: {self.root}")
             entries = list(self.root.iterdir())
             if entries:
+                try:
+                    marker = json.loads(self.marker_path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    marker = {}
+                if marker.get("project_id") == project_id:
+                    return ProjectRootInit(False, False, ())
                 raise ValueError(f"Project Root must be empty: {self.root}")
         self.root.mkdir(parents=True, exist_ok=True)
 
@@ -191,3 +194,19 @@ class ProjectPaths:
                 self.root.rmdir()
             except OSError:
                 pass
+
+    def validate_owner(self, project_id: str) -> None:
+        """Reject roots without an exact Subject ownership marker."""
+        try:
+            marker = json.loads(self.marker_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"Project Root marker is missing or invalid: {self.marker_path}"
+            ) from exc
+        if marker.get("project_id") != project_id:
+            raise ValueError(f"Project Root marker owner mismatch: {self.marker_path}")
+
+    def purge(self, project_id: str) -> None:
+        """Delete an explicitly requested Project Root after owner verification."""
+        self.validate_owner(project_id)
+        shutil.rmtree(self.root)

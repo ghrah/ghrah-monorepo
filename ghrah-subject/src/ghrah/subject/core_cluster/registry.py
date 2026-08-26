@@ -8,8 +8,8 @@
 ``ensure_cluster(cluster_id)`` 在 Ouroboros ctx 上**运行时挂载**一个
 CoreUnit 实例（``ctx.plugin(mount_unit(unit))``，热插拔 API 的首个真实
 消费者）；``shutdown_cluster`` → ``fiber.dispose()``。多集群 = 多实例
-（MVP 单集群——Ouroboros 同名 service 二次 provide 会 ServiceConflictError，
-多实例需 CoreUnitConfig.service_prefix，见计划开放问题）。
+（CoreUnit 不向宿主 provide 全局服务——supervisor 等每实例状态由实例
+自持，多实例挂载天然隔离，无同名服务冲突）。
 
 ``CoreUnitHandle`` duck-type 现有 ``ClusterHandle`` 消费面
 （spawn_agent/list_agents/terminate_agent/is_connected），命令经
@@ -28,6 +28,7 @@ from ghrah.protocol.types import (
     SpawnAgentPayload,
     TerminateAgentPayload,
 )
+from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.runtime.ouroboros_bridge import mount_unit, wait_active
 from ghrah.subject.unit.base import CommandContext
 
@@ -149,7 +150,9 @@ class CoreClusterRegistry:
     def cluster_ids(self) -> list[str]:
         return list(self._clusters)
 
-    async def ensure_cluster(self, cluster_id: str) -> CoreUnitHandle:
+    async def ensure_cluster(
+        self, cluster_id: str, *, project_root_locator: str = ""
+    ) -> CoreUnitHandle:
         """幂等挂载/取某 cluster 的 CoreUnit 实例。"""
         entry = self._clusters.get(cluster_id)
         if entry is not None:
@@ -157,7 +160,11 @@ class CoreClusterRegistry:
         if self._ctx is None:
             raise RuntimeError("CoreClusterRegistry has not been bound to a Context.")
 
-        unit = self._unit_factory(cluster_id)
+        try:
+            unit = self._unit_factory(cluster_id, project_root_locator)
+        except TypeError:
+            # 兼容现有测试/扩展的一参数 factory。
+            unit = self._unit_factory(cluster_id)
         fiber = self._ctx.plugin(mount_unit(unit))
         await wait_active(fiber, timeout=10.0)
         handle = CoreUnitHandle(self, cluster_id, unit)
@@ -212,12 +219,16 @@ def default_core_unit_factory(
         create_core_unit,
     )
 
-    core_db_path = config.core_db_path
+    def factory(cluster_id: str, project_root_locator: str = "") -> Any:
+        core_db_path = (
+            str(ProjectPaths.from_locator(project_root_locator).action_chain_db_path)
+            if project_root_locator
+            else config.core_db_path
+        )
 
-    def persistence_factory(agent_config: Any) -> Any:
-        return SqliteBackend(db_path=core_db_path)
+        def persistence_factory(agent_config: Any) -> Any:
+            return SqliteBackend(db_path=core_db_path)
 
-    def factory(cluster_id: str) -> Any:
         core_config = CoreUnitConfig(
             cluster_id=cluster_id,
             hitl_timeout=config.core.command_timeout,

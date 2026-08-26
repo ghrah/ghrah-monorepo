@@ -266,3 +266,58 @@ class TestCoreClusterRegistryUnit:
             assert not registry.has_cluster("secondary")
             assert all(u.stopped for u in created)
             await ctx.__aexit__(None, None, None)
+
+
+class TestRealCoreUnitMultiCluster:
+    """回归：多集群 = 多真实 CoreUnit 实例共存。
+
+    历史盲区：本文件其他用例全部走 _FakeCoreUnit 工厂，从不触达真实
+    CoreUnit.init——provide("supervisor") 时代第二个实例挂载即
+    ServiceConflictError（Ouroboros 同名服务全局唯一）。provide 删除后
+    每实例状态自持，多实例天然隔离。
+    """
+
+    async def test_two_real_core_units_coexist_and_isolate(self, tmp_path: Path) -> None:
+        from ghrah.core.unit import CoreUnitConfig, create_core_unit
+
+        def factory(cluster_id: str, project_root_locator: str = "") -> Any:
+            return create_core_unit(CoreUnitConfig(cluster_id=cluster_id))
+
+        config = _config(tmp_path)
+        unit = CoreClusterRegistryUnit(config, unit_factory=factory)
+        workspace = _FakeWorkspaceService(str(tmp_path / "workspace"))
+
+        ctx = await Context().__aenter__()
+        try:
+            ctx.provide(MANIFEST_STORE.name, _manifest_store(tmp_path))
+            ctx.provide(WORKSPACE_SERVICE.name, workspace)
+            ctx.provide(SANDBOX_EXECUTOR.name, SandboxExecutor(str(tmp_path / "workspace")))
+
+            fiber = ctx.plugin(mount_unit(unit))
+            await wait_active(fiber)
+            registry = ctx.get(CORE_CLUSTER_REGISTRY.name)
+
+            # 两个真实 CoreUnit 实例挂载不冲突（provide 删除前必炸）
+            handle_a = await registry.ensure_cluster("alpha")
+            handle_b = await registry.ensure_cluster("beta")
+            assert handle_a.is_connected and handle_b.is_connected
+
+            spawn_a = await handle_a.spawn_agent(
+                SpawnAgentPayload(
+                    config=AgentConfigPayload(name="agent-a", system_prompt="x")
+                )
+            )
+            assert spawn_a["success"], spawn_a.get("error")
+            spawn_b = await handle_b.spawn_agent(
+                SpawnAgentPayload(
+                    config=AgentConfigPayload(name="agent-b", system_prompt="x")
+                )
+            )
+            assert spawn_b["success"], spawn_b.get("error")
+
+            # agent 列表按实例隔离
+            assert [a["name"] for a in await handle_a.list_agents()] == ["agent-a"]
+            assert [a["name"] for a in await handle_b.list_agents()] == ["agent-b"]
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)

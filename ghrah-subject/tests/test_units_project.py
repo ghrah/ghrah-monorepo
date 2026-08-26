@@ -133,7 +133,16 @@ class TestUnitsAssembly:
             result = await bridge_command(
                 ctx,
                 "project_create",
-                {"name": "P2", "default_workspace_locator": path_to_locator(str(tmp_path / "p2"))},
+                {
+                    "name": "P2",
+                    "writable_workspaces": [
+                        {
+                            "locator": path_to_locator(str(tmp_path / "p2")),
+                            "name": "default",
+                            "default_for_agents": True,
+                        }
+                    ],
+                },
             )
             assert result["success"], result.get("error")
             assert result["data"]["project"]["name"] == "P2"

@@ -18,6 +18,10 @@ from typing import Any
 
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.project.manager import ProjectManager
+from ghrah.subject.project.migration import (
+    backup_legacy_database,
+    migrate_legacy_action_chains,
+)
 from ghrah.subject.project.store import ProjectStore
 from ghrah.subject.recovery.desired_state import DesiredStateRecord, DesiredStateStore
 from ghrah.subject.runtime.service_keys import (
@@ -26,6 +30,7 @@ from ghrah.subject.runtime.service_keys import (
     MANIFEST_STORE,
     PROJECT_MANAGER,
     TASK_MANAGER,
+    TASK_STORE,
     WORKSPACE_MANAGER,
 )
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
@@ -49,6 +54,7 @@ class ProjectUnit(SubjectUnit):
         self._ctx: Any | None = None
         self._store: ProjectStore | None = None
         self._desired_store: DesiredStateStore | None = None
+        self._task_store: Any | None = None
         self._manager: ProjectManager | None = None
         self._meta = UnitMeta(
             name="project",
@@ -56,6 +62,7 @@ class ProjectUnit(SubjectUnit):
                 {
                     WORKSPACE_MANAGER,
                     TASK_MANAGER,
+                    TASK_STORE,
                     CORE_CLUSTER_REGISTRY,
                     MANIFEST_STORE,
                     DESIRED_STATE_STORE,
@@ -81,6 +88,7 @@ class ProjectUnit(SubjectUnit):
         self._desired_store = ctx.get(DESIRED_STATE_STORE.name)
         workspace_mgr = ctx.get(WORKSPACE_MANAGER.name)
         task_mgr = ctx.get(TASK_MANAGER.name)
+        self._task_store = ctx.get(TASK_STORE.name)
         cluster_transport = ctx.get(CORE_CLUSTER_REGISTRY.name)
         manifest_store = ctx.get(MANIFEST_STORE.name)
         self._manager = ProjectManager(
@@ -91,7 +99,6 @@ class ProjectUnit(SubjectUnit):
             manifest_store,
             on_event=self._emit_event,
             default_workspace_locator=self._config.project.default_workspace_locator,
-            default_db_path_template=self._config.project.default_db_path_template,
             default_root_locator_template=self._config.project.default_root_locator_template,
         )
         ctx.provide(PROJECT_MANAGER.name, self._manager)
@@ -99,6 +106,27 @@ class ProjectUnit(SubjectUnit):
     async def start(self) -> None:
         if self._store is not None:
             await self._store.start()
+        if self._manager is not None:
+            await self._manager.migrate_legacy_project_roots()
+        if self._task_store is not None and self._store is not None:
+            projects = await self._store.list()
+            if projects:
+                await backup_legacy_database(self._config.persistence.db_path)
+            for project in projects:
+                self._task_store.register_project_root(
+                    project.project_id, project.project_root_locator
+                )
+                await self._task_store.migrate_project(project.project_id)
+            report = await migrate_legacy_action_chains(
+                self._config.core_db_path, projects
+            )
+            if report.total_rows or report.ambiguous_agents:
+                logger.info(
+                    "legacy ActionChain migration: rows=%s ambiguous_agents=%s backup=%s",
+                    report.total_rows,
+                    report.ambiguous_agents,
+                    report.backup_path,
+                )
 
     async def stop(self) -> None:
         if self._store is not None:

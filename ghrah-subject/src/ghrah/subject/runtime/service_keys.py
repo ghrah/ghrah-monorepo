@@ -171,7 +171,9 @@ class ClusterHandle(Protocol):
 class CoreClusterRegistryService(Protocol):
     """cluster = CoreUnit 实例注册表契约（进程内运行时挂载/卸载）。"""
 
-    async def ensure_cluster(self, cluster_id: str) -> ClusterHandle:
+    async def ensure_cluster(
+        self, cluster_id: str, *, project_root_locator: str = ""
+    ) -> ClusterHandle:
         """幂等挂载/取某 cluster 的 CoreUnit 实例 handle。"""
 
     def get_handle(self, cluster_id: str) -> ClusterHandle:

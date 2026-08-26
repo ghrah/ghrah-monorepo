@@ -20,9 +20,11 @@ from typing import Any
 from ghrah.protocol.types import AgentConfigPayload, SpawnAgentPayload
 from ouroboros import Context  # type: ignore[import-untyped]
 
-from ghrah.subject.config import RecoveryConfig, SubjectConfig
+from ghrah.subject.config import ProjectConfig, RecoveryConfig, SubjectConfig
+from ghrah.subject.ledger.chain import ActionChainLedger
+from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.runtime.assembly import assemble_subject
-from ghrah.subject.runtime.service_keys import LEDGER, RECONCILIATION_SERVICE
+from ghrah.subject.runtime.service_keys import RECONCILIATION_SERVICE
 from ghrah.subject.server.app import create_app
 
 
@@ -40,6 +42,10 @@ def _config(
             enabled=recovery_enabled,
             reconcile_on_start=reconcile_on_start,
             bootstrap_default_project=True,
+        ),
+        project_slice=ProjectConfig(
+            default_workspace_locator=str(tmp_path / "ws/projects/default"),
+            default_root_locator_template=str(tmp_path / "projects/{project_id}"),
         ),
     )
 
@@ -86,31 +92,37 @@ class TestAssembleSubject:
             assert report.bootstrap is True
             assert report.success
 
-            # registry 懒挂载了真实 CoreUnit（supervisor 服务在场）
+            # registry 懒挂载了真实 CoreUnit（supervisor 实例自持，不经 ctx 服务）
             registry = ctx.get("core_cluster_registry")
             assert registry.has_cluster("default")
             handle = registry.get_handle("default")
             assert handle.is_connected
-            assert ctx.get("supervisor", strict=False) is not None
+            assert handle._unit.supervisor is not None
 
             # 聚合裁决 D-C：spawn 的 agent 链落 Core sqlite（core_db_path），
             # 与 ledger 读侧投影同源（persistence_factory 注入验证）
-            config = _config(tmp_path)
             spawn = await handle.spawn_agent(
                 SpawnAgentPayload(
                     config=AgentConfigPayload(name="ledger-probe", system_prompt="x"),
                 )
             )
             assert spawn["success"], spawn.get("error")
-            supervisor = ctx.get("supervisor")
+            supervisor = handle._unit.supervisor
             actor = supervisor._registry.get_info("ledger-probe").actor_handle
             assert actor._context_manager.persistence is not None
-            assert str(actor._context_manager.persistence.db_path) == config.core_db_path
+            project_result = await ctx.get("project_manager").handle_command(
+                "project_list", {}
+            )
+            project = project_result["data"]["projects"][0]
+            project_db_path = ProjectPaths.from_locator(
+                project["project_root_locator"]
+            ).action_chain_db_path
+            assert str(actor._context_manager.persistence.db_path) == str(project_db_path)
 
             # ledger 读侧直连连通（同文件 WAL 双连接）。P2a 新契约：spawn 即
             # connect + 首次 persist——根节点（system prompt 快照）与 agents
             # 行当场落库（非旧「首次 save_node 才登记」语义）
-            ledger = ctx.get(LEDGER.name)
+            ledger = ActionChainLedger(project_db_path)
             await ledger.start()
             history = await ledger.get_chain_history("ledger-probe")
             assert len(history) == 1

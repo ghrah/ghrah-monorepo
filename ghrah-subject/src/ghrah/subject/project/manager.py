@@ -110,8 +110,6 @@ class ProjectManager:
         on_event: 事件回调（unit 注入）。
         default_workspace_locator: 首启 bootstrap 用的 default workspace locator
             （派生自 config.project.default_workspace_locator）。
-        default_db_path_template: per-project DB 路径模板（``{project_id}`` 占位）。
-            兼容保留；新 Project 的 db_path 已由 Project Root 派生。
         default_root_locator_template: 未显式传 Root 时使用的模板，支持
             ``{project_id}`` 占位。
     """
@@ -126,7 +124,6 @@ class ProjectManager:
         *,
         on_event: OnEvent | None = None,
         default_workspace_locator: str = "",
-        default_db_path_template: str = "~/.ghrah/projects/{project_id}.db",
         default_root_locator_template: str = "~/.ghrah/projects/{project_id}",
     ) -> None:
         self._store = store
@@ -136,7 +133,6 @@ class ProjectManager:
         self._manifest_store = manifest_store
         self._on_event = on_event
         self._default_workspace_locator = default_workspace_locator
-        self._default_db_path_template = default_db_path_template
         self._default_root_locator_template = default_root_locator_template
         self._create_lock = asyncio.Lock()
 
@@ -168,9 +164,6 @@ class ProjectManager:
             return
         await self._on_event(event_type, {"project": record.to_wire(), "agent_name": agent_name})
 
-    def _db_path_for(self, project_id: str) -> str:
-        return self._default_db_path_template.format(project_id=project_id)
-
     def _root_locator_for(self, project_id: str, requested: str = "") -> str:
         value = requested or self._default_root_locator_template.format(project_id=project_id)
         return canonical_file_locator(value)
@@ -197,20 +190,6 @@ class ProjectManager:
         if not p.name.strip():
             return _err("name required")
         workspace_inputs = list(p.writable_workspaces)
-        if "writable_workspaces" not in p.model_fields_set:
-            # 兼容旧客户端：仅在新字段完全缺席时映射 legacy/default locator。
-            legacy_locator = (
-                p.default_workspace_locator.strip() or self._default_workspace_locator
-            )
-            if legacy_locator:
-                workspace_inputs = [
-                    {
-                        "locator": legacy_locator,
-                        "name": p.default_workspace_name or "default",
-                        "role": "default",
-                        "default_for_agents": True,
-                    }
-                ]
 
         normalized_workspaces: list[dict[str, Any]] = []
         for item in workspace_inputs:
@@ -230,15 +209,11 @@ class ProjectManager:
             name=p.name.strip(),
             description=p.description.strip(),
             manifest_ref=p.manifest_ref,
-            instance_manifest_dir=p.instance_manifest_dir,
         )
         root_locator = self._root_locator_for(record.project_id, p.project_root_locator)
         project_paths = ProjectPaths.from_locator(root_locator)
         record = record.model_copy(
-            update={
-                "project_root_locator": root_locator,
-                "db_path": str(project_paths.project_db_path),
-            }
+            update={"project_root_locator": root_locator}
         )
         cluster_id = uuid4().hex
         await self._check_create_paths(
@@ -278,7 +253,9 @@ class ProjectManager:
             await self._store.upsert(record)
             stored = True
             cluster_attempted = True
-            await self._cluster_transport.ensure_cluster(cluster_id)
+            await self._cluster_transport.ensure_cluster(
+                cluster_id, project_root_locator=record.project_root_locator
+            )
         except Exception as exc:  # noqa: BLE001 — 创建事务在此统一补偿
             if cluster_attempted:
                 try:
@@ -324,6 +301,44 @@ class ProjectManager:
             workspace_locators=existing_workspaces + workspace_locators,
         )
 
+    async def migrate_legacy_project_roots(self) -> int:
+        """为尚无 Root 的旧 Project 幂等建立内部目录并更新元数据。"""
+        async with self._create_lock:
+            records = await self._store.list(include_deleted=True)
+            migrated = 0
+            existing_roots = [r.project_root_locator for r in records if r.project_root_locator]
+            workspace_locators: list[str] = []
+            for project in records:
+                for mount in project.workspaces:
+                    workspace = self._workspace_mgr.get_record(mount.workspace_id)
+                    if workspace is not None:
+                        workspace_locators.append(workspace.locator)
+            for record in records:
+                if record.project_root_locator:
+                    continue
+                root_locator = self._root_locator_for(record.project_id)
+                validate_project_path_boundaries(
+                    root_locator=root_locator,
+                    existing_root_locators=existing_roots,
+                    workspace_locators=workspace_locators,
+                )
+                paths = ProjectPaths.from_locator(root_locator)
+                receipt = paths.initialize(record.project_id)
+                try:
+                    await self._store.update(
+                        record.project_id,
+                        record.version,
+                        lambda current: current.model_copy(
+                            update={"project_root_locator": root_locator}
+                        ),
+                    )
+                except Exception:
+                    paths.rollback_initialize(receipt)
+                    raise
+                existing_roots.append(root_locator)
+                migrated += 1
+            return migrated
+
     async def _handle_update(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectUpdatePayload.model_validate(payload)
         existing = await self._store.get(p.project_id)
@@ -339,8 +354,6 @@ class ProjectManager:
                 updates["description"] = p.description
             if p.manifest_ref is not None:
                 updates["manifest_ref"] = p.manifest_ref
-            if p.instance_manifest_dir is not None:
-                updates["instance_manifest_dir"] = p.instance_manifest_dir
             return r.model_copy(update=updates)
 
         updated = await self._store.update(p.project_id, expected, mutator)
@@ -369,6 +382,13 @@ class ProjectManager:
         existing = await self._store.get(p.project_id, include_deleted=True)
         if existing is None:
             return _err(f"project not found: {p.project_id}")
+        paths: ProjectPaths | None = None
+        if p.purge_storage:
+            try:
+                paths = ProjectPaths.from_locator(existing.project_root_locator)
+                paths.validate_owner(existing.project_id)
+            except (OSError, ValueError) as exc:
+                return _err(str(exc))
         # shutdown 全部 cluster + 关 transport
         for cluster_id in existing.cluster_ids:
             try:
@@ -377,8 +397,16 @@ class ProjectManager:
             except Exception:  # noqa: BLE001
                 logger.warning("delete: shutdown cluster %s failed", cluster_id)
         await self._store.soft_delete(existing.project_id, existing.version)
+        if paths is not None:
+            paths.purge(existing.project_id)
         await self._emit("project_deleted", existing)
-        return _ok({"project_id": p.project_id, "deleted": True})
+        return _ok(
+            {
+                "project_id": p.project_id,
+                "deleted": True,
+                "storage_purged": paths is not None,
+            }
+        )
 
     async def _handle_add_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectAddAgentPayload.model_validate(payload)
@@ -390,7 +418,13 @@ class ProjectManager:
             name=p.agent.name,
             cluster_id=p.agent.cluster_id,
             manifest_ref=p.agent.manifest_ref,
-            instance_manifest_path=p.agent.instance_manifest_path,
+            instance_manifest_path=(
+                p.agent.instance_manifest_path
+                or str(
+                    ProjectPaths.from_locator(existing.project_root_locator).agent_manifest_dir
+                    / f"{p.agent.name}.yaml"
+                )
+            ),
             system_prompt=p.agent.system_prompt,
             abilities=p.agent.abilities,
             path_grants=[
@@ -406,14 +440,16 @@ class ProjectManager:
         updated = await self._store.update(p.project_id, expected, mutator)
         # active 且 cluster 缺该 agent 则 spawn
         if updated.status == ProjectStatus.ACTIVE:
-            await self._ensure_agent_spawned(agent)
+            await self._ensure_agent_spawned(agent, updated.project_root_locator)
         await self._emit_agent("project_agent_added", updated, agent.name)
         return _ok({"project": updated.to_wire(), "agent_name": agent.name})
 
-    async def _ensure_agent_spawned(self, agent: AgentSpec) -> None:
+    async def _ensure_agent_spawned(self, agent: AgentSpec, project_root_locator: str) -> None:
         """若 cluster 缺该 agent 则 spawn（MVP：不预检 list，直接 spawn，幂等由 Core 保证）。"""
         try:
-            handle = await self._cluster_transport.ensure_cluster(agent.cluster_id)
+            handle = await self._cluster_transport.ensure_cluster(
+                agent.cluster_id, project_root_locator=project_root_locator
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("add_agent: ensure_cluster %s failed: %s", agent.cluster_id, exc)
             return
@@ -553,7 +589,10 @@ class ProjectManager:
         if reinit_clusters:
             for cluster_id in existing.cluster_ids:
                 try:
-                    await self._cluster_transport.ensure_cluster(cluster_id)
+                    await self._cluster_transport.ensure_cluster(
+                        cluster_id,
+                        project_root_locator=existing.project_root_locator,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("status: reinit cluster %s failed: %s", cluster_id, exc)
         await self._emit(event_type, updated)
@@ -571,14 +610,11 @@ class ProjectManager:
         if not locator:
             raise ValueError("default_workspace_locator not configured")
         locator = _normalize_locator(locator)
-        record = make_project_record(name="default", instance_manifest_dir=".ghrah/agents")
+        record = make_project_record(name="default")
         root_locator = self._root_locator_for(record.project_id)
         project_paths = ProjectPaths.from_locator(root_locator)
         record = record.model_copy(
-            update={
-                "project_root_locator": root_locator,
-                "db_path": str(project_paths.project_db_path),
-            }
+            update={"project_root_locator": root_locator}
         )
         cluster_id = "default"
         await self._check_create_paths(root_locator, [locator])
@@ -603,7 +639,9 @@ class ProjectManager:
             await self._store.upsert(record)
             stored = True
             cluster_attempted = True
-            await self._cluster_transport.ensure_cluster(cluster_id)
+            await self._cluster_transport.ensure_cluster(
+                cluster_id, project_root_locator=record.project_root_locator
+            )
         except Exception:
             if cluster_attempted:
                 try:
@@ -635,7 +673,9 @@ class ProjectManager:
         existing = await self._store.get(project_id)
         if existing is None:
             raise ProjectNotFoundError(f"project not found: {project_id}")
-        handle = await self._cluster_transport.ensure_cluster(cluster_id)
+        handle = await self._cluster_transport.ensure_cluster(
+            cluster_id, project_root_locator=existing.project_root_locator
+        )
         agents_info: list[dict[str, Any]] = []
         try:
             agents_info = await handle.list_agents()

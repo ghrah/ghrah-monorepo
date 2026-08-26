@@ -13,6 +13,7 @@ from ghrah.subject.project.manager import ProjectManager
 from ghrah.subject.project.models import (
     ProjectStatus,
 )
+from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.project.store import ProjectStore
 from ghrah.subject.workspace.models import WorkspaceRecord
 from ghrah.subject.workspace.providers.git import path_to_locator
@@ -73,7 +74,9 @@ class _FakeClusterTransport:
         self._handle = _FakeHandle()
         self.fail_ensure = False
 
-    async def ensure_cluster(self, cluster_id: str) -> _FakeHandle:
+    async def ensure_cluster(
+        self, cluster_id: str, *, project_root_locator: str = ""
+    ) -> _FakeHandle:
         self.ensured.append(cluster_id)
         if self.fail_ensure:
             raise RuntimeError("cluster unavailable")
@@ -125,6 +128,16 @@ def _default_locator(tmp_path: Path) -> str:
     return path_to_locator(str(tmp_path / "default"))
 
 
+def _workspace_input(tmp_path: Path) -> list[dict[str, Any]]:
+    return [
+        {
+            "locator": _default_locator(tmp_path),
+            "name": "default",
+            "default_for_agents": True,
+        }
+    ]
+
+
 # ─── fixtures ───
 
 
@@ -157,7 +170,6 @@ def _make_manager(
         _FakeManifestStore(),
         on_event=on_event if events is not None else None,
         default_workspace_locator=default_locator,
-        default_db_path_template="~/.ghrah/projects/{project_id}.db",
         default_root_locator_template=str(store._db_path.parent / "roots/{project_id}"),
     )
 
@@ -173,7 +185,7 @@ class TestProjectCreate:
             {
                 "name": "P1",
                 "description": "Example project",
-                "default_workspace_locator": _default_locator(tmp_path),
+                "writable_workspaces": _workspace_input(tmp_path),
             },
         )
         assert result["success"], result.get("error")
@@ -338,7 +350,7 @@ class TestProjectGetList:
         mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         created = await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
+            {"name": "P1", "writable_workspaces": _workspace_input(tmp_path)},
         )
         project_id = created["data"]["project"]["project_id"]
 
@@ -360,7 +372,7 @@ class TestProjectAddRemoveAgent:
     async def _create(self, mgr: ProjectManager, tmp_path: Path) -> dict[str, Any]:
         return await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
+            {"name": "P1", "writable_workspaces": _workspace_input(tmp_path)},
         )
 
     async def test_add_agent(
@@ -435,7 +447,7 @@ class TestProjectStatusTransitions:
     async def _create(self, mgr: ProjectManager, tmp_path: Path) -> dict[str, Any]:
         return await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
+            {"name": "P1", "writable_workspaces": _workspace_input(tmp_path)},
         )
 
     async def test_pause_resume_stop(
@@ -479,7 +491,7 @@ class TestProjectSetRecoveryAndDelete:
     async def _create(self, mgr: ProjectManager, tmp_path: Path) -> dict[str, Any]:
         return await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
+            {"name": "P1", "writable_workspaces": _workspace_input(tmp_path)},
         )
 
     async def test_set_recovery(self, store: ProjectStore, tmp_path: Path) -> None:
@@ -503,6 +515,41 @@ class TestProjectSetRecoveryAndDelete:
         # 软删后 get 返回 None
         assert await store.get(pid) is None
 
+    async def test_delete_with_explicit_storage_purge(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        root = ProjectPaths.from_locator(project["project_root_locator"]).root
+
+        result = await mgr.handle_command(
+            "project_delete",
+            {"project_id": project["project_id"], "purge_storage": True},
+        )
+
+        assert result["success"]
+        assert result["data"]["storage_purged"] is True
+        assert not root.exists()
+
+    async def test_purge_rejects_marker_owner_mismatch(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        paths = ProjectPaths.from_locator(project["project_root_locator"])
+        paths.marker_path.write_text('{"project_id":"someone-else"}\n')
+
+        result = await mgr.handle_command(
+            "project_delete",
+            {"project_id": project["project_id"], "purge_storage": True},
+        )
+
+        assert not result["success"]
+        assert paths.root.exists()
+        assert await store.get(project["project_id"]) is not None
+
     async def test_delete_missing(self, store: ProjectStore) -> None:
         mgr = _make_manager(store)
         result = await mgr.handle_command("project_delete", {"project_id": "nope"})
@@ -513,7 +560,7 @@ class TestProjectLinkTask:
     async def _create(self, mgr: ProjectManager, tmp_path: Path) -> dict[str, Any]:
         return await mgr.handle_command(
             "project_create",
-            {"name": "P1", "default_workspace_locator": _default_locator(tmp_path)},
+            {"name": "P1", "writable_workspaces": _workspace_input(tmp_path)},
         )
 
     async def test_link_unlink_task(
@@ -558,7 +605,7 @@ class TestBootstrapMethods:
         assert project.name == "default"
         assert project.cluster_ids == ["default"]
         assert project.project_root_locator.startswith("file://")
-        assert (Path(project.db_path).parent.parent / ".ghrah-project.json").is_file()
+        assert ProjectPaths.from_locator(project.project_root_locator).marker_path.is_file()
         assert len(project.workspaces) == 1
         assert project.workspaces[0].default_for_agents is True
         # 持久化

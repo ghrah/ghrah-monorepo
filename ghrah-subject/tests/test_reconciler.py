@@ -85,7 +85,9 @@ class FakeClusterTransport:
         self._handle = handle or FakeClusterHandle()
         self.ensure_calls: list[str] = []
 
-    async def ensure_cluster(self, cluster_id: str) -> FakeClusterHandle:
+    async def ensure_cluster(
+        self, cluster_id: str, *, project_root_locator: str = ""
+    ) -> FakeClusterHandle:
         self.ensure_calls.append(cluster_id)
         return self._handle
 

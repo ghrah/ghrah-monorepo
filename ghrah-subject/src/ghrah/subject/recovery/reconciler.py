@@ -201,7 +201,9 @@ class ReconciliationService:
         # cluster：幂等 init
         for cluster_id in project.cluster_ids:
             try:
-                await self._cluster_transport.ensure_cluster(cluster_id)
+                await self._cluster_transport.ensure_cluster(
+                    cluster_id, project_root_locator=project.project_root_locator
+                )
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(
                     f"project {project.project_id}: ensure_cluster({cluster_id}) failed: {exc}"
@@ -258,7 +260,9 @@ class ReconciliationService:
                 handle = self._cluster_transport.get_handle(cluster_id)
             except KeyError:
                 try:
-                    handle = await self._cluster_transport.ensure_cluster(cluster_id)
+                    handle = await self._cluster_transport.ensure_cluster(
+                        cluster_id, project_root_locator=project.project_root_locator
+                    )
                 except Exception as exc:  # noqa: BLE001
                     report.errors.append(
                         f"project {project.project_id}: ensure_cluster({cluster_id}) "
