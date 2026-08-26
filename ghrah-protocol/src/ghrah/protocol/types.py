@@ -164,6 +164,18 @@ class CommandType(StrEnum):
     PROJECT_RESUME = "project_resume"
     PROJECT_STOP = "project_stop"
 
+    # ─── Room 管理类（Observer/Core → Subject，10 个）───
+    ROOM_CREATE = "room_create"
+    ROOM_LIST = "room_list"
+    ROOM_GET = "room_get"
+    ROOM_UPDATE = "room_update"
+    ROOM_DELETE = "room_delete"
+    ROOM_JOIN = "room_join"
+    ROOM_LEAVE = "room_leave"
+    ROOM_GET_MEMBERS = "room_get_members"
+    ROOM_GET_LOG = "room_get_log"
+    ROOM_SEND = "room_send"
+
     # ─── 恢复类（Observer → Subject，2 个）───
     RECONCILE_NOW = "reconcile_now"
     RECONCILE_STATUS = "reconcile_status"
@@ -227,6 +239,14 @@ class EventType(StrEnum):
     PROJECT_AGENT_ADDED = "project_agent_added"
     PROJECT_AGENT_REMOVED = "project_agent_removed"
     PROJECT_RECOVERY_SET = "project_recovery_set"
+
+    # ─── Room 事件（Subject → Observer/Core，6 个）───
+    ROOM_CREATED = "room_created"
+    ROOM_UPDATED = "room_updated"
+    ROOM_DELETED = "room_deleted"
+    ROOM_MEMBER_JOINED = "room_member_joined"
+    ROOM_MEMBER_LEFT = "room_member_left"
+    ROOM_LOG_APPENDED = "room_log_appended"
 
     # ─── 恢复事件（Subject → Observer，2 个）───
     SUBJECT_RECONCILED = "subject_reconciled"
@@ -369,6 +389,19 @@ PROJECT_COMMANDS: frozenset[str] = frozenset({
     CommandType.PROJECT_STOP.value,
 })
 
+ROOM_COMMANDS: frozenset[str] = frozenset({
+    CommandType.ROOM_CREATE.value,
+    CommandType.ROOM_LIST.value,
+    CommandType.ROOM_GET.value,
+    CommandType.ROOM_UPDATE.value,
+    CommandType.ROOM_DELETE.value,
+    CommandType.ROOM_JOIN.value,
+    CommandType.ROOM_LEAVE.value,
+    CommandType.ROOM_GET_MEMBERS.value,
+    CommandType.ROOM_GET_LOG.value,
+    CommandType.ROOM_SEND.value,
+})
+
 RECONCILE_COMMANDS: frozenset[str] = frozenset({
     CommandType.RECONCILE_NOW.value,
     CommandType.RECONCILE_STATUS.value,
@@ -393,6 +426,23 @@ class RecoveryAction(StrEnum):
     RESUME = "resume"
     PAUSE = "pause"
     DROP = "drop"
+
+
+# ─── Room 附属枚举 ───
+
+
+class RoomSubjectType(StrEnum):
+    """Room 成员/作者类型。"""
+
+    AGENT = "agent"
+    HUMAN = "human"
+
+
+class RoomStatus(StrEnum):
+    """Room 生命周期状态。"""
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
 
 
 # ─── 命令载荷模型 ───
@@ -1254,6 +1304,162 @@ class ReconcileReportPayload(BaseModel):
     tasks_migrated: int = 0
 
 
+# ─── Room 载荷模型 ───
+
+
+class RoomMember(BaseModel):
+    """Room 成员（多对多：agent / human 均可为成员）。"""
+
+    subject: str
+    subject_type: RoomSubjectType
+    joined_at: str = ""
+
+
+class RoomInfoPayload(BaseModel):
+    """Room 信息载荷（room_get/room_list 结果项及 ROOM_* 事件回执）。
+
+    对齐 ghrah-subject room/models.RoomRecord；seq_watermark 为该 room
+    已分配的最大 RoomLog seq（Subject 单点分配）。
+    """
+
+    room_id: str
+    project_id: str
+    name: str
+    status: RoomStatus = RoomStatus.ACTIVE
+    members: list[RoomMember] = Field(default_factory=list)
+    seq_watermark: int = 0
+    version: int = 1
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class RoomLogEntryPayload(BaseModel):
+    """RoomLog 节点载荷 = 最小信封 + 自由 map（不预置业务枚举 schema）。"""
+
+    id: str
+    room_id: str
+    seq: int
+    author: str
+    author_type: RoomSubjectType
+    timestamp: float
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class RoomCreatePayload(BaseModel):
+    """room_create 命令载荷。"""
+
+    project_id: str
+    name: str
+
+
+class RoomListPayload(BaseModel):
+    """room_list 命令载荷（可选 project/status 过滤）。"""
+
+    project_id: str | None = None
+    status: RoomStatus | None = None
+
+
+class RoomIdPayload(BaseModel):
+    """room_get / room_update / room_delete / room_get_members /
+    room_get_log / room_send 等命令的 room_id 键控基类。"""
+
+    room_id: str
+
+
+class RoomUpdatePayload(BaseModel):
+    """room_update 命令载荷（乐观锁）。"""
+
+    room_id: str
+    name: str | None = None
+    expected_version: int | None = None
+
+
+class RoomDeletePayload(RoomIdPayload):
+    """room_delete 命令载荷。"""
+
+    force: bool = False
+
+
+class RoomJoinPayload(BaseModel):
+    """room_join 命令载荷。"""
+
+    room_id: str
+    subject: str
+    subject_type: RoomSubjectType
+
+
+class RoomLeavePayload(BaseModel):
+    """room_leave 命令载荷。"""
+
+    room_id: str
+    subject: str
+
+
+class RoomGetLogPayload(BaseModel):
+    """room_get_log 命令载荷（since_seq 增量 / limit 截尾）。"""
+
+    room_id: str
+    since_seq: int | None = None
+    limit: int = 100
+
+
+class RoomSendPayload(BaseModel):
+    """room_send 命令载荷（人类/Mock 公开路径；agent 路径由 Core send
+    ability 解析后经同一命令面收敛，见 Room 计划附录双调用方分流）。"""
+
+    room_id: str
+    author: str
+    author_type: RoomSubjectType
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class RoomListResultPayload(BaseModel):
+    """room_list 命令结果载荷。"""
+
+    rooms: list[RoomInfoPayload] = Field(default_factory=list)
+    count: int = 0
+
+
+class RoomLogResultPayload(BaseModel):
+    """room_get_log 命令结果载荷。"""
+
+    entries: list[RoomLogEntryPayload] = Field(default_factory=list)
+    count: int = 0
+
+
+# ─── Room 事件载荷模型 ───
+
+
+class RoomEventPayload(BaseModel):
+    """room_created / room_updated 事件载荷（全量快照）。"""
+
+    room: RoomInfoPayload
+
+
+class RoomDeletedEventPayload(BaseModel):
+    """room_deleted 事件载荷。"""
+
+    room_id: str
+    project_id: str
+
+
+class RoomMemberEventPayload(BaseModel):
+    """room_member_joined / room_member_left 事件载荷。
+
+    joined 携带 member；left 仅 subject（成员已移出全量快照）。
+    """
+
+    room: RoomInfoPayload
+    member: RoomMember | None = None
+    subject: str | None = None
+
+
+class RoomLogEventPayload(BaseModel):
+    """room_log_appended 事件载荷。"""
+
+    entry: RoomLogEntryPayload
+
+
 # ─── Session 事件载荷模型 ───
 
 
@@ -1476,6 +1682,17 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     CommandType.PROJECT_PAUSE: ProjectIdPayload,
     CommandType.PROJECT_RESUME: ProjectIdPayload,
     CommandType.PROJECT_STOP: ProjectIdPayload,
+    # Room 管理（10 个）
+    CommandType.ROOM_CREATE: RoomCreatePayload,
+    CommandType.ROOM_LIST: RoomListPayload,
+    CommandType.ROOM_GET: RoomIdPayload,
+    CommandType.ROOM_UPDATE: RoomUpdatePayload,
+    CommandType.ROOM_DELETE: RoomDeletePayload,
+    CommandType.ROOM_JOIN: RoomJoinPayload,
+    CommandType.ROOM_LEAVE: RoomLeavePayload,
+    CommandType.ROOM_GET_MEMBERS: RoomIdPayload,
+    CommandType.ROOM_GET_LOG: RoomGetLogPayload,
+    CommandType.ROOM_SEND: RoomSendPayload,
     # 恢复（2 个）
     CommandType.RECONCILE_NOW: ReconcileNowPayload,
     CommandType.RECONCILE_STATUS: ReconcileStatusPayload,
@@ -1526,6 +1743,13 @@ EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
     EventType.PROJECT_AGENT_ADDED: ProjectAgentEventPayload,
     EventType.PROJECT_AGENT_REMOVED: ProjectAgentEventPayload,
     EventType.PROJECT_RECOVERY_SET: ProjectEventPayload,
+    # Room 事件（6 个）
+    EventType.ROOM_CREATED: RoomEventPayload,
+    EventType.ROOM_UPDATED: RoomEventPayload,
+    EventType.ROOM_DELETED: RoomDeletedEventPayload,
+    EventType.ROOM_MEMBER_JOINED: RoomMemberEventPayload,
+    EventType.ROOM_MEMBER_LEFT: RoomMemberEventPayload,
+    EventType.ROOM_LOG_APPENDED: RoomLogEventPayload,
     # 恢复事件（2 个）
     EventType.SUBJECT_RECONCILED: ReconcileReportPayload,
     EventType.RECONCILE_FAILED: ReconcileReportPayload,
