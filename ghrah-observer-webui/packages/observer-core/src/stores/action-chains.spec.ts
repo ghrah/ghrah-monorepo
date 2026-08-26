@@ -106,4 +106,30 @@ describe("useActionChainsStore", () => {
     expect(store.getChain("agent-1")).toHaveLength(0);
     expect(store.getChain("agent-2")).toHaveLength(0);
   });
+
+  it("setChain replaces agent chain with read-back nodes (F2 initial sync)", () => {
+    const store = useActionChainsStore();
+    store.setChain("agent-1", [
+      makeNode({ id: "r1", ability_names: ["conversation"] }),
+      makeNode({ id: "r2", ability_names: ["send"] }),
+    ]);
+    const chain = store.getChain("agent-1");
+    expect(chain.map((n) => n.id)).toEqual(["r1", "r2"]);
+  });
+
+  it("setChain merges idempotently with concurrent increments (node id dedup)", () => {
+    const store = useActionChainsStore();
+    // 刷新瞬间：增量事件已先到 n1
+    store.onActionChainUpdated({
+      agent_name: "agent-1",
+      node: makeNode({ id: "n1", ability_names: ["conversation"] }),
+    });
+    // 读回的完整链含 n1（重复）+ n2（新）
+    store.setChain("agent-1", [
+      makeNode({ id: "n1", ability_names: ["conversation"] }),
+      makeNode({ id: "n2", ability_names: ["send"] }),
+    ]);
+    const chain = store.getChain("agent-1");
+    expect(chain.map((n) => n.id)).toEqual(["n1", "n2"]);
+  });
 });

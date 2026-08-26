@@ -1,5 +1,6 @@
 import type {
   ActionChainUpdatedPayload,
+  ActionNode,
   AgentConfigPayload,
   AgentSpawnedPayload,
   AgentTerminatedPayload,
@@ -96,7 +97,12 @@ export function connectStores(
       | string
       | undefined;
     if (originalCommand === CommandType.LIST_AGENTS && Array.isArray(data.agents)) {
-      agents.setAgentsFromList(data.agents as AgentListItem[]);
+      const agentList = data.agents as AgentListItem[];
+      agents.setAgentsFromList(agentList);
+      // F2 初始同步：刷新后 ActionChain 面板恢复——为每个 agent 读回链历史，
+      // 与增量 onActionChainUpdated 幂等合并（store setChain 以 node id 去重）。
+      // fire-and-forget：不阻塞回执/连接流程；单个失败仅记日志。
+      void syncActionChains(agentList.map((a) => a.name));
     }
     if (originalCommand === CommandType.ROOM_LIST && Array.isArray(data.rooms)) {
       rooms.setRoomsFromList(data.rooms as RoomInfoPayload[]);
@@ -223,6 +229,24 @@ export function connectStores(
     EventType.PROJECT_DELETED,
     ...taskEventTypes,
   ] as const;
+
+  /** F2：对每个 agent 并行读回链历史 → store.setChain（幂等合并）。 */
+  async function syncActionChains(agentNames: string[]) {
+    await Promise.all(
+      agentNames.map(async (name) => {
+        try {
+          const res = await client.getChainHistory(name);
+          if (!res.success || !res.data) return;
+          const nodes = (res.data as Record<string, unknown>).nodes;
+          if (Array.isArray(nodes)) {
+            chains.setChain(name, nodes as ActionNode[]);
+          }
+        } catch {
+          // 单个 agent 链读失败不影响其余；增量事件会兜底
+        }
+      }),
+    );
+  }
 
   return () => {
     for (const et of eventTypes) client.off(et);

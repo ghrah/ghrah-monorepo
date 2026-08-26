@@ -156,6 +156,28 @@ describe("ObserverClient", () => {
     });
   });
 
+  describe("getChainHistory", () => {
+    it("builds correct get_chain_history payload", async () => {
+      await connectClient(client, mockWs);
+      const msgPromise = client.getChainHistory("planner", 50);
+
+      const parsed = JSON.parse(mockWs.sent[0]);
+      expect(parsed.type).toBe(CommandType.GET_CHAIN_HISTORY);
+      expect(parsed.payload.agent_name).toBe("planner");
+      expect(parsed.payload.limit).toBe(50);
+
+      mockWs.onmessage!({
+        data: JSON.stringify({
+          type: "command_result",
+          payload: { request_id: parsed.request_id, success: true, data: { nodes: [] } },
+          request_id: parsed.request_id,
+        }),
+      });
+
+      await expect(msgPromise).resolves.toBeDefined();
+    });
+  });
+
   describe("sendHitlResponse", () => {
     it("sends hitl_response without waiting for result", async () => {
       await connectClient(client, mockWs);

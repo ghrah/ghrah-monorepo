@@ -662,6 +662,49 @@ describe("connectStores", () => {
       expect(agentsStore.agents.has("agent-2")).toBe(true);
     });
 
+    it("F2: list_agents command_result triggers chain history initial sync", async () => {
+      await connectClient();
+      const chainStore = useActionChainsStore();
+      const nodeA = { id: "na", ability_names: ["conversation"] };
+      const nodeB = { id: "nb", ability_names: ["send"] };
+
+      const spy = vi
+        .spyOn(client, "getChainHistory")
+        .mockImplementation((name: string) => {
+          const nodes = name === "agent-1" ? [nodeA] : [nodeB];
+          return Promise.resolve({
+            request_id: "r",
+            success: true,
+            original_command: CommandType.GET_CHAIN_HISTORY,
+            data: { nodes },
+          } as Awaited<ReturnType<typeof client.getChainHistory>>);
+        });
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "r1",
+          success: true,
+          original_command: CommandType.LIST_AGENTS,
+          data: {
+            agents: [
+              { name: "agent-1", config: { ...DEFAULT_CONFIG, name: "agent-1" } },
+              { name: "agent-2", config: { ...DEFAULT_CONFIG, name: "agent-2" } },
+            ],
+          },
+        }),
+      );
+
+      // fire-and-forget：等待两个 getChainHistory 完成
+      await vi.waitFor(() => {
+        expect(spy).toHaveBeenCalledWith("agent-1");
+        expect(spy).toHaveBeenCalledWith("agent-2");
+      });
+      expect(chainStore.getChain("agent-1")).toHaveLength(1);
+      expect(chainStore.getChain("agent-1")[0].id).toBe("na");
+      expect(chainStore.getChain("agent-2")[0].id).toBe("nb");
+    });
+
     it("sets rooms on room_list command_result", async () => {
       await connectClient();
       const roomsStore = useRoomsStore();

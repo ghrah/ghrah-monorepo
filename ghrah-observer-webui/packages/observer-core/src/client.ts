@@ -146,6 +146,19 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
+  async getChainHistory(agentName: string, limit?: number): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = { agent_name: agentName };
+    if (limit != null) payload["limit"] = limit;
+
+    const msg: ServerMessage = {
+      type: CommandType.GET_CHAIN_HISTORY,
+      payload,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
   async initCluster(
     clusterId: string,
     config?: Record<string, unknown>,
