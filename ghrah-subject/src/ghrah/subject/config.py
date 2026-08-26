@@ -170,6 +170,22 @@ class RecoveryConfig:
 
 
 @dataclass
+class RoomFilterConfig:
+    """Room Filter Unit 配置切片（E1：能力结果 → RoomLog 显式 Filter）。
+
+    白名单配置驱动（用户裁决：零隐式行为——非白名单/无 room 上下文的
+    能力结果一律不落 Room；manifest ``chat_visible`` 元数据扩展属 E2）。
+
+    Attributes:
+        enabled: 是否挂载 Filter Unit（False = 完全无过滤行为）
+        abilities: 白名单能力名（命中且 success 且带 room 上下文才落账）
+    """
+
+    enabled: bool = True
+    abilities: tuple[str, ...] = ("conversation",)
+
+
+@dataclass
 class SubjectConfig:
     """Subject 运行时配置（各 Unit 配置切片的容器）。
 
@@ -209,6 +225,7 @@ class SubjectConfig:
     hitl_slice: InitVar[HITLPolicyConfig | None] = None
     project_slice: InitVar[ProjectConfig | None] = None
     recovery_slice: InitVar[RecoveryConfig | None] = None
+    room_filter_slice: InitVar[RoomFilterConfig | None] = None
 
     # 非 slice 的新字段（有默认值，可直接构造）。
     transport: TransportKindConfig = field(default_factory=TransportKindConfig)
@@ -221,6 +238,7 @@ class SubjectConfig:
     _hitl: HITLPolicyConfig = field(init=False)
     _project: ProjectConfig = field(init=False)
     _recovery: RecoveryConfig = field(init=False)
+    _room_filter: RoomFilterConfig = field(init=False)
 
     def __post_init__(
         self,
@@ -230,6 +248,7 @@ class SubjectConfig:
         hitl_slice: HITLPolicyConfig | None,
         project_slice: ProjectConfig | None,
         recovery_slice: RecoveryConfig | None,
+        room_filter_slice: RoomFilterConfig | None,
     ) -> None:
         self._persistence = persistence_slice or PersistenceConfig(db_path=self.db_path)
         self._sandbox = sandbox_slice or SandboxUnitConfig(
@@ -248,6 +267,7 @@ class SubjectConfig:
             ),
         )
         self._recovery = recovery_slice or RecoveryConfig()
+        self._room_filter = room_filter_slice or RoomFilterConfig()
 
     # ── 只读 slice property（非 Optional，mypy strict 友好）──
 
@@ -285,6 +305,10 @@ class SubjectConfig:
     def recovery(self) -> RecoveryConfig:
         return self._recovery
 
+    @property
+    def room_filter(self) -> RoomFilterConfig:
+        return self._room_filter
+
     @classmethod
     def from_env(cls) -> SubjectConfig:
         """从环境变量创建配置。
@@ -307,6 +331,8 @@ class SubjectConfig:
         - GHRAH_SUBJECT_RECOVERY_ON_UNKNOWN_WORKSPACE（resume|pause|drop）
         - GHRAH_SUBJECT_RECOVERY_RECONCILE_ON_START
         - GHRAH_SUBJECT_RECOVERY_BOOTSTRAP_DEFAULT_PROJECT
+        - GHRAH_SUBJECT_ROOM_FILTER_ENABLED
+        - GHRAH_SUBJECT_ROOM_FILTER_ABILITIES（逗号分隔白名单能力名）
         """
         hitl_policy = HITLPolicyConfig(
             auto_approve_abilities=os.environ.get(
@@ -416,6 +442,19 @@ class SubjectConfig:
             in ("true", "1", "yes"),
         )
 
+        # room_filter slice
+        room_filter_slice = RoomFilterConfig(
+            enabled=os.environ.get("GHRAH_SUBJECT_ROOM_FILTER_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            abilities=tuple(
+                a.strip()
+                for a in os.environ.get(
+                    "GHRAH_SUBJECT_ROOM_FILTER_ABILITIES", "conversation"
+                ).split(",")
+                if a.strip()
+            ),
+        )
+
         return cls(
             workspace_root=workspace_root,
             db_path=os.environ.get(
@@ -436,6 +475,7 @@ class SubjectConfig:
             enabled_third_party_units=enabled_third_party_units,
             project_slice=project_slice,
             recovery_slice=recovery_slice,
+            room_filter_slice=room_filter_slice,
         )
 
 

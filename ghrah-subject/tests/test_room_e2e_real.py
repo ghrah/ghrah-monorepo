@@ -316,6 +316,10 @@ class TestRoomRealEndToEnd:
             assert received.content == "你好"
             assert received.sender == "human:yuki"
 
+            # E0 贯通断言：投递 metadata（room_id）随 AgentMessage 到达 agent
+            # （receive 侧合入 ChatMessage metadata → 链节点 messages_delta）
+            assert received.metadata.get("room_id") == room["room_id"]
+
             # author_type=agent 不投递（send ability 路径自担 Supervisor 投递）
             agent_send = await bridge_command(
                 ctx,
@@ -330,3 +334,105 @@ class TestRoomRealEndToEnd:
             assert agent_send["success"], agent_send.get("error")
             await asyncio.sleep(0.3)
             assert len(actor._message_history) == 1
+
+    async def test_room_filter_appends_conversation_reply(self, tmp_path: Path) -> None:
+        """E1/G1（合成事件）：白名单 conversation 结果 + room 上下文 → 落 RoomLog。
+
+        真实 LLM 不参与：以真实序列化形状的合成 action_chain_updated 事件
+        驱动（事件订阅/Filter/room_send 校验/落账/广播全链路真实执行）。
+        """
+        async with _stack(tmp_path) as ctx:
+            events: list[tuple[str, dict[str, Any]]] = []
+            ctx.on(
+                "event/room_log_appended",
+                lambda payload: events.append(("room_log_appended", payload)),
+            )
+
+            project_id = await _make_project(ctx)
+            room = _data(
+                await bridge_command(
+                    ctx, "room_create", {"project_id": project_id, "name": "test"}
+                )
+            )["room"]
+            await bridge_command(
+                ctx,
+                "spawn_agent",
+                {"config": {"name": "planner", "system_prompt": "t"}},
+            )
+            await bridge_command(
+                ctx,
+                "room_join",
+                {
+                    "room_id": room["room_id"],
+                    "subject": "planner",
+                    "subject_type": "agent",
+                },
+            )
+
+            ctx.emit(
+                "core:action_chain_updated",
+                {
+                    "agent_name": "planner",
+                    "node": {
+                        "id": "node-e1",
+                        "agent_name": "planner",
+                        "action_results": [
+                            {
+                                "ability_name": "conversation",
+                                "action_result": {
+                                    "outcome": "success",
+                                    "data": {"response": "收到，开始规划"},
+                                },
+                            }
+                        ],
+                        "messages_delta": [
+                            {
+                                "role": "user",
+                                "metadata": {"room_id": room["room_id"]},
+                            }
+                        ],
+                    },
+                },
+            )
+            await _wait_for(lambda: bool(events), timeout=5.0)
+
+            log = _data(
+                await bridge_command(ctx, "room_get_log", {"room_id": room["room_id"]})
+            )
+            assert log["count"] == 1
+            entry = log["entries"][0]
+            assert entry["author"] == "planner"
+            assert entry["author_type"] == "agent"
+            assert entry["data"]["message"] == "收到，开始规划"
+            assert entry["data"]["via"] == "chain_filter"
+            # WS 投影：room_log_appended(agent) 已广播（G1 断言面）
+            assert events[0][1]["entry"]["id"] == entry["id"]
+
+            # G3 负例：无 room 上下文（metadata.room_id 缺失）→ 不落
+            ctx.emit(
+                "core:action_chain_updated",
+                {
+                    "agent_name": "planner",
+                    "node": {
+                        "id": "node-e2",
+                        "agent_name": "planner",
+                        "action_results": [
+                            {
+                                "ability_name": "conversation",
+                                "action_result": {
+                                    "outcome": "success",
+                                    "data": {"response": "无归属回复"},
+                                },
+                            }
+                        ],
+                        "messages_delta": [
+                            {"role": "user", "metadata": {}},
+                        ],
+                    },
+                },
+            )
+            await asyncio.sleep(0.3)
+            log = _data(
+                await bridge_command(ctx, "room_get_log", {"room_id": room["room_id"]})
+            )
+            assert log["count"] == 1

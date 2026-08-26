@@ -61,6 +61,7 @@ async def mount_builtin_units(
         from ghrah.subject.units.project import ProjectUnit
         from ghrah.subject.units.recovery import RecoveryUnit
         from ghrah.subject.units.room import RoomUnit
+        from ghrah.subject.units.room_filter import RoomFilterUnit
         from ghrah.subject.units.websocket_observer_endpoint import (
             WebSocketObserverEndpointUnit,
         )
@@ -74,6 +75,10 @@ async def mount_builtin_units(
                 RecoveryUnit(config),
             ]
         )
+        # Room Filter（E1）：requires ROOM_MANAGER（RoomUnit 之后挂载）；
+        # enabled=False 时完全不挂载（零隐式行为，配置切片控制）
+        if config.room_filter.enabled:
+            units.append(RoomFilterUnit(config))
 
     fibers: dict[str, Fiber] = {}
     for unit in units:

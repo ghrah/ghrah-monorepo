@@ -424,7 +424,9 @@ async def _delivery_manager(
     async def project_exists(project_id: str) -> bool:
         return project_id in PROJECT_IDS
 
-    async def deliver(target: str, sender: str, content: str) -> dict[str, Any]:
+    async def deliver(
+        target: str, sender: str, content: str, room_id: str
+    ) -> dict[str, Any]:
         deliveries.append((target, sender, content))
         return {"success": True, "data": {"content": "ok"}, "error": None}
 
@@ -534,7 +536,9 @@ async def test_delivery_failure_does_not_affect_room_send(tmp_path: Path) -> Non
     store = RoomStore(tmp_path / "rooms.db")
     await store.start()
 
-    async def deliver(target: str, sender: str, content: str) -> dict[str, Any]:
+    async def deliver(
+        target: str, sender: str, content: str, room_id: str
+    ) -> dict[str, Any]:
         deliveries.append((target, sender, content))
         if target == "bad":
             raise RuntimeError("boom")

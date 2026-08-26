@@ -53,7 +53,12 @@ logger = logging.getLogger(__name__)
 
 OnEvent = Callable[[str, dict[str, Any]], Awaitable[None]]
 ProjectExists = Callable[[str], Awaitable[bool]]
-Deliver = Callable[[str, str, str], Awaitable[dict[str, Any]]]
+Deliver = Callable[[str, str, str, str], Awaitable[dict[str, Any]]]
+"""deliver(target, sender, content, room_id) → command_result。
+
+room_id 随投递写入消息 metadata（AgentMessage.metadata.room_id）→ 链节点
+messages_delta，供回复归属推导（Room Filter）消费。
+"""
 
 __all__ = ["RoomManager"]
 
@@ -310,7 +315,7 @@ class RoomManager:
         for target in targets:
             try:
                 asyncio.get_running_loop().create_task(
-                    self._deliver_one(target, sender=p.author, content=message)
+                    self._deliver_one(target, p.room_id, sender=p.author, content=message)
                 )
             except RuntimeError:
                 logger.warning(
@@ -332,9 +337,11 @@ class RoomManager:
             targets = list(agent_members)
         return [t for t in targets if t != p.author]
 
-    async def _deliver_one(self, target: str, *, sender: str, content: str) -> None:
+    async def _deliver_one(
+        self, target: str, room_id: str, *, sender: str, content: str
+    ) -> None:
         try:
-            result = await self._deliver(target, sender, content)  # type: ignore[misc]
+            result = await self._deliver(target, sender, content, room_id)  # type: ignore[misc]
         except Exception:
             logger.exception(
                 "room delivery failed: target=%s sender=%s", target, sender
