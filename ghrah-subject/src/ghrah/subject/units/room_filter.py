@@ -95,6 +95,7 @@ class RoomFilterUnit(SubjectUnit):
         agent_name = str(payload.get("agent_name") or node.get("agent_name") or "")
         if not agent_name:
             return
+        agent_identity = self._resolve_agent_identity(node) or agent_name
 
         node_id = str(node["id"])
         if node_id in self._seen_nodes:
@@ -129,7 +130,9 @@ class RoomFilterUnit(SubjectUnit):
             content = self._extract_content(action_result)
             if not content:
                 continue
-            await self._append_to_room(room_id, agent_name, ability_name, node_id, content)
+            await self._append_to_room(
+                room_id, agent_identity, ability_name, node_id, content
+            )
 
     @staticmethod
     def _resolve_room_id(node: dict[str, Any]) -> str | None:
@@ -161,6 +164,26 @@ class RoomFilterUnit(SubjectUnit):
         room_id = delivery_context.get("room_id")
         if isinstance(room_id, str) and room_id:
             return room_id
+        return None
+
+    @staticmethod
+    def _resolve_agent_identity(node: dict[str, Any]) -> str | None:
+        """读取本次投递使用的 project-scoped 稳定 Agent ID。
+
+        ``RoomFilterUnit`` 直接调用 ``RoomManager``，不会经过 ``RoomUnit`` 的
+        显示名归一化边界。因此新 Room 已用稳定 ID 保存成员时，回写 author
+        必须沿用 delivery_context.agent_id；旧节点没有该字段时由调用方回退
+        到 agent_name，保持历史兼容。
+        """
+        node_metadata = node.get("metadata")
+        if not isinstance(node_metadata, dict):
+            return None
+        delivery_context = node_metadata.get("delivery_context")
+        if not isinstance(delivery_context, dict):
+            return None
+        agent_id = delivery_context.get("agent_id")
+        if isinstance(agent_id, str) and agent_id:
+            return agent_id
         return None
 
     @staticmethod

@@ -117,6 +117,7 @@ async def test_delivery_context_from_later_tool_iteration_appends() -> None:
 
     assert len(manager.sends) == 1
     assert manager.sends[0]["room_id"] == "room-tool-loop"
+    assert manager.sends[0]["author"] == "stable-1"
     assert manager.sends[0]["data"]["message"] == "收到"
 
 
