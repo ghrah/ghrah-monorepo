@@ -452,6 +452,7 @@ class AgentConfigPayload(BaseModel):
     """Agent 配置载荷，对应 ghrah-core 的 AgentConfig。"""
 
     name: str
+    agent_id: str = ""
     agent_config_name: str | None = None
     description: str = ""
     system_prompt: str = ""
@@ -611,6 +612,8 @@ class AgentSpawnedPayload(BaseModel):
     """agent_spawned 事件载荷。"""
 
     name: str
+    agent_id: str = ""
+    incarnation_id: str = ""
     config: AgentConfigPayload
 
 
@@ -618,6 +621,8 @@ class AgentTerminatedPayload(BaseModel):
     """agent_terminated 事件载荷。"""
 
     name: str
+    agent_id: str = ""
+    incarnation_id: str = ""
 
 
 class AgentResponsePayload(BaseModel):
@@ -1009,6 +1014,7 @@ class TaskInfoPayload(BaseModel):
     project_id: str
     title: str
     description: str = ""
+    agent_id: str | None = None
     agent_name: str | None = None
     status: TaskStatus = TaskStatus.PENDING
     priority: TaskPriority = TaskPriority.NORMAL
@@ -1029,6 +1035,7 @@ class TaskCreatePayload(BaseModel):
     title: str
     project_id: str
     description: str = ""
+    agent_id: str | None = None
     agent_name: str | None = None
     priority: TaskPriority = TaskPriority.NORMAL
     parent_id: str | None = None
@@ -1042,6 +1049,7 @@ class TaskUpdatePayload(BaseModel):
     task_id: str
     title: str | None = None
     description: str | None = None
+    agent_id: str | None = None
     agent_name: str | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None
@@ -1063,6 +1071,7 @@ class TaskIdPayload(BaseModel):
 class TaskAssignPayload(TaskIdPayload):
     """task_assign 命令载荷。"""
 
+    agent_id: str = ""
     agent_name: str
 
 
@@ -1093,6 +1102,7 @@ class TaskBlockPayload(TaskIdPayload):
 class TaskListPayload(BaseModel):
     """task_list 命令载荷。"""
 
+    agent_id: str | None = None
     agent_name: str | None = None
     status: TaskStatus | list[TaskStatus] | None = None
     parent_id: str | None = None
@@ -1120,6 +1130,8 @@ class TaskEventPayload(BaseModel):
     task: TaskInfoPayload
     previous_status: TaskStatus | None = None
     reason: str | None = None
+    agent_id: str | None = None
+    agent_name: str | None = None
 
 
 # ─── Project 载荷模型 ───
@@ -1152,6 +1164,7 @@ class WritableWorkspaceSpec(BaseModel):
 class AgentSpecSchema(BaseModel):
     """Project 内 agent desired-state 摘要。"""
 
+    agent_id: str = ""
     name: str
     cluster_id: str
     manifest_ref: str = ""
@@ -1246,6 +1259,7 @@ class ProjectRemoveAgentPayload(BaseModel):
 
     project_id: str
     agent_name: str
+    agent_id: str = ""
     expected_version: int | None = None
 
 
@@ -1309,6 +1323,7 @@ class ProjectAgentEventPayload(BaseModel):
 
     project: ProjectInfoPayload
     agent_name: str
+    agent_id: str = ""
 
 
 class ReconcileReportPayload(BaseModel):
@@ -1318,6 +1333,10 @@ class ReconcileReportPayload(BaseModel):
     success: bool
     projects_reconciled: int = 0
     agents_spawned: int = 0
+    agents_restored: int = 0
+    agents_initialized: int = 0
+    agents_failed: int = 0
+    agent_results: list[dict[str, Any]] = Field(default_factory=list)
     workspaces_adopted: int = 0
     errors: list[str] = Field(default_factory=list)
     bootstrap: bool = False
@@ -1334,6 +1353,7 @@ class RoomMember(BaseModel):
 
     subject: str
     subject_type: RoomSubjectType
+    subject_name: str = ""
     joined_at: str = ""
 
 
@@ -1408,6 +1428,7 @@ class RoomJoinPayload(BaseModel):
     room_id: str
     subject: str
     subject_type: RoomSubjectType
+    subject_name: str = ""
 
 
 class RoomLeavePayload(BaseModel):

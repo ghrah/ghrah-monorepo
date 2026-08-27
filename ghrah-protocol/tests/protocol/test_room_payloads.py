@@ -48,6 +48,7 @@ from ghrah.protocol.types import (
 ROOM_MEMBER_AGENT = {
     "subject": "architect",
     "subject_type": "agent",
+    "subject_name": "",
     "joined_at": "2026-08-25T00:00:00Z",
 }
 
@@ -123,7 +124,7 @@ class TestRoomPayloadRoundTrip:
         (RoomDeletePayload, {"room_id": "room-001", "force": False}),
         (RoomJoinPayload, {
             "room_id": "room-001", "subject": "frontend-dev",
-            "subject_type": "agent",
+            "subject_type": "agent", "subject_name": "",
         }),
         (RoomLeavePayload, {"room_id": "room-001", "subject": "frontend-dev"}),
         (RoomGetLogPayload, {"room_id": "room-001", "since_seq": 40, "limit": 100}),
@@ -141,12 +142,14 @@ class TestRoomPayloadRoundTrip:
                 "members": [
                     ROOM_MEMBER_AGENT,
                     {"subject": "frontend-dev", "subject_type": "agent",
+                     "subject_name": "",
                      "joined_at": "2026-08-25T01:00:00Z"},
                 ],
                 "version": 6,
             },
             "member": {
                 "subject": "frontend-dev", "subject_type": "agent",
+                "subject_name": "",
                 "joined_at": "2026-08-25T01:00:00Z",
             },
             "subject": None,
