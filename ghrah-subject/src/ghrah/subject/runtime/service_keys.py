@@ -167,6 +167,9 @@ class ClusterHandle(Protocol):
     async def terminate_agent(self, agent_name: str) -> dict[str, Any]:
         """发 terminate_agent，返回 command_result dict。"""
 
+    async def send_message(self, payload: Any) -> dict[str, Any]:
+        """向本 cluster 内指定 agent 发消息。"""
+
 
 class CoreClusterRegistryService(Protocol):
     """cluster = CoreUnit 实例注册表契约（进程内运行时挂载/卸载）。"""

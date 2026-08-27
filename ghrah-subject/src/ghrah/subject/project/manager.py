@@ -159,20 +159,31 @@ class ProjectManager:
             return
         await self._on_event(event_type, {"project": record.to_wire()})
 
-    async def _emit_agent(self, event_type: str, record: ProjectRecord, agent_name: str) -> None:
+    async def _emit_agent(
+        self, event_type: str, record: ProjectRecord, agent: AgentSpec
+    ) -> None:
         if self._on_event is None:
             return
-        await self._on_event(event_type, {"project": record.to_wire(), "agent_name": agent_name})
+        await self._on_event(
+            event_type,
+            {
+                "project": record.to_wire(),
+                "agent_name": agent.name,
+                "agent_id": agent.agent_id,
+            },
+        )
 
     def _root_locator_for(self, project_id: str, requested: str = "") -> str:
         value = requested or self._default_root_locator_template.format(project_id=project_id)
         return canonical_file_locator(value)
 
     def _validate_agent(self, agent: AgentSpec, project: ProjectRecord) -> None:
-        """agent_name cluster 内唯一 + cluster_id 属本 project + path_grants 校验。"""
+        """agent_id project 内唯一 + name cluster 内唯一 + 归属/授权校验。"""
         if agent.cluster_id not in project.cluster_ids:
             raise ValueError(f"agent {agent.name!r} cluster_id {agent.cluster_id!r} not in project")
         for existing in project.agents:
+            if agent.agent_id and existing.agent_id == agent.agent_id:
+                raise ValueError(f"agent_id {agent.agent_id!r} already exists in project")
             if existing.name == agent.name and existing.cluster_id == agent.cluster_id:
                 raise ValueError(
                     f"agent {agent.name!r} already exists in cluster {agent.cluster_id!r}"
@@ -417,6 +428,7 @@ class ProjectManager:
         agent = AgentSpec(
             name=p.agent.name,
             cluster_id=p.agent.cluster_id,
+            agent_id=p.agent.agent_id or uuid4().hex,
             manifest_ref=p.agent.manifest_ref,
             instance_manifest_path=(
                 p.agent.instance_manifest_path
@@ -441,8 +453,14 @@ class ProjectManager:
         # active 且 cluster 缺该 agent 则 spawn
         if updated.status == ProjectStatus.ACTIVE:
             await self._ensure_agent_spawned(agent, updated.project_root_locator)
-        await self._emit_agent("project_agent_added", updated, agent.name)
-        return _ok({"project": updated.to_wire(), "agent_name": agent.name})
+        await self._emit_agent("project_agent_added", updated, agent)
+        return _ok(
+            {
+                "project": updated.to_wire(),
+                "agent_name": agent.name,
+                "agent_id": agent.agent_id,
+            }
+        )
 
     async def _ensure_agent_spawned(self, agent: AgentSpec, project_root_locator: str) -> None:
         """若 cluster 缺该 agent 则 spawn（MVP：不预检 list，直接 spawn，幂等由 Core 保证）。"""
@@ -456,6 +474,7 @@ class ProjectManager:
         spawn_payload = SpawnAgentPayload(
             config=AgentConfigPayload(
                 name=agent.name,
+                agent_id=agent.agent_id,
                 system_prompt=agent.system_prompt or "",
             ),
             abilities=None,
@@ -474,12 +493,31 @@ class ProjectManager:
         if existing is None:
             return _err(f"project not found: {p.project_id}")
         expected = p.expected_version if p.expected_version is not None else existing.version
-        target = next((a for a in existing.agents if a.name == p.agent_name), None)
+        target = next(
+            (
+                a
+                for a in existing.agents
+                if (p.agent_id and a.agent_id == p.agent_id)
+                or (not p.agent_id and a.name == p.agent_name)
+            ),
+            None,
+        )
         if target is None:
-            return _err(f"agent not found: {p.agent_name}")
+            identity = p.agent_id or p.agent_name
+            return _err(f"agent not found: {identity}")
 
         def mutator(r: ProjectRecord) -> ProjectRecord:
-            return r.model_copy(update={"agents": [a for a in r.agents if a.name != p.agent_name]})
+            def is_target(candidate: AgentSpec) -> bool:
+                if target.agent_id:
+                    return candidate.agent_id == target.agent_id
+                return (
+                    candidate.name == target.name
+                    and candidate.cluster_id == target.cluster_id
+                )
+
+            return r.model_copy(
+                update={"agents": [a for a in r.agents if not is_target(a)]}
+            )
 
         updated = await self._store.update(p.project_id, expected, mutator)
         # terminate agent
@@ -489,8 +527,14 @@ class ProjectManager:
                 await handle.terminate_agent(target.name)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("remove_agent: terminate %s failed: %s", p.agent_name, exc)
-        await self._emit_agent("project_agent_removed", updated, p.agent_name)
-        return _ok({"project": updated.to_wire(), "agent_name": p.agent_name})
+        await self._emit_agent("project_agent_removed", updated, target)
+        return _ok(
+            {
+                "project": updated.to_wire(),
+                "agent_name": target.name,
+                "agent_id": target.agent_id,
+            }
+        )
 
     async def _handle_link_task(self, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._toggle_task_link(payload, link=True)
@@ -690,6 +734,9 @@ class ProjectManager:
             spec = AgentSpec(
                 name=name,
                 cluster_id=cluster_id,
+                agent_id=(
+                    str(info.get("agent_id")) if info.get("agent_id") else uuid4().hex
+                ),
                 manifest_ref="",
                 instance_manifest_path="",
             )

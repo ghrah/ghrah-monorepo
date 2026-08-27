@@ -75,6 +75,16 @@ def locator_to_path(locator: str) -> str:
         raise ValueError(f"GitWorkspaceProvider requires file:// locator, got: {locator}")
     path = unquote(parsed.path or "")
     netloc = unquote(parsed.netloc or "")
+    if (
+        os.name == "nt"
+        and len(path) > 2
+        and path[0] == "/"
+        and path[1].isalpha()
+        and path[2] == ":"
+    ):
+        # as_uri 规范形态 file:///C:/x 反解得 /C:/x；剥前导斜杠还原盘符，
+        # 否则 Path('/C:/x') → \C:\x 且 is_absolute()=False。
+        path = path[1:]
     if netloc:
         if _DRIVE_NETLOC_RE.match(netloc):
             # 旧式盘符形态：file://C:/x → /C:/x（Path 归一为 C:\x）

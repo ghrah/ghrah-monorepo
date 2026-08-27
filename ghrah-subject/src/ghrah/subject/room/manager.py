@@ -35,7 +35,6 @@ from ghrah.protocol.types import (
     RoomLeavePayload,
     RoomListPayload,
     RoomSendPayload,
-    RoomStatus,
     RoomSubjectType,
     RoomUpdatePayload,
 )
@@ -206,7 +205,7 @@ class RoomManager:
             # 幂等 join：已在 room → 成功返回，不发事件（对齐 mock 契约）
             return _ok({"room": existing.to_wire()})
 
-        member = make_room_member(p.subject, p.subject_type)
+        member = make_room_member(p.subject, p.subject_type, p.subject_name)
 
         def mutator(r: RoomRecord) -> RoomRecord:
             return r.model_copy(

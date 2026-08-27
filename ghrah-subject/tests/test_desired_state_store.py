@@ -71,7 +71,7 @@ class TestDesiredStateStore:
             update={
                 "cluster_ids": ["c2"],
                 "agents": [
-                    AgentSpec(name="a1", cluster_id="c2"),  # 同名去重
+                    AgentSpec(name="a1", cluster_id="c2"),  # 跨 project 同名不是同一 Agent
                     AgentSpec(name="a2", cluster_id="c2"),
                 ],
             }
@@ -81,8 +81,32 @@ class TestDesiredStateStore:
         loaded = await store.load("default")
         assert loaded is not None
         names = [a.name for a in loaded.agents]
-        # 跨 project 派生 + 按 name 去重
-        assert names == ["a1", "a2"]
+        # 无 UUID 的旧记录也按 project/cluster/name 隔离，不能跨 project 合并。
+        assert names == ["a1", "a1", "a2"]
+
+    async def test_derive_agents_deduplicates_same_uuid_only(
+        self, store: DesiredStateStore
+    ) -> None:
+        shared_id = "a" * 32
+        p1 = _project("P1")
+        p1 = p1.model_copy(
+            update={
+                "agents": [AgentSpec(name="old-name", cluster_id="c1", agent_id=shared_id)]
+            }
+        )
+        p2 = make_project_record(name="P2").model_copy(
+            update={
+                "cluster_ids": ["c2"],
+                "agents": [AgentSpec(name="new-name", cluster_id="c2", agent_id=shared_id)],
+            }
+        )
+        await store.save(DesiredStateRecord(subject_id="default", projects=[p1, p2]))
+
+        loaded = await store.load("default")
+        assert loaded is not None
+        assert [(a.agent_id, a.name) for a in loaded.agents] == [
+            (shared_id, "old-name")
+        ]
 
     async def test_save_overwrites_single_row(self, store: DesiredStateStore) -> None:
         r1 = DesiredStateRecord(subject_id="default", projects=[_project("A")])

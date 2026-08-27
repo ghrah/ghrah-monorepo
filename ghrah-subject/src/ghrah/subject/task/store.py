@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS subject_tasks (
     project_id   TEXT NOT NULL DEFAULT '',
     title        TEXT NOT NULL,
     description  TEXT NOT NULL DEFAULT '',
+    agent_id     TEXT,
     agent_name   TEXT,
     status       TEXT NOT NULL,
     priority     TEXT NOT NULL,
@@ -56,6 +57,7 @@ _COLUMNS = (
     "project_id",
     "title",
     "description",
+    "agent_id",
     "agent_name",
     "status",
     "priority",
@@ -92,7 +94,7 @@ def _row_to_record(row: aiosqlite.Row) -> TaskRecord:
     return TaskRecord.model_validate(d)
 
 
-async def _ensure_project_id_column(db: aiosqlite.Connection) -> None:
+async def _ensure_compat_columns(db: aiosqlite.Connection) -> None:
     """安全地为旧库补 project_id 列与索引（仅当列不存在时添加）。
 
     CREATE TABLE IF NOT EXISTS 对已存在 DB 不补列，故需显式 ALTER 迁移。
@@ -104,8 +106,13 @@ async def _ensure_project_id_column(db: aiosqlite.Connection) -> None:
         await db.execute(
             "ALTER TABLE subject_tasks ADD COLUMN project_id TEXT NOT NULL DEFAULT ''"
         )
+    if "agent_id" not in columns:
+        await db.execute("ALTER TABLE subject_tasks ADD COLUMN agent_id TEXT")
     await db.execute(
         "CREATE INDEX IF NOT EXISTS idx_subject_tasks_project ON subject_tasks(project_id)"
+    )
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_subject_tasks_agent_id ON subject_tasks(agent_id)"
     )
     await db.commit()
 
@@ -135,7 +142,7 @@ class TaskStore:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(_DDL)
-            await _ensure_project_id_column(db)
+            await _ensure_compat_columns(db)
             self._db = db
         logger.debug("TaskStore started (db=%s)", self._db_path)
 
@@ -252,6 +259,7 @@ class TaskStore:
     async def list(
         self,
         *,
+        agent_id: str | None = None,
         agent_name: str | None = None,
         status: str | None = None,
         parent_id: str | None = None,
@@ -270,6 +278,9 @@ class TaskStore:
             if agent_name is not None:
                 clauses.append("agent_name = ?")
                 params.append(agent_name)
+            if agent_id is not None:
+                clauses.append("agent_id = ?")
+                params.append(agent_id)
             if status is not None:
                 clauses.append("status = ?")
                 params.append(status)

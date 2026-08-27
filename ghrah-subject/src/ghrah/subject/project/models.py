@@ -118,6 +118,7 @@ class AgentSpec(BaseModel):
     ``default_for_agents=True`` 的 WorkspaceMount（MVP 唯一）。
 
     Attributes:
+        agent_id: 跨 Room/cluster 稳定不变的业务身份（UUID hex）。
         name: agent 名（cluster 内唯一）。
         cluster_id: 所属 Core 集群 id（须在 project.cluster_ids 内）。
         manifest_ref: Subject 级模板库引用（~/.ghrah/manifests）。
@@ -132,6 +133,7 @@ class AgentSpec(BaseModel):
 
     name: str
     cluster_id: str
+    agent_id: str = ""
     manifest_ref: str = ""
     instance_manifest_path: str = ""
     system_prompt: str = ""

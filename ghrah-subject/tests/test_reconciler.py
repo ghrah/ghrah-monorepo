@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ghrah.protocol.types import RecoveryAction
+from ghrah.protocol.types import ProjectStatus, RecoveryAction
 
 from ghrah.subject.config import RecoveryConfig
 from ghrah.subject.project.models import (
@@ -152,8 +152,11 @@ def _make_service(
     tuple[DesiredStateStore, FakeProjectMgr, FakeClusterTransport, FakeTaskStore],
 ]:
     desired_store = _FakeDesiredStore(desired_record)
+    authoritative_projects = projects
+    if authoritative_projects is None and desired_record is not None:
+        authoritative_projects = desired_record.projects
     project_mgr = FakeProjectMgr(
-        projects=projects, bootstrap_project=bootstrap_project, agents=agents
+        projects=authoritative_projects, bootstrap_project=bootstrap_project, agents=agents
     )
     cluster_transport = FakeClusterTransport(FakeClusterHandle(existing_agents))
     workspace_mgr = FakeWorkspaceMgr(workspace_records)
@@ -267,6 +270,43 @@ class TestReconcile:
         assert report.agents_spawned == 1
         assert cluster_transport._handle.spawned == ["a1"]
         assert report.bootstrap is False
+
+    async def test_project_store_overrides_stale_desired_cache(self) -> None:
+        authoritative = _desired_project(
+            agents=[AgentSpec(name="fresh", cluster_id="c1", agent_id="f" * 32)]
+        )
+        stale = _desired_project(
+            agents=[AgentSpec(name="stale", cluster_id="c1", agent_id="s" * 32)]
+        )
+        svc, (desired_store, _, cluster_transport, _) = _make_service(
+            desired_record=DesiredStateRecord(subject_id="default", projects=[stale]),
+            projects=[authoritative],
+            existing_agents=[],
+            workspace_records=[_WS1],
+        )
+
+        report = await svc.reconcile()
+
+        assert report.success is True
+        assert cluster_transport._handle.spawned == ["fresh"]
+        rebuilt = await desired_store.load("default")
+        assert rebuilt is not None
+        assert [a.name for a in rebuilt.projects[0].agents] == ["fresh"]
+
+    async def test_paused_project_does_not_mount_cluster(self) -> None:
+        project = _desired_project(
+            agents=[AgentSpec(name="paused", cluster_id="c1")]
+        ).model_copy(update={"status": ProjectStatus.PAUSED})
+        svc, (_, _, cluster_transport, _) = _make_service(
+            projects=[project],
+            workspace_records=[_WS1],
+        )
+
+        report = await svc.reconcile()
+
+        assert report.paused == 1
+        assert cluster_transport.ensure_calls == []
+        assert cluster_transport._handle.spawned == []
 
     async def test_reconcile_existing_agent_not_spawned(self) -> None:
         project = _desired_project(

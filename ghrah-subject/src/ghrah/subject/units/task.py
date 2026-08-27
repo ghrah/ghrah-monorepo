@@ -86,7 +86,60 @@ class TaskUnit(SubjectUnit):
         payload: dict[str, Any],
         cmd_ctx: CommandContext,
     ) -> dict[str, Any]:
-        return await self.service.handle_command(command, payload)
+        normalized = await self._normalize_agent_identity(command, payload)
+        if normalized.get("success") is False:
+            return normalized
+        return await self.service.handle_command(command, normalized)
+
+    async def _normalize_agent_identity(
+        self, command: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """在 Task 写边界将 project 内 Agent 名解析为稳定 agent_id。"""
+        if command not in {"task_create", "task_update", "task_assign"}:
+            return payload
+        value_id = str(payload.get("agent_id") or "")
+        value_name = str(payload.get("agent_name") or "")
+        if not value_id and not value_name:
+            return payload
+        ctx = self._ctx
+        store = self._store
+        if ctx is None or store is None:
+            return payload
+        try:
+            project_manager = ctx.get(PROJECT_MANAGER.name)
+        except Exception:  # noqa: BLE001 — coexistence profile 无 ProjectUnit
+            return payload
+        if project_manager is None:
+            return payload
+        project_id = str(payload.get("project_id") or "")
+        if not project_id and payload.get("task_id"):
+            task = await store.get(str(payload["task_id"]))
+            project_id = task.project_id if task is not None else ""
+        if not project_id:
+            return payload
+        result = await project_manager.handle_command(
+            "project_get", {"project_id": project_id}
+        )
+        project = (result.get("data") or {}).get("project") or {}
+        agents = project.get("agents") or []
+        matches = [
+            agent
+            for agent in agents
+            if (value_id and agent.get("agent_id") == value_id)
+            or (not value_id and value_name and agent.get("name") == value_name)
+        ]
+        if len(matches) > 1:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"ambiguous agent in task project: {value_name or value_id}",
+            }
+        if len(matches) == 1:
+            normalized = dict(payload)
+            normalized["agent_id"] = matches[0].get("agent_id") or ""
+            normalized["agent_name"] = matches[0].get("name") or value_name
+            return normalized
+        return payload
 
     async def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """TaskManager 的 ``on_event`` 回调：保留 async 签名，体内同步 ctx.emit。"""

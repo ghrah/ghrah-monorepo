@@ -94,6 +94,7 @@ class TaskManager:
             "task": task_wire,
             "previous_status": previous_status.value if previous_status else None,
             "reason": reason,
+            "agent_id": task_wire.get("agent_id"),
             "agent_name": task_wire.get("agent_name"),
         }
         await self._on_event(event_type, payload)
@@ -117,6 +118,7 @@ class TaskManager:
             title=title,
             project_id=p.project_id,
             description=p.description,
+            agent_id=p.agent_id,
             agent_name=p.agent_name,
             priority=p.priority,
             parent_id=p.parent_id,
@@ -172,6 +174,8 @@ class TaskManager:
                 updates["description"] = p.description
             if p.agent_name is not None:
                 updates["agent_name"] = p.agent_name
+            if p.agent_id is not None:
+                updates["agent_id"] = p.agent_id
             if p.priority is not None:
                 updates["priority"] = p.priority
             if p.parent_id is not None:
@@ -223,7 +227,11 @@ class TaskManager:
 
         def mutator(r: TaskRecord) -> TaskRecord:
             return r.model_copy(
-                update={"agent_name": p.agent_name, "updated_at": _now()}
+                update={
+                    "agent_id": p.agent_id or None,
+                    "agent_name": p.agent_name or None,
+                    "updated_at": _now(),
+                }
             )
 
         updated = await self._store.update(
@@ -324,6 +332,7 @@ class TaskManager:
                 single_status = normalize_status(p.status).value
 
         records = await self._store.list(
+            agent_id=p.agent_id,
             agent_name=p.agent_name,
             status=single_status,
             parent_id=p.parent_id,

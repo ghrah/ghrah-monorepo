@@ -7,8 +7,7 @@
 thin wrapper around :class:`ProjectManager`：注入依赖（ProjectStore /
 WorkspaceManager / TaskManagerService / CoreClusterRegistry / ManifestStore /
 DesiredStateStore），把 manager 的 ``on_event`` 回调桥到 internal event_bus，
-并在每次成功变更命令后把全量 project 快照写入 DesiredStateStore（desired-state
-唯一真相源，父计划 §3.3）。
+并在每次成功变更命令后把 ProjectStore 全量投影写入 DesiredStateStore（派生缓存）。
 """
 
 from __future__ import annotations
@@ -21,6 +20,7 @@ from ghrah.subject.project.manager import ProjectManager
 from ghrah.subject.project.migration import (
     backup_legacy_database,
     migrate_legacy_action_chains,
+    migrate_project_agent_ids,
 )
 from ghrah.subject.project.store import ProjectStore
 from ghrah.subject.recovery.desired_state import DesiredStateRecord, DesiredStateStore
@@ -127,6 +127,44 @@ class ProjectUnit(SubjectUnit):
                     report.ambiguous_agents,
                     report.backup_path,
                 )
+            # 全局旧库先拆到 Project Root，再把唯一 name-key 原子迁到稳定 UUID。
+            for project in projects:
+                identity_report = await migrate_project_agent_ids(project)
+                if identity_report.ambiguous_names:
+                    logger.error(
+                        "agent identity migration skipped ambiguous names: "
+                        "project=%s names=%s",
+                        project.project_id,
+                        identity_report.ambiguous_names,
+                    )
+                if not identity_report.agent_ids:
+                    continue
+
+                def assign_agent_ids(record: Any) -> Any:
+                    agents = [
+                        agent.model_copy(
+                            update={
+                                "agent_id": identity_report.agent_ids.get(
+                                    (agent.cluster_id, agent.name), agent.agent_id
+                                )
+                            }
+                        )
+                        for agent in record.agents
+                    ]
+                    return record.model_copy(update={"agents": agents})
+
+                project = await self._store.update(
+                    project.project_id,
+                    project.version,
+                    assign_agent_ids,
+                )
+                logger.info(
+                    "agent identity migration: project=%s agents=%s rows=%s backup=%s",
+                    project.project_id,
+                    len(identity_report.agent_ids),
+                    identity_report.migrated_rows,
+                    identity_report.backup_path,
+                )
 
     async def stop(self) -> None:
         if self._store is not None:
@@ -144,7 +182,7 @@ class ProjectUnit(SubjectUnit):
         return result
 
     async def _save_desired(self) -> None:
-        """命令成功后把全量 project 快照写入 DesiredStateStore（desired-state 唯一真相源）。"""
+        """命令成功后用 ProjectStore 权威状态刷新 DesiredStateStore 派生缓存。"""
         if self._store is None or self._desired_store is None or self._ctx is None:
             return
         try:

@@ -22,7 +22,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from ghrah.protocol.types import RecoveryAction
+from ghrah.protocol.types import ProjectStatus, RecoveryAction
 from ghrah.subject.config import RecoveryConfig
 from ghrah.subject.recovery.desired_state import (
     DesiredStateRecord,
@@ -58,6 +58,10 @@ class ReconcileReport:
     bootstrap: bool = False
     projects_reconciled: int = 0
     agents_spawned: int = 0
+    agents_restored: int = 0
+    agents_initialized: int = 0
+    agents_failed: int = 0
+    agent_results: list[dict[str, str]] = field(default_factory=list)
     workspaces_adopted: int = 0
     tasks_migrated: int = 0
     paused: int = 0
@@ -71,6 +75,10 @@ class ReconcileReport:
             "success": self.success,
             "projects_reconciled": self.projects_reconciled,
             "agents_spawned": self.agents_spawned,
+            "agents_restored": self.agents_restored,
+            "agents_initialized": self.agents_initialized,
+            "agents_failed": self.agents_failed,
+            "agent_results": list(self.agent_results),
             "workspaces_adopted": self.workspaces_adopted,
             "errors": list(self.errors),
             "bootstrap": self.bootstrap,
@@ -84,7 +92,7 @@ class ReconciliationService:
     """Subject 全栈 reconcile 服务。
 
     Args:
-        desired_store: DesiredStateStore（持久化 desired-state 真相源）。
+        desired_store: DesiredStateStore（ProjectStore 的可重建派生缓存）。
         project_mgr: ProjectManagerService（提供 bootstrap_default_project /
             adopt_existing_agents + 13 命令；reconcile 首启经其 bootstrap）。
         workspace_mgr: WorkspaceManager（列已登记 workspace + 注册/重建 default ws）。
@@ -125,16 +133,17 @@ class ReconciliationService:
         report = ReconcileReport(subject_id=self._subject_id)
         try:
             await self._desired_store.start()
-            record = await self._desired_store.load(self._subject_id)
-            needs_bootstrap = (
-                record is None or not record.projects
-            ) and self._config.bootstrap_default_project
+            projects = await self._load_projects()
+            needs_bootstrap = not projects and self._config.bootstrap_default_project
             if needs_bootstrap:
                 await self._bootstrap(report)
-                record = await self._desired_store.load(self._subject_id)
-            if record is not None:
-                for project in record.projects:
-                    await self._reconcile_project(project, report)
+                projects = await self._load_projects()
+            # ProjectStore 是权威；每次启动都由其刷新 desired cache，绝不反向覆盖。
+            await self._desired_store.save(
+                DesiredStateRecord(subject_id=self._subject_id, projects=projects)
+            )
+            for project in projects:
+                await self._reconcile_project(project, report)
         except Exception as exc:  # noqa: BLE001 — 不阻断启动
             logger.exception("reconcile failed")
             report.success = False
@@ -147,6 +156,18 @@ class ReconciliationService:
     async def reconcile_status(self) -> ReconcileReport | None:
         """返回最近一次 reconcile 报告（供 reconcile_status 命令）。"""
         return self._last_report
+
+    async def _load_projects(self) -> list[ProjectRecord]:
+        """从 ProjectManager/ProjectStore 读取恢复权威状态。"""
+        result = await self._project_mgr.handle_command(
+            "project_list", {"include_deleted": False}
+        )
+        if not result.get("success"):
+            raise RuntimeError(result.get("error") or "project_list failed")
+        from ghrah.subject.project.models import ProjectRecord
+
+        raw_projects = (result.get("data") or {}).get("projects", [])
+        return [ProjectRecord.model_validate(project) for project in raw_projects]
 
     # ─── bootstrap（首启，决策 2/6） ───
 
@@ -192,6 +213,9 @@ class ReconciliationService:
     async def _reconcile_project(self, project: ProjectRecord, report: ReconcileReport) -> None:
         """对账单个 project：workspace / cluster / 实例 manifest / agent。"""
         report.projects_reconciled += 1
+        if project.status != ProjectStatus.ACTIVE:
+            report.paused += len(project.agents)
+            return
         # workspace：经 WorkspaceManager 已登记记录比对（不重复扫描，复用 orphan adopt）
         registered_ids = {r.workspace_id for r in self._workspace_mgr.list_records()}
         for mount in project.workspaces:
@@ -255,6 +279,13 @@ class ReconciliationService:
 
     async def _reconcile_agents(self, project: ProjectRecord, report: ReconcileReport) -> None:
         """对账 agent：校验实例 manifest（os.path.exists）+ spawn 缺失 agent。"""
+        legacy_name_counts: dict[str, int] = {}
+        for agent in project.agents:
+            if not agent.agent_id:
+                legacy_name_counts[agent.name] = legacy_name_counts.get(agent.name, 0) + 1
+        ambiguous_legacy = {
+            name for name, count in legacy_name_counts.items() if count > 1
+        }
         for cluster_id in project.cluster_ids:
             try:
                 handle = self._cluster_transport.get_handle(cluster_id)
@@ -270,7 +301,11 @@ class ReconciliationService:
                     )
                     continue
             try:
-                existing = {a.get("name") for a in await handle.list_agents()}
+                existing_agents = await handle.list_agents()
+                existing_ids = {
+                    str(a.get("agent_id")) for a in existing_agents if a.get("agent_id")
+                }
+                existing_names = {a.get("name") for a in existing_agents}
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(
                     f"project {project.project_id}: list_agents({cluster_id}) failed: {exc}"
@@ -278,6 +313,24 @@ class ReconciliationService:
                 continue
             for agent in project.agents:
                 if agent.cluster_id != cluster_id:
+                    continue
+                if not agent.agent_id and agent.name in ambiguous_legacy:
+                    report.agents_failed += 1
+                    error = "ambiguous legacy name has no stable agent_id"
+                    report.errors.append(
+                        f"project {project.project_id} cluster {cluster_id} agent "
+                        f"{agent.name}: {error}"
+                    )
+                    report.agent_results.append(
+                        {
+                            "project_id": project.project_id,
+                            "cluster_id": cluster_id,
+                            "agent_id": "",
+                            "agent_name": agent.name,
+                            "outcome": "failed",
+                            "error": error,
+                        }
+                    )
                     continue
                 # 实例 manifest 校验（决策 5：MVP 仅 os.path.exists，缺失 warning 不渲染）
                 if agent.instance_manifest_path:
@@ -289,19 +342,54 @@ class ReconciliationService:
                             project.project_id,
                             agent.instance_manifest_path,
                         )
-                if agent.name in existing:
+                if (agent.agent_id and agent.agent_id in existing_ids) or (
+                    not agent.agent_id and agent.name in existing_names
+                ):
                     continue
-                spawned = await self._spawn_agent(handle, agent)
-                if spawned:
+                recovery_mode, error = await self._spawn_agent(handle, agent)
+                if recovery_mode is not None:
                     report.agents_spawned += 1
+                    if recovery_mode == "restored":
+                        report.agents_restored += 1
+                    elif recovery_mode == "initialized":
+                        report.agents_initialized += 1
+                    report.agent_results.append(
+                        {
+                            "project_id": project.project_id,
+                            "cluster_id": cluster_id,
+                            "agent_id": agent.agent_id,
+                            "agent_name": agent.name,
+                            "outcome": recovery_mode,
+                        }
+                    )
+                else:
+                    report.agents_failed += 1
+                    message = (
+                        f"project {project.project_id} cluster {cluster_id} agent "
+                        f"{agent.agent_id or agent.name}: {error or 'spawn failed'}"
+                    )
+                    report.errors.append(message)
+                    report.agent_results.append(
+                        {
+                            "project_id": project.project_id,
+                            "cluster_id": cluster_id,
+                            "agent_id": agent.agent_id,
+                            "agent_name": agent.name,
+                            "outcome": "failed",
+                            "error": error or "spawn failed",
+                        }
+                    )
 
-    async def _spawn_agent(self, handle: ClusterHandle, agent: AgentSpec) -> bool:
-        """spawn 单个 agent。返回是否成功 spawn。"""
+    async def _spawn_agent(
+        self, handle: ClusterHandle, agent: AgentSpec
+    ) -> tuple[str | None, str | None]:
+        """spawn 单个 agent；返回 ``(outcome, error)``。"""
         from ghrah.protocol.types import AgentConfigPayload, SpawnAgentPayload
 
         payload = SpawnAgentPayload(
             config=AgentConfigPayload(
                 name=agent.name,
+                agent_id=agent.agent_id,
                 system_prompt=agent.system_prompt or "",
             ),
             abilities=None,
@@ -311,15 +399,16 @@ class ReconciliationService:
             result = await handle.spawn_agent(payload)
         except Exception as exc:  # noqa: BLE001
             logger.warning("reconcile: spawn_agent %s failed: %s", agent.name, exc)
-            return False
+            return None, str(exc)
         if not result.get("success"):
             logger.warning(
                 "reconcile: spawn_agent %s rejected: %s",
                 agent.name,
                 result.get("error"),
             )
-            return False
-        return True
+            return None, str(result.get("error") or "spawn rejected")
+        data = result.get("data") or {}
+        return str(data.get("recovery_mode") or "spawned"), None
 
     # ─── 事件 ───
 

@@ -2,14 +2,14 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""DesiredStateRecord + DesiredStateStore：Subject 全栈恢复的 desired-state 真相源。
+"""DesiredStateRecord + DesiredStateStore：ProjectStore desired-state 的派生缓存。
 
 单行全量快照（单 subject 单行覆盖，无乐观锁），镜像 TaskStore/ProjectStore 的
 aiosqlite 连接管理范式。``save`` 时由 ``projects`` 派生 ``agents``（跨 project
 汇总去重），简化调用方（ProjectUnit 仅需传 projects）。
 
 写入触发（父计划 §3.3）：ProjectUnit 每次成功变更命令后调 ``save`` 全量快照。
-RecoveryUnit 启动时 ``load`` 供 reconcile。
+RecoveryUnit 启动时从 ProjectStore 重建；本缓存不参与反向恢复覆盖。
 """
 
 from __future__ import annotations
@@ -69,14 +69,17 @@ class DesiredStateRecord(BaseModel):
         return value
 
     def derive_agents(self) -> list[AgentSpec]:
-        """跨 project 扁平化所有 agent（按 name 去重，保留首个）。"""
+        """跨 project 扁平化 agent；优先按 UUID，旧记录按 project/cluster/name。"""
         seen: set[str] = set()
         result: list[AgentSpec] = []
         for project in self.projects:
             for agent in project.agents:
-                if agent.name in seen:
+                identity = agent.agent_id or (
+                    f"legacy:{project.project_id}:{agent.cluster_id}:{agent.name}"
+                )
+                if identity in seen:
                     continue
-                seen.add(agent.name)
+                seen.add(identity)
                 result.append(agent)
         return result
 

@@ -3,7 +3,10 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from ghrah.subject.project.migration import migrate_legacy_action_chains
+from ghrah.subject.project.migration import (
+    migrate_legacy_action_chains,
+    migrate_project_agent_ids,
+)
 from ghrah.subject.project.models import AgentSpec, make_project_record
 from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.workspace.providers.git import path_to_locator
@@ -89,3 +92,51 @@ async def test_action_chain_dry_run_reports_ambiguous_ownership(tmp_path: Path) 
     assert report.ambiguous_agents == ["alice"]
     assert report.total_rows == 0
     assert report.backup_path is None
+
+
+async def test_project_agent_id_migration_rekeys_all_checkpoint_tables(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path, "project-a", "alice")
+    action_db = ProjectPaths.from_locator(
+        project.project_root_locator
+    ).action_chain_db_path
+    _seed_chain_db(action_db)
+
+    report = await migrate_project_agent_ids(project)
+
+    agent_id = report.agent_ids[("cluster-project-a", "alice")]
+    assert len(agent_id) == 32
+    assert report.migrated_rows == 5
+    assert Path(report.backup_path or "").is_file()
+    with sqlite3.connect(action_db) as db:
+        for table in ("agents", "sessions", "nodes", "chain_meta", "messages"):
+            values = {
+                row[0] for row in db.execute(f"SELECT agent_name FROM {table}")
+            }
+            assert agent_id in values
+            assert "alice" not in values
+            assert "bob" in values
+
+    rerun = await migrate_project_agent_ids(project)
+    assert rerun.agent_ids == report.agent_ids
+    assert rerun.migrated_rows == 0
+
+
+async def test_project_agent_id_migration_refuses_ambiguous_same_name(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path, "project-a", "planner").model_copy(
+        update={
+            "agents": [
+                AgentSpec(name="planner", cluster_id="cluster-a"),
+                AgentSpec(name="planner", cluster_id="cluster-b"),
+            ]
+        }
+    )
+
+    report = await migrate_project_agent_ids(project)
+
+    assert report.agent_ids == {}
+    assert report.ambiguous_names == ["planner"]
+    assert report.migrated_rows == 0

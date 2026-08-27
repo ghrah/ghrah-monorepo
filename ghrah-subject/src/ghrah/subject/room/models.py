@@ -93,7 +93,12 @@ def make_room_log_record(
 
 
 def make_room_member(
-    subject: str, subject_type: RoomSubjectType
+    subject: str, subject_type: RoomSubjectType, subject_name: str = ""
 ) -> RoomMember:
     """构造新成员（joined_at = now）。"""
-    return RoomMember(subject=subject, subject_type=subject_type, joined_at=now_iso())
+    return RoomMember(
+        subject=subject,
+        subject_type=subject_type,
+        subject_name=subject_name,
+        joined_at=now_iso(),
+    )

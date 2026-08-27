@@ -7,13 +7,16 @@ import sqlite3
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+from uuid import NAMESPACE_URL, uuid5
 
 from ghrah.subject.project.models import ProjectRecord
 from ghrah.subject.project.paths import ProjectPaths
 
 __all__ = [
     "ActionChainMigrationReport",
+    "AgentIdentityMigrationReport",
     "backup_legacy_database",
+    "migrate_project_agent_ids",
     "migrate_legacy_action_chains",
 ]
 
@@ -32,6 +35,17 @@ class ActionChainMigrationReport:
     @property
     def total_rows(self) -> int:
         return sum(self.migrated_rows.values())
+
+
+@dataclass
+class AgentIdentityMigrationReport:
+    """旧 name-key checkpoint → UUID-key 的可审计迁移结果。"""
+
+    project_id: str
+    agent_ids: dict[tuple[str, str], str] = field(default_factory=dict)
+    ambiguous_names: list[str] = field(default_factory=list)
+    migrated_rows: int = 0
+    backup_path: str | None = None
 
 
 def _table_exists(db: sqlite3.Connection, table: str) -> bool:
@@ -190,6 +204,91 @@ async def migrate_legacy_action_chains(
 ) -> ActionChainMigrationReport:
     """Copy uniquely owned development data; retain the source as rollback evidence."""
     return await asyncio.to_thread(_migrate_sync, Path(legacy_path), projects, dry_run)
+
+
+def _stable_legacy_agent_id(project_id: str, cluster_id: str, name: str) -> str:
+    """为可唯一解析的旧 Agent 生成可重试的稳定 UUID。"""
+    return uuid5(
+        NAMESPACE_URL,
+        f"ghrah-agent:{project_id}:{cluster_id}:{name}",
+    ).hex
+
+
+def _migrate_project_agent_ids_sync(
+    project: ProjectRecord,
+) -> AgentIdentityMigrationReport:
+    report = AgentIdentityMigrationReport(project_id=project.project_id)
+    ownership = Counter(agent.name for agent in project.agents)
+    report.ambiguous_names = sorted(
+        name
+        for name, count in ownership.items()
+        if count > 1 and any(a.name == name and not a.agent_id for a in project.agents)
+    )
+    for agent in project.agents:
+        if agent.agent_id or ownership[agent.name] != 1:
+            continue
+        report.agent_ids[(agent.cluster_id, agent.name)] = _stable_legacy_agent_id(
+            project.project_id, agent.cluster_id, agent.name
+        )
+    if not report.agent_ids:
+        return report
+
+    db_path = ProjectPaths.from_locator(project.project_root_locator).action_chain_db_path
+    if not db_path.is_file():
+        return report
+    db = sqlite3.connect(db_path)
+    try:
+        if not _table_exists(db, "agents"):
+            return report
+        available = {
+            str(row[0]) for row in db.execute("SELECT agent_name FROM agents").fetchall()
+        }
+        to_rekey = {
+            name: agent_id
+            for (_cluster_id, name), agent_id in report.agent_ids.items()
+            if name in available and agent_id not in available
+        }
+        if not to_rekey:
+            return report
+
+        backup_path = db_path.with_name(f"{db_path.name}.pre-agent-id-migration.bak")
+        report.backup_path = str(backup_path)
+        if not backup_path.exists():
+            backup = sqlite3.connect(backup_path)
+            try:
+                db.backup(backup)
+            finally:
+                backup.close()
+
+        db.execute("PRAGMA foreign_keys=OFF")
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            for old_name, agent_id in to_rekey.items():
+                for table in ("sessions", "nodes", "chain_meta", "messages", "agents"):
+                    if not _table_exists(db, table):
+                        continue
+                    before = db.total_changes
+                    db.execute(
+                        f"UPDATE {table} SET agent_name = ? WHERE agent_name = ?",  # noqa: S608
+                        (agent_id, old_name),
+                    )
+                    report.migrated_rows += db.total_changes - before
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.execute("PRAGMA foreign_keys=ON")
+    finally:
+        db.close()
+    return report
+
+
+async def migrate_project_agent_ids(
+    project: ProjectRecord,
+) -> AgentIdentityMigrationReport:
+    """迁移单 Project 内可唯一解析的旧 Agent 身份与 checkpoint 外键。"""
+    return await asyncio.to_thread(_migrate_project_agent_ids_sync, project)
 
 
 def _backup_sync(source_path: Path) -> Path | None:

@@ -415,6 +415,10 @@ class TestProjectAddRemoveAgent:
         )
         assert result["success"], result.get("error")
         assert len(result["data"]["project"]["agents"]) == 1
+        agent_id = result["data"]["agent_id"]
+        assert len(agent_id) == 32
+        assert result["data"]["project"]["agents"][0]["agent_id"] == agent_id
+        assert events[-1][1]["agent_id"] == agent_id
         assert events[-1][0] == "project_agent_added"
         # spawn 调用
         assert mgr._cluster_transport._handle.spawned == ["a1"]  # type: ignore[attr-defined]

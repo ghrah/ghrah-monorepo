@@ -25,6 +25,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ghrah.protocol.types import (
+    SendMessagePayload,
     SpawnAgentPayload,
     TerminateAgentPayload,
 )
@@ -103,6 +104,18 @@ class CoreUnitHandle:
             return {"success": False, "error": f"cluster '{self._cluster_id}' is shut down"}
         payload = TerminateAgentPayload(name=agent_name).model_dump(mode="json")
         return await self._dispatch("terminate_agent", payload)
+
+    async def send_message(self, payload: SendMessagePayload) -> dict[str, Any]:
+        """把消息定向发给本 cluster 的 CoreUnit，避免全局命令路由串群。"""
+        if not self._alive:
+            return {"success": False, "error": f"cluster '{self._cluster_id}' is shut down"}
+        return await self._dispatch("send_message", payload.model_dump(mode="json"))
+
+    async def dispatch(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """向本 cluster CoreUnit 定向派发内部命令。"""
+        if not self._alive:
+            return {"success": False, "error": f"cluster '{self._cluster_id}' is shut down"}
+        return await self._dispatch(command, payload)
 
     async def shutdown(self) -> None:
         """关闭该 cluster（dispose CoreUnit fiber，幂等）。"""
