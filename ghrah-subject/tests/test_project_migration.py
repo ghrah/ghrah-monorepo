@@ -140,3 +140,35 @@ async def test_project_agent_id_migration_refuses_ambiguous_same_name(
     assert report.agent_ids == {}
     assert report.ambiguous_names == ["planner"]
     assert report.migrated_rows == 0
+
+
+async def test_project_agent_id_migration_rekeys_legacy_checkpoint_for_new_durable_spec(
+    tmp_path: Path,
+) -> None:
+    """direct spawn 留下 name-key 链后，动态补录 UUID 也必须迁移旧链。"""
+    project = _project(tmp_path, "project-a", "alice")
+    stable_id = "0123456789abcdef0123456789abcdef"
+    project = project.model_copy(
+        update={
+            "agents": [
+                project.agents[0].model_copy(update={"agent_id": stable_id})
+            ]
+        }
+    )
+    action_db = ProjectPaths.from_locator(
+        project.project_root_locator
+    ).action_chain_db_path
+    _seed_chain_db(action_db)
+
+    report = await migrate_project_agent_ids(project)
+
+    # AgentSpec 已有 ID，无需回写 ProjectStore；但旧 checkpoint 必须重键。
+    assert report.agent_ids == {}
+    assert report.migrated_rows == 5
+    with sqlite3.connect(action_db) as db:
+        for table in ("agents", "sessions", "nodes", "chain_meta", "messages"):
+            values = {
+                row[0] for row in db.execute(f"SELECT agent_name FROM {table}")
+            }
+            assert stable_id in values
+            assert "alice" not in values

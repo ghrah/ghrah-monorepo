@@ -44,6 +44,7 @@ from ghrah.subject.project.isolation import (
     validate_path_grants_non_overlapping,
     validate_workspace_locators_non_nested,
 )
+from ghrah.subject.project.migration import migrate_project_agent_ids
 from ghrah.subject.project.models import (
     AgentSpec,
     PathGrant,
@@ -77,6 +78,17 @@ if TYPE_CHECKING:
     from ghrah.subject.sandbox.workspace import WorkspaceManager
 
 logger = logging.getLogger(__name__)
+
+# server 装配层（units/websocket_observer_endpoint.py 的 _EngineDispatchAdapter）
+# 会把 request_id/session_id 信封字段注入 payload 副本；ProjectCreatePayload /
+# ProjectUpdatePayload 为 extra="forbid" strict 模型，验证前需剥离。
+_ENVELOPE_KEYS = frozenset({"request_id", "session_id"})
+
+
+def _strip_envelope(payload: dict[str, Any]) -> dict[str, Any]:
+    if _ENVELOPE_KEYS.isdisjoint(payload):
+        return payload
+    return {k: v for k, v in payload.items() if k not in _ENVELOPE_KEYS}
 
 __all__ = ["ProjectManager"]
 
@@ -197,7 +209,7 @@ class ProjectManager:
             return await self._handle_create_locked(payload)
 
     async def _handle_create_locked(self, payload: dict[str, Any]) -> dict[str, Any]:
-        p = ProjectCreatePayload.model_validate(payload)
+        p = ProjectCreatePayload.model_validate(_strip_envelope(payload))
         if not p.name.strip():
             return _err("name required")
         workspace_inputs = list(p.writable_workspaces)
@@ -351,7 +363,7 @@ class ProjectManager:
             return migrated
 
     async def _handle_update(self, payload: dict[str, Any]) -> dict[str, Any]:
-        p = ProjectUpdatePayload.model_validate(payload)
+        p = ProjectUpdatePayload.model_validate(_strip_envelope(payload))
         existing = await self._store.get(p.project_id)
         if existing is None:
             return _err(f"project not found: {p.project_id}")
@@ -450,8 +462,30 @@ class ProjectManager:
             return r.model_copy(update={"agents": [*r.agents, agent]})
 
         updated = await self._store.update(p.project_id, expected, mutator)
+        # 旧 Project 可能已有以显示名分区的 checkpoint，但此前 direct spawn
+        # 没写 durable AgentSpec。动态补录 UUID 后必须在 spawn 前立即重键；
+        # 否则 Core 会把它当成新 Agent 初始化，表现为 ActionChain 丢失。
+        migration_error: str | None = None
+        try:
+            identity_report = await migrate_project_agent_ids(updated)
+            if identity_report.migrated_rows:
+                logger.info(
+                    "add_agent: migrated legacy checkpoint project=%s agent=%s "
+                    "rows=%s backup=%s",
+                    updated.project_id,
+                    agent.name,
+                    identity_report.migrated_rows,
+                    identity_report.backup_path,
+                )
+        except Exception as exc:  # noqa: BLE001 — desired 已提交，禁止空链 spawn
+            migration_error = str(exc)
+            logger.exception(
+                "add_agent: legacy checkpoint migration failed project=%s agent=%s",
+                updated.project_id,
+                agent.name,
+            )
         # active 且 cluster 缺该 agent 则 spawn
-        if updated.status == ProjectStatus.ACTIVE:
+        if updated.status == ProjectStatus.ACTIVE and migration_error is None:
             await self._ensure_agent_spawned(agent, updated.project_root_locator)
         await self._emit_agent("project_agent_added", updated, agent)
         return _ok(
@@ -459,6 +493,8 @@ class ProjectManager:
                 "project": updated.to_wire(),
                 "agent_name": agent.name,
                 "agent_id": agent.agent_id,
+                "runtime_pending": migration_error is not None,
+                "runtime_error": migration_error,
             }
         )
 

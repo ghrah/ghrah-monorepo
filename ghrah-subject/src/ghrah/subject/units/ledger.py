@@ -114,7 +114,8 @@ class LedgerUnit(SubjectUnit):
         return await self._handle_chain_history(payload)
 
     async def _handle_chain_history(self, payload: dict[str, Any]) -> dict[str, Any]:
-        agent_name = payload.get("agent_name", "")
+        agent_name = str(payload.get("agent_name") or "")
+        agent_id = str(payload.get("agent_id") or "")
         project_id = payload.get("project_id")
         branch_name = payload.get("branch_name", "main")
         limit = payload.get("limit", -1)
@@ -123,6 +124,9 @@ class LedgerUnit(SubjectUnit):
             return {"success": False, "error": "agent_name is required"}
 
         try:
+            persistence_key = await self._resolve_persistence_key(
+                agent_name, project_id=str(project_id or ""), agent_id=agent_id
+            )
             if project_id:
                 ledgers = [await self._ledger_for_project(project_id)]
             else:
@@ -137,7 +141,7 @@ class LedgerUnit(SubjectUnit):
             nodes = []
             for candidate in ledgers:
                 candidate_nodes = await candidate.get_chain_history(
-                    agent_name,
+                    persistence_key,
                     branch=branch_name,
                     limit=limit,
                 )
@@ -147,13 +151,14 @@ class LedgerUnit(SubjectUnit):
                     break
             serialized = [serialize_node(node) for node in nodes]
             active_session_id = ""
-            meta = await ledger.get_chain_meta(agent_name)
+            meta = await ledger.get_chain_meta(persistence_key)
             if meta is not None:
                 active_session_id = meta.active_session_id
             return {
                 "success": True,
                 "data": {
                     "agent_name": agent_name,
+                    "agent_id": persistence_key if persistence_key != agent_name else agent_id,
                     "branch_name": branch_name,
                     "nodes": serialized,
                     "active_session_id": active_session_id,
@@ -162,3 +167,33 @@ class LedgerUnit(SubjectUnit):
         except Exception as exc:
             logger.exception("Failed to get chain history for %s", agent_name)
             return {"success": False, "error": str(exc)}
+
+    async def _resolve_persistence_key(
+        self, agent_name: str, *, project_id: str, agent_id: str
+    ) -> str:
+        """把显示名解析为 Core checkpoint 使用的稳定 agent_id。
+
+        UUID 引入后 ContextManager 以 ``agent_id`` 分区 SQLite；旧 Observer 仍只
+        发送 ``agent_name + project_id``。在 Ledger 边界完成兼容解析，避免 Agent
+        已恢复但 ActionChain 初始投影查询空桶。
+        """
+        if agent_id:
+            return agent_id
+        if not project_id or self._ctx is None:
+            return agent_name
+        manager = self._ctx.get(PROJECT_MANAGER.name)
+        result = await manager.handle_command("project_get", {"project_id": project_id})
+        project = (result.get("data") or {}).get("project") if result.get("success") else None
+        if not project:
+            return agent_name
+        matches = [
+            agent
+            for agent in project.get("agents") or []
+            if agent.get("name") == agent_name
+        ]
+        if len(matches) > 1:
+            raise ValueError(f"ambiguous agent name in project: {agent_name}")
+        if len(matches) == 1 and matches[0].get("agent_id"):
+            return str(matches[0]["agent_id"])
+        # 兼容未进入 Project desired-state 的旧 ephemeral Agent checkpoint。
+        return agent_name

@@ -224,13 +224,17 @@ def _migrate_project_agent_ids_sync(
         for name, count in ownership.items()
         if count > 1 and any(a.name == name and not a.agent_id for a in project.agents)
     )
+    target_ids: dict[tuple[str, str], str] = {}
     for agent in project.agents:
-        if agent.agent_id or ownership[agent.name] != 1:
+        if ownership[agent.name] != 1:
             continue
-        report.agent_ids[(agent.cluster_id, agent.name)] = _stable_legacy_agent_id(
+        target_id = agent.agent_id or _stable_legacy_agent_id(
             project.project_id, agent.cluster_id, agent.name
         )
-    if not report.agent_ids:
+        target_ids[(agent.cluster_id, agent.name)] = target_id
+        if not agent.agent_id:
+            report.agent_ids[(agent.cluster_id, agent.name)] = target_id
+    if not target_ids:
         return report
 
     db_path = ProjectPaths.from_locator(project.project_root_locator).action_chain_db_path
@@ -245,7 +249,7 @@ def _migrate_project_agent_ids_sync(
         }
         to_rekey = {
             name: agent_id
-            for (_cluster_id, name), agent_id in report.agent_ids.items()
+            for (_cluster_id, name), agent_id in target_ids.items()
             if name in available and agent_id not in available
         }
         if not to_rekey:
