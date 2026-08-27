@@ -729,12 +729,7 @@ describe("connectStores", () => {
       );
 
       await vi.waitFor(() => {
-        expect(spy).toHaveBeenCalledWith(
-          "shuoxi",
-          undefined,
-          undefined,
-          "stable-shuoxi",
-        );
+        expect(spy).toHaveBeenCalledWith("shuoxi", undefined, undefined, "stable-shuoxi");
       });
     });
 

@@ -22,8 +22,6 @@ export default {
     },
     connect: "连接",
     disconnect: "断开连接",
-    interfaceScale: "界面缩放",
-    language: "语言",
     languageNames: {
       en: "English",
       "zh-CN": "中文",
@@ -146,8 +144,16 @@ export default {
   },
   config: {
     nav: {
+      general: "通用",
       agents: "Agent 配置",
       abilities: "Ability 配置",
+    },
+    general: {
+      title: "通用设置",
+      language: "语言",
+      languageDescription: "选择界面显示语言。",
+      interfaceScale: "界面缩放",
+      interfaceScaleDescription: "调整界面整体的字体与 UI 大小。",
     },
     agent: {
       title: "Agent 配置",

@@ -22,8 +22,6 @@ export default {
     },
     connect: "Connect",
     disconnect: "Disconnect",
-    interfaceScale: "Interface scale",
-    language: "Language",
     languageNames: {
       en: "English",
       "zh-CN": "中文",
@@ -147,8 +145,16 @@ export default {
   },
   config: {
     nav: {
+      general: "General",
       agents: "Agent Config",
       abilities: "Ability Config",
+    },
+    general: {
+      title: "General",
+      language: "Language",
+      languageDescription: "Choose the display language of the interface.",
+      interfaceScale: "Interface scale",
+      interfaceScaleDescription: "Adjust the overall font and UI size of the interface.",
     },
     agent: {
       title: "Agent Config",

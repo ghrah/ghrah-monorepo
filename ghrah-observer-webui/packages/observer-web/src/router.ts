@@ -14,7 +14,12 @@ const router = createRouter({
       children: [
         {
           path: "",
-          redirect: "/config/agents",
+          redirect: "/config/general",
+        },
+        {
+          path: "general",
+          name: "config-general",
+          component: () => import("./components/config/general-config-page.vue"),
         },
         {
           path: "agents",
