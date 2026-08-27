@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { reactive, ref, computed } from "vue";
+import { computed, reactive, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useObserver } from "@/composables/useObserver";
 
 const emit = defineEmits<{ close: [] }>();
 
 const { putAgent, listManifestAgents } = useObserver();
+const { t } = useI18n();
 
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -142,17 +144,15 @@ async function handleSubmit() {
   loading.value = false;
 
   if (result && !result.success) {
-    error.value = result.error ?? "创建失败";
+    error.value = result.error ?? t("config.manifest.createFailed");
   } else if (result === null) {
-    error.value = "未连接到 Gateway";
+    error.value = t("config.manifest.notConnected");
   } else {
     await listManifestAgents();
     window.postMessage?.({ type: "openFile", fullName, kind: "agent" });
     emit("close");
   }
 }
-
-
 </script>
 
 <template>
@@ -160,9 +160,9 @@ async function handleSubmit() {
     <div class="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
       <!-- Header -->
       <div class="px-6 pt-5 pb-3 border-b border-gray-200 dark:border-gray-700">
-        <h2 class="text-lg font-semibold">New Agent Manifest</h2>
+        <h2 class="text-lg font-semibold">{{ t("config.manifest.dialogTitle") }}</h2>
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          创建一个完整的 Agent Manifest YAML 配置文件
+          {{ t("config.manifest.subtitle") }}
         </p>
       </div>
 
@@ -174,11 +174,11 @@ async function handleSubmit() {
 
         <!-- Metadata Section -->
         <fieldset>
-          <legend class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Metadata</legend>
+          <legend class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t("config.manifest.metadata") }}</legend>
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                Namespace <span class="text-red-500">*</span>
+                {{ t("config.manifest.namespace") }}
               </label>
               <input
                 v-model="form.namespace"
@@ -191,7 +191,7 @@ async function handleSubmit() {
             </div>
             <div>
               <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                Name <span class="text-red-500">*</span>
+                {{ t("config.manifest.name") }}
               </label>
               <input
                 v-model="form.name"
@@ -204,7 +204,7 @@ async function handleSubmit() {
             </div>
           </div>
           <div class="mt-3">
-            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Title</label>
+            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t("config.manifest.titleField") }}</label>
             <input
               v-model="form.title"
               type="text"
@@ -213,32 +213,32 @@ async function handleSubmit() {
             />
           </div>
           <div class="mt-3">
-            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Description</label>
+            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t("config.manifest.description") }}</label>
             <input
               v-model="form.description"
               type="text"
               class="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Agent 功能描述"
+              :placeholder="t('config.manifest.descriptionPlaceholder')"
             />
           </div>
           <div class="mt-3">
-            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Tags</label>
+            <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t("config.manifest.tags") }}</label>
             <input
               v-model="form.tags"
               type="text"
               class="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="逗号分隔，e.g. coding, design"
+              :placeholder="t('config.manifest.tagsPlaceholder')"
             />
           </div>
         </fieldset>
 
         <!-- Model Section -->
         <fieldset>
-          <legend class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Model</legend>
+          <legend class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">{{ t("config.manifest.model") }}</legend>
           <div class="grid grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                Agent Config Name <span class="text-red-500">*</span>
+                {{ t("config.manifest.agentConfigName") }}
               </label>
               <input
                 v-model="form.agent_config_name"
@@ -249,7 +249,7 @@ async function handleSubmit() {
               />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Iterations</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t("config.manifest.maxIterations") }}</label>
               <input
                 v-model.number="form.max_iterations"
                 type="number"
@@ -260,7 +260,7 @@ async function handleSubmit() {
           </div>
           <div class="grid grid-cols-2 gap-3 mt-3">
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Temperature</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t("config.manifest.temperature") }}</label>
               <input
                 v-model="form.temperature"
                 type="number"
@@ -268,17 +268,17 @@ async function handleSubmit() {
                 min="0"
                 max="2"
                 class="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="可选，e.g. 0.7"
+                :placeholder="t('config.manifest.temperaturePlaceholder')"
               />
             </div>
             <div>
-              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Max Tokens</label>
+              <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{{ t("config.manifest.maxTokens") }}</label>
               <input
                 v-model="form.max_tokens"
                 type="number"
                 min="1"
                 class="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="可选，e.g. 4096"
+                :placeholder="t('config.manifest.maxTokensPlaceholder')"
               />
             </div>
           </div>
@@ -287,7 +287,7 @@ async function handleSubmit() {
         <!-- System Prompt Section -->
         <fieldset>
           <legend class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-            System Prompt <span class="text-red-500">*</span>
+            {{ t("config.manifest.systemPrompt") }}
           </legend>
           <textarea
             v-model="form.system_prompt"
@@ -301,9 +301,9 @@ async function handleSubmit() {
         <!-- Abilities Section -->
         <fieldset>
           <legend class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-            Abilities <span class="text-red-500">*</span>
+            {{ t("config.manifest.abilities") }}
           </legend>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">至少需要一个 Ability。type 为内置类型，ref 为完整引用名。</p>
+          <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">{{ t("config.manifest.abilitiesHint") }}</p>
           <div class="space-y-2">
             <div
               v-for="(ability, index) in form.abilities"
@@ -314,8 +314,8 @@ async function handleSubmit() {
                 v-model="ability.mode"
                 class="px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="type">type (内置)</option>
-                <option value="ref">ref (引用)</option>
+                <option value="type">{{ t("config.manifest.typeBuiltIn") }}</option>
+                <option value="ref">{{ t("config.manifest.ref") }}</option>
               </select>
               <input
                 v-model="ability.value"
@@ -339,15 +339,15 @@ async function handleSubmit() {
             class="mt-2 text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
             @click="addAbility()"
           >
-            + Add Ability
+            {{ t("config.manifest.addAbility") }}
           </button>
         </fieldset>
 
         <!-- Actions -->
         <div class="flex justify-end gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-          <button type="button" class="btn-secondary" :disabled="loading" @click="$emit('close')">Cancel</button>
+          <button type="button" class="btn-secondary" :disabled="loading" @click="$emit('close')">{{ t("common.cancel") }}</button>
           <button type="submit" class="btn-primary" :disabled="loading || !canSubmit">
-            {{ loading ? "Creating..." : "Create Manifest" }}
+            {{ loading ? t("config.manifest.creating") : t("config.manifest.create") }}
           </button>
         </div>
       </form>

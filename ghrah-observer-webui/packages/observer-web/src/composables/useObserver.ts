@@ -1,8 +1,8 @@
 import {
   type AbilityManifestInfo,
   type AgentManifestInfo,
-  connectStores,
   type CreateProjectOptions,
+  connectStores,
   extractAbilityList,
   extractAgentList,
   extractManifestEntry,
@@ -20,6 +20,7 @@ import {
 } from "@ghrah/observer-core";
 import type { AgentConfigPayload } from "@ghrah/protocol";
 import { ref, shallowRef, watch } from "vue";
+import { i18n } from "@/i18n";
 
 const client = shallowRef<ObserverClient | null>(null);
 const error = ref<string | null>(null);
@@ -318,7 +319,7 @@ export function useObserver() {
     } else if (result && !result.success) {
       manifests.setValidationResult({
         is_valid: false,
-        errors: [result.error ?? "Validation failed"],
+        errors: [result.error ?? i18n.global.t("common.validationFailed")],
       });
     }
     return result;

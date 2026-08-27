@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { useProjectsStore } from "@ghrah/observer-core";
-import { computed, nextTick, ref } from "vue";
+import { nextTick, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useObserver } from "@/composables/useObserver";
+
+const { t } = useI18n();
 
 const projects = useProjectsStore();
 const { switchProject, createProject, error } = useObserver();
@@ -13,9 +16,6 @@ const newProjectRoot = ref("");
 const newWorkspaces = ref<Array<{ locator: string; name: string }>>([]);
 const busy = ref(false);
 const nameInput = ref<HTMLInputElement | null>(null);
-const activeProject = computed(() =>
-  projects.activeProjectId ? projects.projects.get(projects.activeProjectId) : undefined,
-);
 
 function startCreate() {
   creating.value = true;
@@ -67,7 +67,7 @@ async function submitCreate() {
       if (created?.project_id) switchProject(created.project_id);
       cancelCreate();
     } else if (result && !result.success) {
-      error.value = result.error ?? "创建失败";
+      error.value = result.error ?? t("nav.project.createFailed");
     }
   } finally {
     busy.value = false;
@@ -78,7 +78,7 @@ async function submitCreate() {
 <template>
   <div class="project-selector sidebar-section">
     <div class="project-heading">
-      <h3>Projects</h3>
+      <h3>{{ t("nav.project.title") }}</h3>
     </div>
 
     <ul v-if="projects.projectList.length > 0" class="project-list">
@@ -91,7 +91,7 @@ async function submitCreate() {
         role="button"
         tabindex="0"
         :class="[
-          'project-item cursor-pointer text-sm truncate transition-colors',
+          'project-item cursor-pointer text-sm transition-colors',
           projects.activeProjectId === project.project_id
             ? 'active bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100 font-medium'
             : 'hover:bg-gray-100 dark:hover:bg-gray-800',
@@ -102,24 +102,26 @@ async function submitCreate() {
       >
         <span class="project-avatar">{{ project.name.slice(0, 2).toUpperCase() }}</span>
         <span class="project-name-visually-hidden">{{ project.name }}</span>
+        <div
+          v-if="projects.activeProjectId === project.project_id"
+          class="project-summary"
+          role="note"
+        >
+          <strong>{{ project.name }}</strong>
+          <p v-if="project.description">{{ project.description }}</p>
+          <span>{{ t("nav.project.internalRoot") }}</span>
+          <code :title="project.project_root_locator">
+            {{ project.project_root_locator || t("nav.project.legacyRoot") }}
+          </code>
+          <small v-if="project.project_root_locator">
+            {{ t("nav.project.stores") }}
+          </small>
+          <small>{{ t("nav.project.summaryWorkspaces", { count: project.workspaces?.length ?? 0 }) }}</small>
+        </div>
       </li>
     </ul>
 
-    <p v-else class="project-empty">No projects</p>
-
-    <div v-if="activeProject" class="project-summary">
-      <strong>{{ activeProject.name }}</strong>
-      <p v-if="activeProject.description">{{ activeProject.description }}</p>
-      <span>Internal Project Root</span>
-      <code :title="activeProject.project_root_locator">
-        {{ activeProject.project_root_locator || "Legacy project — migration pending" }}
-      </code>
-      <small v-if="activeProject.project_root_locator" class="project-derived-paths">
-        Internal stores: db/tasks.sqlite3 · db/rooms.sqlite3 · db/action-chains.sqlite3 ·
-        manifests/agents
-      </small>
-      <small>{{ activeProject.workspaces?.length ?? 0 }} writable workspace(s)</small>
-    </div>
+    <p v-else class="project-empty">{{ t("nav.project.empty") }}</p>
 
     <div class="project-add-area">
       <span class="project-divider" />
@@ -127,8 +129,8 @@ async function submitCreate() {
         v-if="!creating"
         class="project-add"
         type="button"
-        aria-label="New project"
-        title="New project"
+        :aria-label="t('nav.project.new')"
+        :title="t('nav.project.new')"
         @click="startCreate"
       >
         <span aria-hidden="true">+</span>
@@ -136,56 +138,56 @@ async function submitCreate() {
 
       <form v-else class="project-create-popover" @submit.prevent="submitCreate">
         <div class="project-create-header">
-          <strong>Create project</strong>
+          <strong>{{ t("nav.project.createTitle") }}</strong>
           <button
             type="button"
             class="project-create-cancel"
-            aria-label="Cancel"
+            :aria-label="t('common.cancel')"
             @click="cancelCreate"
           >
             ×
           </button>
         </div>
         <div class="project-create-fields">
-          <label for="new-project-name">Project name</label>
+          <label for="new-project-name">{{ t("nav.project.name") }}</label>
           <input
             id="new-project-name"
             ref="nameInput"
             v-model="newName"
             type="text"
-            placeholder="Project name"
+            :placeholder="t('nav.project.name')"
             class="project-create-input"
             @keydown.esc="cancelCreate"
           />
-          <label for="new-project-description">Description</label>
+          <label for="new-project-description">{{ t("nav.project.description") }}</label>
           <textarea
             id="new-project-description"
             v-model="newDescription"
             rows="3"
-            placeholder="What is this project for?"
+            :placeholder="t('nav.project.descriptionPlaceholder')"
             class="project-create-input project-create-textarea"
             @keydown.esc="cancelCreate"
           />
-          <label for="new-project-root">Internal Project Root</label>
+          <label for="new-project-root">{{ t("nav.project.internalRoot") }}</label>
           <input
             id="new-project-root"
             v-model="newProjectRoot"
             type="text"
-            placeholder="Auto-generated under ~/.ghrah/projects"
+            :placeholder="t('nav.project.rootPlaceholder')"
             class="project-create-input"
             @keydown.esc="cancelCreate"
           />
           <p class="project-create-hint">
-            Private Subject data. Agents cannot access this folder as a workspace.
+            {{ t("nav.project.rootHint") }}
           </p>
           <div class="project-workspace-heading">
-            <label>Writable workspaces</label>
+            <label>{{ t("nav.project.writableWorkspaces") }}</label>
             <button type="button" class="project-workspace-add" @click="addWorkspace">
-              + Add
+              {{ t("nav.project.addWorkspace") }}
             </button>
           </div>
           <p v-if="newWorkspaces.length === 0" class="project-create-hint">
-            None. Agents will start without a default writable folder.
+            {{ t("nav.project.noWorkspacesHint") }}
           </p>
           <div
             v-for="(workspace, index) in newWorkspaces"
@@ -195,28 +197,28 @@ async function submitCreate() {
             <input
               v-model="workspace.name"
               type="text"
-              :aria-label="`Workspace ${index + 1} name`"
-              placeholder="Workspace name"
+              :aria-label="t('nav.project.workspaceNameAria', { index: index + 1 })"
+              :placeholder="t('nav.project.workspaceName')"
               class="project-create-input project-workspace-name"
             />
             <input
               v-model="workspace.locator"
               type="text"
-              :aria-label="`Workspace ${index + 1} path`"
-              placeholder="/absolute/path/to/workspace"
+              :aria-label="t('nav.project.workspacePathAria', { index: index + 1 })"
+              :placeholder="t('nav.project.workspacePath')"
               class="project-create-input"
             />
             <button
               type="button"
               class="project-workspace-remove"
-              :aria-label="`Remove workspace ${index + 1}`"
+              :aria-label="t('nav.project.removeWorkspaceAria', { index: index + 1 })"
               @click="removeWorkspace(index)"
             >
               ×
             </button>
           </div>
           <p v-if="newWorkspaces.length > 0" class="project-create-hint">
-            The first workspace is the default for agents. Workspaces cannot overlap Project Roots.
+            {{ t("nav.project.firstWorkspaceHint") }}
           </p>
         </div>
         <div class="project-create-actions">
@@ -229,7 +231,7 @@ async function submitCreate() {
               newWorkspaces.some((workspace) => !workspace.locator.trim())
             "
           >
-            {{ busy ? "…" : "Create" }}
+            {{ busy ? "…" : t("common.create") }}
           </button>
         </div>
       </form>

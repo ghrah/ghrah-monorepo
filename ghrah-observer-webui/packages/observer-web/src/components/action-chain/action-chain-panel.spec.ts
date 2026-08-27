@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { useActionChainsStore, useAgentsStore } from "@ghrah/observer-core";
-import { ActionNodeSchema, type ActionNode, type AgentSpawnedPayload } from "@ghrah/protocol";
+import { type ActionNode, ActionNodeSchema, type AgentSpawnedPayload } from "@ghrah/protocol";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it } from "vitest";

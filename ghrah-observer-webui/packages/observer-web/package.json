@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "test": "vitest run",
-    "lint": "biome check src/"
+    "lint": "biome check src/ && pnpm lint:i18n && pnpm lint:ui-tokens",
+    "lint:i18n": "node scripts/check-i18n.mjs",
+    "lint:ui-tokens": "node scripts/check-ui-tokens.mjs"
   },
   "dependencies": {
     "@ghrah/observer-core": "workspace:*",
@@ -19,6 +21,7 @@
     "parse-diff": "^0.12.0",
     "pinia": "^3.0.0",
     "vue": "^3.5.0",
+    "vue-i18n": "^11.4.10",
     "vue-router": "^4.5.0"
   },
   "devDependencies": {

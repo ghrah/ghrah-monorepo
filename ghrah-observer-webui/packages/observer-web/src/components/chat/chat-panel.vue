@@ -8,6 +8,7 @@ import {
 } from "@ghrah/observer-core";
 import type { ContentBlock } from "@ghrah/protocol";
 import { computed, nextTick, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useMarkdown } from "@/composables/useMarkdown";
 import { useObserver } from "@/composables/useObserver";
 import MessageInput from "./message-input.vue";
@@ -17,6 +18,7 @@ const rooms = useRoomsStore();
 const connection = useConnectionStore();
 const { roomSend } = useObserver();
 const { render: renderMarkdown } = useMarkdown();
+const { t } = useI18n();
 
 const messageContainer = ref<HTMLElement | null>(null);
 
@@ -39,9 +41,17 @@ async function handleSend(targets: string[], content: string) {
   chat.addPendingEntry({ to: roomId, content, agentName: "", roomId, targets });
   roomSend(roomId, content, targets)
     .then((r) => {
-      if (r === null) chat.markPendingError(roomId, content, "发送失败：未连接", roomId);
+      if (r === null)
+        chat.markPendingError(roomId, content, t("chat.sendFailedDisconnected"), roomId);
     })
-    .catch((e) => chat.markPendingError(roomId, content, `发送失败：${String(e ?? "")}`, roomId));
+    .catch((e) =>
+      chat.markPendingError(
+        roomId,
+        content,
+        t("chat.sendFailed", { msg: String(e ?? "") }),
+        roomId,
+      ),
+    );
   await nextTick(() => scrollToBottom());
 }
 
@@ -80,13 +90,13 @@ function entryHeader(entry: ChatEntry): string {
       : "";
   switch (entry.kind) {
     case "human_input":
-      return `you${targetSuffix}`;
+      return `${t("chat.header.you")}${targetSuffix}`;
     case "conversation":
       return `@${entry.from}${targetSuffix}`;
     case "send_message":
       return `@${entry.from} → @${entry.to}`;
     case "broadcast":
-      return `@${entry.from} → @all`;
+      return `@${entry.from} → @${t("chat.header.all")}`;
     case "end_task":
       return `✓ @${entry.from}`;
     default:
@@ -124,16 +134,16 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
   <div class="flex flex-col h-full">
     <div class="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between">
       <h3 class="text-sm font-semibold truncate">
-        Chat<span v-if="rooms.activeRoom" class="text-gray-500 dark:text-gray-400 font-normal"> · {{ rooms.activeRoom.name }}</span>
+        {{ rooms.activeRoom ? t("chat.title", { room: rooms.activeRoom.name }) : t("chat.name") }}
       </h3>
     </div>
 
     <div v-if="!rooms.activeRoomId" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
-      Select a room to start chatting
+      {{ t("chat.selectRoom") }}
     </div>
 
     <div v-else-if="roomEntries.length === 0" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
-      No messages yet
+      {{ t("chat.empty") }}
     </div>
 
     <div
@@ -161,7 +171,7 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
           >
             <div v-if="isText(block)" class="markdown-body" v-html="renderMarkdown(block.text)" />
             <details v-else-if="block.type === 'reasoning'" class="block-reasoning">
-              <summary class="text-xs italic text-gray-500 dark:text-gray-400">reasoning{{ block.incomplete ? "…" : "" }}</summary>
+              <summary class="text-xs italic text-gray-500 dark:text-gray-400">{{ t("chat.reasoning") }}{{ block.incomplete ? "…" : "" }}</summary>
               <pre class="text-xs whitespace-pre-wrap">{{ block.reasoning }}</pre>
             </details>
             <img v-else-if="block.type === 'image'" :src="imgSrc(block)" alt="image" class="max-w-full rounded" />
@@ -174,7 +184,7 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
               <pre class="text-xs whitespace-pre-wrap">{{ block.arguments }}</pre>
             </details>
             <details v-else-if="block.type === 'tool_result'" class="block-tool">
-              <summary :class="['text-xs', block.success ? 'text-green-600' : 'text-red-600']">↳ {{ block.name ?? block.tool_call_id }}{{ block.success ? "" : " (failed)" }}</summary>
+              <summary :class="['text-xs', block.success ? 'text-green-600' : 'text-red-600']">↳ {{ block.name ?? block.tool_call_id }}{{ block.success ? "" : t("chat.failed") }}</summary>
               <pre class="text-xs whitespace-pre-wrap">{{ block.content }}</pre>
               <pre v-if="block.error" class="text-xs text-red-500 whitespace-pre-wrap">{{ block.error }}</pre>
             </details>

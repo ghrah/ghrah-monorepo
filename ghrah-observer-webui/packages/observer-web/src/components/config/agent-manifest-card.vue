@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import type { AgentManifestInfo } from "@ghrah/observer-core";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 defineProps<{
   manifest: AgentManifestInfo;
@@ -42,9 +45,9 @@ defineEmits<{
       </span>
     </div>
     <div class="flex gap-1 mt-2">
-      <button class="btn-primary text-xs px-2 py-0.5" @click.stop="$emit('spawn')">Spawn</button>
-      <button class="btn-secondary text-xs px-2 py-0.5" @click.stop="$emit('edit')">Edit YAML</button>
-      <button class="btn-danger text-xs px-2 py-0.5" @click.stop="$emit('delete')">Delete</button>
+      <button class="btn-primary text-xs px-2 py-0.5" @click.stop="$emit('spawn')">{{ t("config.agent.spawn") }}</button>
+      <button class="btn-secondary text-xs px-2 py-0.5" @click.stop="$emit('edit')">{{ t("config.agent.editYaml") }}</button>
+      <button class="btn-danger text-xs px-2 py-0.5" @click.stop="$emit('delete')">{{ t("config.agent.delete") }}</button>
     </div>
   </div>
 </template>

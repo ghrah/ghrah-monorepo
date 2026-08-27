@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { useAgentsStore, useRoomsStore } from "@ghrah/observer-core";
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import AgentActionMenu from "@/components/agent-action-menu.vue";
+
+const { t } = useI18n();
 
 const agents = useAgentsStore();
 const rooms = useRoomsStore();
@@ -35,10 +38,10 @@ function selectAgent(agentName: string) {
   <div class="agent-list sidebar-section h-full flex flex-col">
     <div class="section-heading">
       <div>
-        <span class="section-eyebrow">Runtime</span>
-        <h3>Agents</h3>
+        <span class="section-eyebrow">{{ t("agents.runtime") }}</span>
+        <h3>{{ t("agents.title") }}</h3>
       </div>
-      <RouterLink to="/config/agents" class="btn-primary">+ Spawn</RouterLink>
+      <RouterLink to="/config/agents" class="btn-primary">{{ t("agents.spawn") }}</RouterLink>
     </div>
 
     <ul v-if="agents.activeAgents.length > 0" class="flex-1 overflow-y-auto space-y-1">
@@ -67,6 +70,6 @@ function selectAgent(agentName: string) {
       </li>
     </ul>
 
-    <p v-else class="text-gray-400 dark:text-gray-600 text-sm italic">No active agents</p>
+    <p v-else class="text-gray-400 dark:text-gray-600 text-sm italic">{{ t("agents.empty") }}</p>
   </div>
 </template>

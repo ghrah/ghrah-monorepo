@@ -8,7 +8,7 @@
     "dev:extension": "./scripts/dev-extension.sh",
     "test:extension": "./scripts/test-extension.sh",
     "build": "./scripts/build.sh",
-    "lint": "biome check .",
+    "lint": "pnpm --filter @ghrah/observer-web lint:i18n && pnpm --filter @ghrah/observer-web lint:ui-tokens && biome check .",
     "lint:fix": "biome check . --write",
     "format": "biome format . --write",
     "test": "vitest",

@@ -3,6 +3,8 @@ import { createApp } from "vue";
 import "virtual:uno.css";
 import "./style.css";
 import App from "./app.vue";
+import { initFontScale } from "./composables/useFontScale";
+import { i18n } from "./i18n";
 import router from "./router.js";
 
 function initDarkMode() {
@@ -14,8 +16,10 @@ function initDarkMode() {
   }
 }
 initDarkMode();
+initFontScale();
 
 const app = createApp(App);
 app.use(createPinia());
+app.use(i18n);
 app.use(router);
 app.mount("#app");

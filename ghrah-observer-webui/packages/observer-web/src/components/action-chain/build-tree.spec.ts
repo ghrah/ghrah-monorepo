@@ -109,12 +109,8 @@ describe("createTreeCache", () => {
       const full = buildTree(growing);
       expect(rows.map((r) => r.node.id)).toEqual(full.map((r) => r.node.id));
       expect(rows.map((r) => r.depth)).toEqual(full.map((r) => r.depth));
-      expect(rows.map((r) => r.isLastChild)).toEqual(
-        full.map((r) => r.isLastChild),
-      );
-      expect(rows.map((r) => r.ancestorPipes)).toEqual(
-        full.map((r) => r.ancestorPipes),
-      );
+      expect(rows.map((r) => r.isLastChild)).toEqual(full.map((r) => r.isLastChild));
+      expect(rows.map((r) => r.ancestorPipes)).toEqual(full.map((r) => r.ancestorPipes));
     }
   });
 
@@ -145,9 +141,7 @@ describe("createTreeCache", () => {
     const full = buildTree(growing);
     expect(rows.map((r) => r.node.id)).toEqual(full.map((r) => r.node.id));
     expect(rows.map((r) => r.isLastChild)).toEqual(full.map((r) => r.isLastChild));
-    expect(rows.map((r) => r.ancestorPipes)).toEqual(
-      full.map((r) => r.ancestorPipes),
-    );
+    expect(rows.map((r) => r.ancestorPipes)).toEqual(full.map((r) => r.ancestorPipes));
   });
 
   it("switching agents keeps independent caches (no rebuild on switch-back)", () => {
@@ -184,10 +178,7 @@ describe("createTreeCache", () => {
     ];
     cache.rowsFor("agent", base);
     // 新子节点时间戳早于既有末子节点 → 增量守卫触发全量，排序正确
-    const appended = [
-      ...base,
-      node({ id: "c0", parent_id: "root", timestamp: "t2" }),
-    ];
+    const appended = [...base, node({ id: "c0", parent_id: "root", timestamp: "t2" })];
     const rows = cache.rowsFor("agent", appended);
     expect(rows.map((r) => r.node.id)).toEqual(["root", "c0", "c1"]);
   });

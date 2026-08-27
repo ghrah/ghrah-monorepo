@@ -159,7 +159,7 @@ describe("ChatPanel", () => {
       expect(chat.allEntries.some((e) => e.error)).toBe(true);
     });
     const e = chat.allEntries.find((x) => x.error);
-    expect(e?.error).toContain("发送失败");
+    expect(e?.error).toContain("Send failed");
     expect(e?.roomId).toBe("r1");
     await wrapper.vm.$nextTick();
     expect(wrapper.find(".chat-entry").classes()).toContain("entry-error");

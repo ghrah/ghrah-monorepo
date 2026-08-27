@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { useRoomsStore } from "@ghrah/observer-core";
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
 
 const props = defineProps<{ disabled?: boolean }>();
 const emit = defineEmits<{ send: [targets: string[], content: string] }>();
@@ -12,9 +15,7 @@ const selectedTargets = ref<Set<string>>(new Set());
 
 /** 候选 = 当前 room 的 agent 成员（定向范围不超出本 room）。 */
 const memberAgentNames = computed(() =>
-  (rooms.activeRoom?.members ?? [])
-    .filter((m) => m.subject_type === "agent")
-    .map((m) => m.subject),
+  (rooms.activeRoom?.members ?? []).filter((m) => m.subject_type === "agent").map((m) => m.subject),
 );
 
 // @-补全：输入以 @ 开头时弹出过滤列表
@@ -84,8 +85,8 @@ function handleSubmit() {
 
 const placeholder = computed(() =>
   selectedTargets.value.size > 0
-    ? `To ${[...selectedTargets.value].map((t) => `@${t}`).join(" ")}...`
-    : "Message this room (broadcast); @name or chips to target...",
+    ? t("chat.input.toTarget", { name: [...selectedTargets.value].join(" ") })
+    : t("chat.input.broadcast"),
 );
 </script>
 
@@ -140,7 +141,7 @@ const placeholder = computed(() =>
         :disabled="props.disabled || !input.trim()"
         class="btn-primary text-sm"
       >
-        Send
+        {{ t("chat.input.send") }}
       </button>
     </div>
   </form>

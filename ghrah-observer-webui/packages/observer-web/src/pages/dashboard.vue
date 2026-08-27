@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useAgentsStore, useRoomsStore } from "@ghrah/observer-core";
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import ActionChainPanel from "@/components/action-chain/action-chain-panel.vue";
 import AgentList from "@/components/agent-list.vue";
 import ChatPanel from "@/components/chat/chat-panel.vue";
@@ -18,6 +19,7 @@ type WorkspaceTab = {
 
 const rooms = useRoomsStore();
 const agents = useAgentsStore();
+const { t } = useI18n();
 const { switchRoom } = useObserver();
 const tabs = ref<WorkspaceTab[]>([]);
 const activeTabId = ref<string | null>(null);
@@ -70,16 +72,16 @@ function closeTab(tab: WorkspaceTab) {
 
 <template>
   <div class="workspace-shell">
-    <aside class="project-rail workspace-column" aria-label="Projects">
+    <aside class="project-rail workspace-column" :aria-label="t('dashboard.projects')">
       <ProjectSelector />
     </aside>
 
-    <aside class="room-sidebar workspace-column" aria-label="Rooms">
+    <aside class="room-sidebar workspace-column" :aria-label="t('dashboard.rooms')">
       <RoomSelector @open-room="openRoom" />
     </aside>
 
-    <section class="workspace-main" aria-label="Workspace tabs">
-      <div class="workspace-tabs" role="tablist" aria-label="Open views">
+    <section class="workspace-main" :aria-label="t('dashboard.workspaceTabs')">
+      <div class="workspace-tabs" role="tablist" :aria-label="t('dashboard.openViews')">
         <div class="tabs-scroll">
           <button
             v-for="tab in tabs"
@@ -96,13 +98,13 @@ function closeTab(tab: WorkspaceTab) {
               class="tab-close"
               role="button"
               tabindex="0"
-              :aria-label="`Close ${tab.label}`"
+              :aria-label="t('dashboard.closeTab', { label: tab.label })"
               @click.stop="closeTab(tab)"
               @keydown.enter.stop="closeTab(tab)"
             >×</span>
           </button>
         </div>
-        <span class="tab-count">{{ tabs.length }} open</span>
+        <span class="tab-count">{{ t("dashboard.openCount", { count: tabs.length }) }}</span>
       </div>
 
       <div class="workspace-content">
@@ -112,15 +114,15 @@ function closeTab(tab: WorkspaceTab) {
              component 不匹配，activate 分支 unmount 旧组件时
              parentComponent.ctx.deactivate 不存在 → TypeError，界面卡死。 -->
         <KeepAlive>
-          <component :is="activePanel" v-if="activePanel" :key="activeTabId" />
+          <component :is="activePanel" v-if="activePanel" :key="activeTab?.id" />
         </KeepAlive>
         <div v-if="!activeTab" class="workspace-empty">
           <div class="empty-mark">⌘</div>
-          <h2>Your workspace is ready</h2>
-          <p>Open a room from the left to start a conversation, or choose an agent to inspect its ActionChain.</p>
+          <h2>{{ t("dashboard.readyTitle") }}</h2>
+          <p>{{ t("dashboard.readyBody") }}</p>
           <div class="empty-shortcuts">
-            <span class="shortcut-pill"><kbd>#</kbd> Room conversation</span>
-            <span class="shortcut-pill"><kbd>◎</kbd> Agent ActionChain</span>
+            <span class="shortcut-pill"><kbd>#</kbd> {{ t("dashboard.roomConversation") }}</span>
+            <span class="shortcut-pill"><kbd>◎</kbd> {{ t("dashboard.agentActionChain") }}</span>
           </div>
         </div>
       </div>
@@ -130,7 +132,7 @@ function closeTab(tab: WorkspaceTab) {
       </footer>
     </section>
 
-    <aside class="agent-sidebar workspace-column" aria-label="Agents">
+    <aside class="agent-sidebar workspace-column" :aria-label="t('dashboard.agents')">
       <AgentList @open-agent="openAgent" />
     </aside>
   </div>

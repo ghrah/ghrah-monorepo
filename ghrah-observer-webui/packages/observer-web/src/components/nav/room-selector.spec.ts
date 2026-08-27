@@ -24,7 +24,12 @@ vi.mock("@/composables/useObserver", () => ({
 
 import RoomSelector from "./room-selector.vue";
 
-function room(id: string, projectId: string, name: string, members: string[] = []): RoomInfoPayload {
+function room(
+  id: string,
+  projectId: string,
+  name: string,
+  members: string[] = [],
+): RoomInfoPayload {
   return {
     room_id: id,
     project_id: projectId,
@@ -132,9 +137,7 @@ describe("RoomSelector", () => {
 
   it("creates a room in the active project and switches to it", async () => {
     const projects = useProjectsStore();
-    projects.setProjectsFromList([
-      { project_id: "p1", name: "demo" } as never,
-    ]);
+    projects.setProjectsFromList([{ project_id: "p1", name: "demo" } as never]);
     projects.setActiveProject("p1");
 
     const wrapper = mount(RoomSelector);
@@ -190,27 +193,25 @@ describe("RoomSelector", () => {
     await wrapper.vm.$nextTick();
 
     // 默认不显示成员管理面板
-    expect(wrapper.text()).not.toContain("成员");
+    expect(wrapper.text()).not.toContain("members");
 
     // 打开面板
     await wrapper.find('button[title="Manage members"]').trigger("click");
-    expect(wrapper.text()).toContain("arch 成员");
+    expect(wrapper.text()).toContain("arch members");
     expect(wrapper.text()).toContain("architect");
 
     // 移除成员
     leaveRoomMock.mockResolvedValue({ success: true, data: {} });
     const removeBtn = wrapper
       .findAll("button")
-      .find((b) => b.attributes("title") === "移出 room");
+      .find((b) => b.attributes("title") === "Remove from room");
     expect(removeBtn).toBeDefined();
     await removeBtn!.trigger("click");
     expect(leaveRoomMock).toHaveBeenCalledWith("r1", "architect");
 
     // 添加成员：候选 = 不在室内的 active agents（tester）
     joinRoomMock.mockResolvedValue({ success: true, data: {} });
-    const addBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("添加成员"));
+    const addBtn = wrapper.findAll("button").find((b) => b.text().includes("Add member"));
     expect(addBtn).toBeDefined();
     await addBtn!.trigger("click");
     await wrapper.vm.$nextTick();
@@ -233,9 +234,7 @@ describe("RoomSelector", () => {
     await wrapper.vm.$nextTick();
     await wrapper.find('button[title="Manage members"]').trigger("click");
     // 唯一 active agent 已在室 → 添加按钮禁用
-    const addBtn = wrapper
-      .findAll("button")
-      .find((b) => b.text().includes("添加成员"));
+    const addBtn = wrapper.findAll("button").find((b) => b.text().includes("Add member"));
     expect(addBtn).toBeDefined();
     expect(addBtn!.attributes("disabled")).toBeDefined();
   });

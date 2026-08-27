@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import type { HitlRequest } from "@ghrah/observer-core";
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useObserver } from "@/composables/useObserver";
+
+const { t } = useI18n();
 
 const props = defineProps<{ request: HitlRequest }>();
 
@@ -18,10 +21,12 @@ const toolArgsSummary = computed(() => {
   if (args.command) return String(args.command);
   if (args.path) return String(args.path);
   const entries = Object.entries(args).slice(0, 2);
-  return entries.map(([k, v]) => {
-    const val = typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
-    return `${k}=${val.length > 30 ? val.slice(0, 30) + "\u2026" : val}`;
-  }).join(", ");
+  return entries
+    .map(([k, v]) => {
+      const val = typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+      return `${k}=${val.length > 30 ? val.slice(0, 30) + "\u2026" : val}`;
+    })
+    .join(", ");
 });
 
 const contextDesc = computed(() => {
@@ -54,7 +59,7 @@ async function handleRejectSubmit() {
 <template>
   <li class="flex flex-col gap-1 p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
     <div class="flex items-center gap-2">
-      <span class="text-amber-500 font-bold text-xs">\u23f3</span>
+      <span class="text-amber-500 font-bold text-xs">⏳</span>
       <span class="font-medium text-sm">{{ request.abilityName }}</span>
       <span class="text-gray-400 dark:text-gray-500 text-xs font-mono truncate">{{ toolArgsSummary }}</span>
       <span class="ml-auto text-xs text-gray-500 dark:text-gray-400">{{ request.agentName }}</span>
@@ -69,17 +74,17 @@ async function handleRejectSubmit() {
         v-model="rejectReason"
         rows="2"
         class="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-xs dark:text-gray-100 dark:placeholder-gray-500 bg-white dark:bg-gray-800 focus:outline-none focus:ring-1 focus:ring-red-500 resize-none"
-        placeholder="Reason for rejection (optional)"
+        :placeholder="t('hitl.reasonPlaceholder')"
       />
       <div class="flex gap-2">
-        <button class="btn-danger" :disabled="loading" @click="handleRejectSubmit">Confirm Reject</button>
-        <button class="btn-secondary" @click="showRejectForm = false">Cancel</button>
+        <button class="btn-danger" :disabled="loading" @click="handleRejectSubmit">{{ t("hitl.confirmReject") }}</button>
+        <button class="btn-secondary" @click="showRejectForm = false">{{ t("common.cancel") }}</button>
       </div>
     </div>
 
     <div v-else class="flex gap-2 pl-5">
-      <button class="btn-primary" :disabled="loading" @click="handleApprove">Approve</button>
-      <button class="btn-danger" :disabled="loading" @click="showRejectForm = true">Reject</button>
+      <button class="btn-primary" :disabled="loading" @click="handleApprove">{{ t("hitl.approve") }}</button>
+      <button class="btn-danger" :disabled="loading" @click="showRejectForm = true">{{ t("hitl.reject") }}</button>
     </div>
   </li>
 </template>

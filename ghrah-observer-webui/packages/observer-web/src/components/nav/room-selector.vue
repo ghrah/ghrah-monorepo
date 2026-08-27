@@ -2,7 +2,10 @@
 import { useAgentsStore, useProjectsStore, useRoomsStore } from "@ghrah/observer-core";
 import type { RoomInfoPayload } from "@ghrah/protocol";
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { useObserver } from "@/composables/useObserver";
+
+const { t } = useI18n();
 
 const rooms = useRoomsStore();
 const projects = useProjectsStore();
@@ -63,7 +66,7 @@ async function submitCreate() {
   const projectId = projects.activeProjectId;
   if (!name || busy.value) return;
   if (!projectId) {
-    error.value = "请先选择一个 project";
+    error.value = t("nav.room.selectProjectFirst");
     return;
   }
   busy.value = true;
@@ -77,7 +80,7 @@ async function submitCreate() {
       }
       cancelCreate();
     } else if (result && !result.success) {
-      error.value = result.error ?? "创建失败";
+      error.value = result.error ?? t("nav.room.createFailed");
     }
   } finally {
     busy.value = false;
@@ -106,7 +109,7 @@ async function addMember(subject: string) {
   try {
     const result = await joinRoom(room.room_id, subject, "agent");
     if (result && !result.success) {
-      error.value = result.error ?? "加入失败";
+      error.value = result.error ?? t("nav.room.joinFailed");
     }
   } finally {
     memberBusy.value = false;
@@ -121,7 +124,7 @@ async function removeMember(subject: string) {
   try {
     const result = await leaveRoom(room.room_id, subject);
     if (result && !result.success) {
-      error.value = result.error ?? "移除失败";
+      error.value = result.error ?? t("nav.room.removeFailed");
     }
   } finally {
     memberBusy.value = false;
@@ -133,14 +136,14 @@ async function removeMember(subject: string) {
   <div class="room-selector sidebar-section">
     <div class="section-heading">
       <div>
-        <span class="section-eyebrow">Workspace</span>
-        <h3>Rooms</h3>
+        <span class="section-eyebrow">{{ t("nav.room.workspace") }}</span>
+        <h3>{{ t("nav.room.rooms") }}</h3>
       </div>
       <div class="flex items-center gap-1">
         <button
           v-if="activeRoom"
           class="btn-secondary text-xs px-2 py-0.5"
-          :title="showMembers ? 'Hide members' : 'Manage members'"
+          :title="showMembers ? t('nav.room.hideMembers') : t('nav.room.manageMembers')"
           @click="showMembers = !showMembers"
         >
           👥 {{ activeRoom.members.length }}
@@ -148,10 +151,10 @@ async function removeMember(subject: string) {
         <button
           v-if="!creating"
           class="btn-primary text-xs px-2 py-0.5"
-          title="New room"
+          :title="t('nav.room.new')"
           @click="startCreate"
         >
-          + New
+          + {{ t("common.create") }}
         </button>
       </div>
     </div>
@@ -160,7 +163,7 @@ async function removeMember(subject: string) {
       <input
         v-model="newName"
         type="text"
-        placeholder="Room name"
+        :placeholder="t('nav.room.namePlaceholder')"
         class="flex-1 min-w-0 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
         @keydown.esc="cancelCreate"
       />
@@ -169,7 +172,7 @@ async function removeMember(subject: string) {
         class="btn-primary text-xs px-2 py-1"
         :disabled="busy || !newName.trim()"
       >
-        {{ busy ? "…" : "Create" }}
+        {{ busy ? "…" : t("common.create") }}
       </button>
       <button
         type="button"
@@ -214,7 +217,7 @@ async function removeMember(subject: string) {
       </li>
     </ul>
 
-    <p v-else class="text-gray-400 dark:text-gray-600 text-sm italic">No rooms</p>
+    <p v-else class="text-gray-400 dark:text-gray-600 text-sm italic">{{ t("nav.room.empty") }}</p>
 
     <!-- 成员管理（active room） -->
     <div
@@ -222,7 +225,7 @@ async function removeMember(subject: string) {
       class="mt-2 p-2 border border-gray-200 dark:border-gray-700 rounded bg-gray-50 dark:bg-gray-800 text-xs"
     >
       <div class="font-semibold text-gray-600 dark:text-gray-300 mb-1">
-        {{ activeRoom.name }} 成员
+        {{ t("nav.room.membersTitle", { name: activeRoom.name }) }}
       </div>
       <ul class="space-y-0.5 mb-2">
         <li
@@ -235,7 +238,7 @@ async function removeMember(subject: string) {
           </span>
           <button
             class="text-red-500 hover:text-red-700 dark:hover:text-red-400 px-1"
-            title="移出 room"
+            :title="t('nav.room.removeTitle')"
             :disabled="memberBusy"
             @click="removeMember(member.subject)"
           >
@@ -243,7 +246,7 @@ async function removeMember(subject: string) {
           </button>
         </li>
         <li v-if="activeRoom.members.length === 0" class="text-gray-400 dark:text-gray-600 italic">
-          暂无成员
+          {{ t("nav.room.noMembers") }}
         </li>
       </ul>
 
@@ -253,7 +256,7 @@ async function removeMember(subject: string) {
           :disabled="memberBusy || candidateAgents.length === 0"
           @click="addOpen = !addOpen"
         >
-          + 添加成员
+          {{ t("nav.room.addMember") }}
         </button>
         <ul
           v-if="addOpen && candidateAgents.length > 0"
@@ -269,7 +272,7 @@ async function removeMember(subject: string) {
           </li>
         </ul>
         <p v-if="addOpen && candidateAgents.length === 0" class="text-gray-400 dark:text-gray-600 mt-1 italic">
-          当前 agents 均已入室
+          {{ t("nav.room.allAgentsInRoom") }}
         </p>
       </div>
     </div>

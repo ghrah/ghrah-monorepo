@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import type { ActionNode, ContentBlock } from "@ghrah/protocol";
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
+
+const { t, locale } = useI18n();
 
 const props = defineProps<{
   node: ActionNode;
@@ -41,7 +44,7 @@ const timeStr = computed(() => {
   const ts = props.node.timestamp;
   if (!ts) return "";
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? ts : d.toLocaleTimeString();
+  return Number.isNaN(d.getTime()) ? ts : d.toLocaleTimeString(locale.value);
 });
 const summary = computed(() => {
   const iter = props.node.iteration ?? 0;
@@ -93,7 +96,7 @@ const hasDetails = computed(() => visibleBlocks.value.length > 0 || actionResult
         <pre v-else class="whitespace-pre-wrap">{{ JSON.stringify(block, null, 2) }}</pre>
       </div>
       <details v-if="actionResults.length > 0" class="text-xs text-gray-600 dark:text-gray-400">
-        <summary>action_results ({{ actionResults.length }})</summary>
+        <summary>{{ t("actionChain.results", { count: actionResults.length }) }}</summary>
         <pre class="whitespace-pre-wrap">{{ JSON.stringify(actionResults, null, 2) }}</pre>
       </details>
     </div>

@@ -13,6 +13,7 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["packages/*/src/**/*.spec.ts", "packages/*/src/**/*.test.ts"],
+    setupFiles: ["packages/observer-web/src/test/setup.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

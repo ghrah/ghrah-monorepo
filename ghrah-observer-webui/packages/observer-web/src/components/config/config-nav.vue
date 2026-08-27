@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 
 const route = useRoute();
+const { t } = useI18n();
 </script>
 
 <template>
@@ -15,7 +17,7 @@ const route = useRoute();
           : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800',
       ]"
     >
-      Agent 配置
+      {{ t("config.nav.agents") }}
     </RouterLink>
     <RouterLink
       to="/config/abilities"
@@ -26,7 +28,7 @@ const route = useRoute();
           : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800',
       ]"
     >
-      Ability 配置
+      {{ t("config.nav.abilities") }}
     </RouterLink>
   </nav>
 </template>

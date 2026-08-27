@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { useActionChainsStore, useAgentsStore } from "@ghrah/observer-core";
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import ActionNodeRow from "./action-node.vue";
+
+const { t } = useI18n();
+
 import { createTreeCache, type TreeRow } from "./build-tree.js";
 
 const chains = useActionChainsStore();
@@ -22,16 +26,16 @@ const rows = computed<TreeRow[]>(() => {
 <template>
   <div class="p-3 h-full flex flex-col">
     <div class="flex items-center justify-between mb-2">
-      <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Action Chain</h3>
+      <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t("actionChain.title") }}</h3>
       <span v-if="selectedAgentName" class="text-xs text-gray-500 dark:text-gray-400">@{{ selectedAgentName }}</span>
     </div>
 
     <div v-if="!selectedAgentName" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm italic">
-      Select an agent to view its action chain
+      {{ t("actionChain.selectAgent") }}
     </div>
 
     <div v-else-if="rows.length === 0" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm italic">
-      No actions yet
+      {{ t("actionChain.empty") }}
     </div>
 
     <div v-else class="flex-1 overflow-y-auto">
