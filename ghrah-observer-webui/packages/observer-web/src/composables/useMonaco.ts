@@ -9,6 +9,7 @@ export function useMonaco() {
     const diffEditor = monaco.editor.createDiffEditor(container, {
       readOnly: true,
       renderSideBySide: true,
+      fontSize: 13,
     });
     diffEditor.setModel({
       original: monaco.editor.createModel(original, language),

@@ -295,7 +295,7 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
 }
 
 .entry-header {
-  font-size: 0.7rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   margin-bottom: 0.125rem;
   opacity: 0.8;
@@ -317,7 +317,7 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
   background: rgba(0, 0, 0, 0.05);
   padding: 0.25rem 0.5rem;
   border-radius: 0.25rem;
-  font-size: 0.75rem;
+  font-size: 0.875rem;
   overflow-x: auto;
 }
 :root.dark .markdown-body :deep(pre) {

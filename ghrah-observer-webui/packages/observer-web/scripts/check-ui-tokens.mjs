@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 const css = readFileSync("src/style.css", "utf8");
 const failures = [];
 
-if (/font-size:\s*(?:9|10)px/.test(css)) {
-  failures.push("style.css still contains font-size: 9px or 10px");
+if (/font-size:\s*\d+px/.test(css)) {
+  failures.push("style.css still contains a hardcoded px font-size");
 }
 
 const tokenizedClasses = [

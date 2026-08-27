@@ -24,5 +24,11 @@ export default defineConfig({
     colors: {
       primary: "#0066cc",
     },
+    fontSize: {
+      xs: "0.8125rem",
+      sm: "0.9375rem",
+      base: "1rem",
+      lg: "1.125rem",
+    },
   },
 });
