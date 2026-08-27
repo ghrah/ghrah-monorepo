@@ -16,7 +16,8 @@
 2. 本 unit 订阅 ``core:action_chain_updated``，对 node 内命中白名单且
    ``outcome == "success"`` 的能力结果：
    - ``send`` 跳过（send ability 自带 RoomLog 落账，防双记）；
-   - 其余白名单能力：从 ``messages_delta`` 显式解析 room 上下文
+   - 其余白名单能力：从 ``messages_delta`` 或节点 ``delivery_context``
+     显式解析 room 上下文
      （缺失不落——宁缺毋滥），经 ``room_send``（author_type=agent）
      走完整校验 + seq 分配 + 落账 + 广播（该路径不投递，作者即发送者）。
 
@@ -134,8 +135,10 @@ class RoomFilterUnit(SubjectUnit):
     def _resolve_room_id(node: dict[str, Any]) -> str | None:
         """从 node.messages_delta 显式解析 room 上下文。
 
-        H1 投递的用户消息携带 ``metadata.room_id``（receive 侧合入）。
-        缺失 → None（不落账）。
+        H1 投递的用户消息携带 ``metadata.room_id``（receive 侧合入）。一次
+        receive 若经历多轮 tool call，后续节点没有 user delta，因此 Core 还会
+        把同一归属写入 ``node.metadata.delivery_context``。
+        两处均缺失 → None（不落账）。
         """
         delta = node.get("messages_delta")
         if not isinstance(delta, list):
@@ -149,6 +152,15 @@ class RoomFilterUnit(SubjectUnit):
             room_id = metadata.get("room_id")
             if isinstance(room_id, str) and room_id:
                 return room_id
+        node_metadata = node.get("metadata")
+        if not isinstance(node_metadata, dict):
+            return None
+        delivery_context = node_metadata.get("delivery_context")
+        if not isinstance(delivery_context, dict):
+            return None
+        room_id = delivery_context.get("room_id")
+        if isinstance(room_id, str) and room_id:
+            return room_id
         return None
 
     @staticmethod

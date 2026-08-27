@@ -11,7 +11,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 from ghrah.subject.config import RoomFilterConfig, SubjectConfig
@@ -100,6 +99,25 @@ async def test_no_room_context_not_appended() -> None:
         {"agent_name": "planner", "node": _node(room_id=None)}
     )
     assert manager.sends == []
+
+
+async def test_delivery_context_from_later_tool_iteration_appends() -> None:
+    """多轮 tool call 的最终节点从 durable delivery_context 恢复 Room 归属。"""
+    unit, manager = await _unit()
+    node = _node(room_id=None)
+    node["metadata"] = {
+        "delivery_context": {
+            "room_id": "room-tool-loop",
+            "project_id": "project-1",
+            "agent_id": "stable-1",
+        }
+    }
+
+    await unit._on_chain_updated({"agent_name": "shuoxi", "node": node})
+
+    assert len(manager.sends) == 1
+    assert manager.sends[0]["room_id"] == "room-tool-loop"
+    assert manager.sends[0]["data"]["message"] == "收到"
 
 
 async def test_send_ability_skipped() -> None:
