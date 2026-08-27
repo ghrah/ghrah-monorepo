@@ -162,10 +162,12 @@ export class ObserverClient extends ServerClient {
     agentName: string,
     limit?: number,
     projectId?: string,
+    agentId?: string,
   ): Promise<CommandResultPayload> {
     const payload: Record<string, unknown> = { agent_name: agentName };
     if (limit != null) payload["limit"] = limit;
     if (projectId != null) payload["project_id"] = projectId;
+    if (agentId != null) payload["agent_id"] = agentId;
 
     const msg: ServerMessage = {
       type: CommandType.GET_CHAIN_HISTORY,

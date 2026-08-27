@@ -34,7 +34,13 @@ import { useProjectsStore } from "./stores/projects.js";
 import { useRoomsStore } from "./stores/rooms.js";
 import { useTasksStore } from "./stores/tasks.js";
 
-type AgentListItem = { name: string; config: AgentConfigPayload };
+type AgentListItem = {
+  name: string;
+  agent_id?: string;
+  incarnation_id?: string;
+  recovery_mode?: string;
+  config: AgentConfigPayload;
+};
 
 export interface ConnectStoresOptions {
   /** 高频事件合帧 batcher（性能红线 4）；默认 rAF/微任务合帧。 */
@@ -102,7 +108,7 @@ export function connectStores(
       // F2 初始同步：刷新后 ActionChain 面板恢复——为每个 agent 读回链历史，
       // 与增量 onActionChainUpdated 幂等合并（store setChain 以 node id 去重）。
       // fire-and-forget：不阻塞回执/连接流程；单个失败仅记日志。
-      void syncActionChains(agentList.map((a) => a.name));
+      void syncActionChains(agentList);
     }
     if (originalCommand === CommandType.ROOM_LIST && Array.isArray(data.rooms)) {
       rooms.setRoomsFromList(data.rooms as RoomInfoPayload[]);
@@ -231,16 +237,19 @@ export function connectStores(
   ] as const;
 
   /** F2：对每个 agent 并行读回链历史 → store.setChain（幂等合并）。 */
-  async function syncActionChains(agentNames: string[]) {
+  async function syncActionChains(agentList: AgentListItem[]) {
     await Promise.all(
-      agentNames.map(async (name) => {
+      agentList.map(async (agent) => {
+        const name = agent.name;
         try {
           const projectId = projects.projectList.find((project) =>
             project.agents.some((agent) => agent.name === name),
           )?.project_id;
-          const res = projectId
-            ? await client.getChainHistory(name, undefined, projectId)
-            : await client.getChainHistory(name);
+          const agentId = agent.agent_id ?? agent.config.agent_id;
+          const res =
+            projectId || agentId
+              ? await client.getChainHistory(name, undefined, projectId, agentId)
+              : await client.getChainHistory(name);
           if (!res.success || !res.data) return;
           const nodes = (res.data as Record<string, unknown>).nodes;
           if (Array.isArray(nodes)) {

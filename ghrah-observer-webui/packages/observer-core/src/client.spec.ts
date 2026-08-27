@@ -176,6 +176,28 @@ describe("ObserverClient", () => {
 
       await expect(msgPromise).resolves.toBeDefined();
     });
+
+    it("includes stable agent and project ids when provided", async () => {
+      await connectClient(client, mockWs);
+      const msgPromise = client.getChainHistory("planner", undefined, "p1", "stable-1");
+
+      const parsed = JSON.parse(mockWs.sent[0]);
+      expect(parsed.payload).toMatchObject({
+        agent_name: "planner",
+        project_id: "p1",
+        agent_id: "stable-1",
+      });
+
+      mockWs.onmessage!({
+        data: JSON.stringify({
+          type: "command_result",
+          payload: { request_id: parsed.request_id, success: true, data: { nodes: [] } },
+          request_id: parsed.request_id,
+        }),
+      });
+
+      await expect(msgPromise).resolves.toBeDefined();
+    });
   });
 
   describe("sendHitlResponse", () => {

@@ -24,9 +24,18 @@ describe("useAgentsStore", () => {
 
   it("onAgentSpawned adds agent with active status", () => {
     const store = useAgentsStore();
-    store.onAgentSpawned({ name: "agent-1", config: makeConfig("agent-1") });
+    store.onAgentSpawned({
+      name: "agent-1",
+      agent_id: "stable-1",
+      incarnation_id: "inc-1",
+      recovery_mode: "restored",
+      config: makeConfig("agent-1"),
+    });
     expect(store.agents.get("agent-1")?.status).toBe("active");
     expect(store.agents.get("agent-1")?.name).toBe("agent-1");
+    expect(store.agents.get("agent-1")?.agentId).toBe("stable-1");
+    expect(store.agents.get("agent-1")?.incarnationId).toBe("inc-1");
+    expect(store.agents.get("agent-1")?.recoveryMode).toBe("restored");
     expect(store.activeAgents).toHaveLength(1);
   });
 

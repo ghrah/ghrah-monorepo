@@ -701,6 +701,43 @@ describe("connectStores", () => {
       expect(chainStore.getChain("agent-2")[0].id).toBe("nb");
     });
 
+    it("F2: initial chain sync uses stable agent_id before project list arrives", async () => {
+      await connectClient();
+      const spy = vi.spyOn(client, "getChainHistory").mockResolvedValue({
+        request_id: "r",
+        success: true,
+        original_command: CommandType.GET_CHAIN_HISTORY,
+        data: { nodes: [] },
+      } as Awaited<ReturnType<typeof client.getChainHistory>>);
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "r1",
+          success: true,
+          original_command: CommandType.LIST_AGENTS,
+          data: {
+            agents: [
+              {
+                name: "shuoxi",
+                agent_id: "stable-shuoxi",
+                config: { ...DEFAULT_CONFIG, name: "shuoxi", agent_id: "stable-shuoxi" },
+              },
+            ],
+          },
+        }),
+      );
+
+      await vi.waitFor(() => {
+        expect(spy).toHaveBeenCalledWith(
+          "shuoxi",
+          undefined,
+          undefined,
+          "stable-shuoxi",
+        );
+      });
+    });
+
     it("sets rooms on room_list command_result", async () => {
       await connectClient();
       const roomsStore = useRoomsStore();

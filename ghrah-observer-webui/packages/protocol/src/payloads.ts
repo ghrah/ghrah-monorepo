@@ -2,10 +2,15 @@ import { z } from "zod";
 
 export const AgentConfigPayloadSchema = z.object({
   name: z.string(),
+  agent_id: z.string().optional(),
   agent_config_name: z.string().nullable().optional(),
   description: z.string().optional().default(""),
   system_prompt: z.string().optional().default(""),
   max_iterations: z.number().int().optional().default(10),
+  communication_timeout: z.number().optional(),
+  window: z.record(z.unknown()).nullable().optional(),
+  context: z.record(z.unknown()).nullable().optional(),
+  model_overrides: z.record(z.unknown()).nullable().optional(),
 });
 
 export const AbilityDefinitionPayloadSchema = z.object({
@@ -172,11 +177,16 @@ export const WorkspaceListPayloadSchema = z.object({
 
 export const AgentSpawnedPayloadSchema = z.object({
   name: z.string(),
+  agent_id: z.string().optional(),
+  incarnation_id: z.string().optional(),
+  recovery_mode: z.string().optional(),
   config: AgentConfigPayloadSchema,
 });
 
 export const AgentTerminatedPayloadSchema = z.object({
   name: z.string(),
+  agent_id: z.string().optional(),
+  incarnation_id: z.string().optional(),
 });
 
 export const ContentBlockSchema = z.discriminatedUnion("type", [
@@ -281,6 +291,7 @@ export const AgentResponsePayloadSchema = z.object({
 
 export const ActionChainUpdatedPayloadSchema = z.object({
   agent_name: z.string(),
+  agent_id: z.string().optional(),
   node: ActionNodeSchema.optional().default({}),
 });
 
@@ -526,6 +537,7 @@ export const WritableWorkspaceSpecSchema = z.object({
 });
 
 export const AgentSpecSchema = z.object({
+  agent_id: z.string().optional(),
   name: z.string(),
   cluster_id: z.string(),
   manifest_ref: z.string().optional().default(""),

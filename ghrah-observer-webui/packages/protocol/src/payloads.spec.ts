@@ -487,9 +487,14 @@ describe("Event payload schemas", () => {
   it("AgentSpawnedPayloadSchema", () => {
     const result = AgentSpawnedPayloadSchema.parse({
       name: "agent-1",
-      config: { name: "agent-1" },
+      agent_id: "stable-1",
+      incarnation_id: "inc-1",
+      recovery_mode: "restored",
+      config: { name: "agent-1", agent_id: "stable-1" },
     });
     expect(result.name).toBe("agent-1");
+    expect(result.agent_id).toBe("stable-1");
+    expect(result.recovery_mode).toBe("restored");
     expect(result.config.max_iterations).toBe(10);
   });
 
