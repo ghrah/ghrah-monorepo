@@ -13,6 +13,7 @@ from ghrah.subject.sandbox.workspace import (
     SnapshotInfo,
     WorkspaceManager,
 )
+from ghrah.subject.workspace.providers.git import path_to_locator
 
 requires_git = pytest.mark.skipif(
     shutil.which("git") is None, reason="git not available"
@@ -115,11 +116,42 @@ class TestSandboxExecutorResolveCwd:
         with pytest.raises(ValueError, match="outside"):
             executor._resolve_cwd(outside)
 
+    async def test_explicit_external_workspace_is_allowed(self, tmp_path: Path):
+        executor = SandboxExecutor(workspace_root=str(tmp_path / "internal"))
+        external = str(tmp_path / "external")
+        executor.allow_external_workspace(external)
+
+        assert executor._resolve_cwd(external) == external
+        assert executor._resolve_cwd(os.path.join(external, "nested")) == os.path.join(
+            external, "nested"
+        )
+
+        executor.disallow_external_workspace(external)
+        with pytest.raises(ValueError, match="outside"):
+            executor._resolve_cwd(external)
+
     async def test_relative_path_traversal_raises(self, tmp_path: Path):
         executor = SandboxExecutor(workspace_root=str(tmp_path))
         with pytest.raises(ValueError, match="outside"):
             executor._resolve_cwd("../../outside_sb_dir")
 
+
+class TestExternalWorkspaceRegistration:
+    @requires_git
+    async def test_registers_workspace_outside_manager_root(self, tmp_path: Path):
+        internal_root = tmp_path / "subject-root"
+        external_workspace = tmp_path / "project-source"
+        executor = SandboxExecutor(workspace_root=str(internal_root))
+        manager = WorkspaceManager(root_path=str(internal_root), sandbox=executor)
+        await manager.start()
+        try:
+            workspace = await manager.register_workspace(
+                path_to_locator(str(external_workspace)), name="source", provider_type="git"
+            )
+            assert workspace.path == str(external_workspace)
+            assert (external_workspace / ".git").is_dir()
+        finally:
+            await manager.stop()
 
 class TestSandboxExecutorExecuteCommand:
     async def test_execute_echo(self, tmp_path):

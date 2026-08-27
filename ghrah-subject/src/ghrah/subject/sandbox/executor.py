@@ -67,7 +67,7 @@ class SandboxExecutor:
 
     职责：
     - 命令安全检查（blocked commands）
-    - 工作目录约束（cwd 限制在 workspace_root 内）
+    - 工作目录约束（cwd 限制在 workspace_root 或显式授权的外部 Workspace 内）
     - 超时控制
     - 输出截断
     - 环境变量注入
@@ -79,6 +79,7 @@ class SandboxExecutor:
         config: SandboxExecutorConfig | None = None,
     ) -> None:
         self._workspace_root = os.path.abspath(workspace_root)
+        self._external_workspace_roots: set[str] = set()
         self._config = config or SandboxExecutorConfig()
         self._started = False
 
@@ -98,6 +99,14 @@ class SandboxExecutor:
     @property
     def config(self) -> SandboxExecutorConfig:
         return self._config
+
+    def allow_external_workspace(self, path: str) -> None:
+        """授权一个由 WorkspaceManager 管理的外部工作区作为 cwd 边界。"""
+        self._external_workspace_roots.add(os.path.abspath(path))
+
+    def disallow_external_workspace(self, path: str) -> None:
+        """撤销外部工作区 cwd 授权。"""
+        self._external_workspace_roots.discard(os.path.abspath(path))
 
     async def execute_command(
         self,
@@ -198,17 +207,18 @@ class SandboxExecutor:
         return True, ""
 
     def _resolve_cwd(self, cwd: str | None) -> str:
-        """将 cwd 解析为绝对路径，确保在 workspace_root 内。"""
+        """将 cwd 解析为绝对路径，确保在内部根或已授权的外部 Workspace 内。"""
         if cwd is None:
             return self._workspace_root
         if os.path.isabs(cwd):
             abs_cwd = cwd
         else:
             abs_cwd = os.path.abspath(os.path.join(self._workspace_root, cwd))
-        if not is_subpath(abs_cwd, self._workspace_root) and abs_cwd != self._workspace_root:
+        allowed_roots = (self._workspace_root, *self._external_workspace_roots)
+        if not any(is_subpath(abs_cwd, root) for root in allowed_roots):
             raise ValueError(
                 f"cwd '{cwd}' resolves to '{abs_cwd}' which is outside "
-                f"workspace_root '{self._workspace_root}'"
+                f"the configured workspace boundaries"
             )
         return abs_cwd
 

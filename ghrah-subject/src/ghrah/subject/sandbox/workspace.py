@@ -257,6 +257,8 @@ class WorkspaceManager:
             return
         provider = self._provider_for(record)
         ws_path = locator_to_path(record.locator)
+        if self.sandbox is not None:
+            self.sandbox.allow_external_workspace(ws_path)
         workspace = AgentWorkspace(
             name=record.name,
             path=ws_path,
@@ -419,8 +421,12 @@ class WorkspaceManager:
                 locator=locator,
             )
             try:
+                if self.sandbox is not None:
+                    self.sandbox.allow_external_workspace(ws_path)
                 await provider.init(record)
             except WorkspaceProviderError as exc:
+                if self.sandbox is not None:
+                    self.sandbox.disallow_external_workspace(ws_path)
                 raise SnapshotError(str(exc)) from exc
         # 去重：同 workspace_id 已登记则返回现有
         existing = self._by_id.get(record.workspace_id)
@@ -437,6 +443,8 @@ class WorkspaceManager:
         workspace = self._by_id.pop(workspace_id, None)
         if workspace is None:
             return
+        if self.sandbox is not None:
+            self.sandbox.disallow_external_workspace(workspace.path)
         stale_names = [name for name, wid in self._by_agent.items() if wid == workspace_id]
         for name in stale_names:
             self._by_agent.pop(name, None)
