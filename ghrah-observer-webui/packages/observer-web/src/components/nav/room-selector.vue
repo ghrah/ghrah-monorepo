@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAgentsStore, useProjectsStore, useRoomsStore } from "@ghrah/observer-core";
-import type { RoomInfoPayload } from "@ghrah/protocol";
+import type { RoomInfoPayload, RoomMember } from "@ghrah/protocol";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useObserver } from "@/composables/useObserver";
@@ -38,6 +38,13 @@ function isMultiRoom(subject: string): boolean {
 
 function initial(subject: string): string {
   return subject.slice(0, 1).toUpperCase();
+}
+
+function memberLabel(member: RoomMember): string {
+  if (member.subject_name) return member.subject_name;
+  return (
+    agents.activeAgents.find((agent) => agent.agentId === member.subject)?.name ?? member.subject
+  );
 }
 
 async function selectRoom(room: RoomInfoPayload) {
@@ -95,19 +102,27 @@ const addOpen = ref(false);
 const memberBusy = ref(false);
 
 /** 候选成员 = 当前 active agents 中尚未入室者。 */
-const candidateAgents = computed<string[]>(() => {
+const candidateAgents = computed(() => {
   const room = activeRoom.value;
   if (!room) return [];
-  const inRoom = new Set(room.members.map((m) => m.subject));
-  return agents.activeAgents.map((a) => a.name).filter((n) => !inRoom.has(n));
+  return agents.activeAgents.filter(
+    (agent) =>
+      !room.members.some(
+        (member) =>
+          member.subject === agent.name ||
+          (!!agent.agentId && member.subject === agent.agentId) ||
+          member.subject_name === agent.name,
+      ),
+  );
 });
 
-async function addMember(subject: string) {
+async function addMember(agentName: string) {
   const room = activeRoom.value;
   if (!room || memberBusy.value) return;
   memberBusy.value = true;
   try {
-    const result = await joinRoom(room.room_id, subject, "agent");
+    const agent = agents.agents.get(agentName);
+    const result = await joinRoom(room.room_id, agent?.agentId || agentName, "agent");
     if (result && !result.success) {
       error.value = result.error ?? t("nav.room.joinFailed");
     }
@@ -203,7 +218,7 @@ async function removeMember(subject: string) {
           <span
             v-for="member in room.members"
             :key="member.subject"
-            :title="member.subject"
+            :title="memberLabel(member)"
             :class="[
               'room-member inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold',
               isMultiRoom(member.subject)
@@ -211,7 +226,7 @@ async function removeMember(subject: string) {
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
             ]"
           >
-            {{ initial(member.subject) }}
+            {{ initial(memberLabel(member)) }}
           </span>
         </div>
       </li>
@@ -233,8 +248,8 @@ async function removeMember(subject: string) {
           :key="member.subject"
           class="flex items-center justify-between gap-1"
         >
-          <span class="truncate" :title="member.subject">
-            {{ member.subject_type === "human" ? "👤" : "🤖" }} {{ member.subject }}
+          <span class="truncate" :title="memberLabel(member)">
+            {{ member.subject_type === "human" ? "👤" : "🤖" }} {{ memberLabel(member) }}
           </span>
           <button
             class="text-red-500 hover:text-red-700 dark:hover:text-red-400 px-1"
@@ -263,12 +278,12 @@ async function removeMember(subject: string) {
           class="absolute z-10 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg"
         >
           <li
-            v-for="name in candidateAgents"
-            :key="name"
+            v-for="agent in candidateAgents"
+            :key="agent.agentId || agent.name"
             class="px-2 py-1 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900 text-gray-700 dark:text-gray-200"
-            @click="addMember(name)"
+            @click="addMember(agent.name)"
           >
-            🤖 {{ name }}
+            🤖 {{ agent.name }}
           </li>
         </ul>
         <p v-if="addOpen && candidateAgents.length === 0" class="text-gray-400 dark:text-gray-600 mt-1 italic">

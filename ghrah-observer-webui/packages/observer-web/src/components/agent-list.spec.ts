@@ -23,7 +23,12 @@ function room(id: string, name: string, members: string[] = []): RoomInfoPayload
     project_id: "p1",
     name,
     status: "active",
-    members: members.map((s) => ({ subject: s, subject_type: "agent" as const, joined_at: "" })),
+    members: members.map((s) => ({
+      subject: s,
+      subject_type: "agent" as const,
+      subject_name: s,
+      joined_at: "",
+    })),
     seq_watermark: 0,
     version: 1,
     created_at: "",
@@ -76,5 +81,28 @@ describe("AgentList", () => {
       "frontend",
     ]);
     expect(agentItem(wrapper, "tester")!.findAll(".agent-room-badge")).toHaveLength(0);
+  });
+
+  it("matches room badges by stable agent ID", async () => {
+    const agents = useAgentsStore();
+    agents.onAgentSpawned({
+      ...spawn("shuoxi"),
+      agent_id: "stable-shuoxi",
+    } as AgentSpawnedPayload);
+    const rooms = useRoomsStore();
+    const stableRoom = room("r1", "chat");
+    stableRoom.members = [
+      {
+        subject: "stable-shuoxi",
+        subject_type: "agent",
+        subject_name: "shuoxi",
+        joined_at: "",
+      },
+    ];
+    rooms.setRoomsFromList([stableRoom]);
+
+    const wrapper = mount(AgentList, { global: { stubs: { AgentActionMenu: true } } });
+    await wrapper.vm.$nextTick();
+    expect(agentItem(wrapper, "shuoxi")!.findAll(".agent-room-badge")).toHaveLength(1);
   });
 });

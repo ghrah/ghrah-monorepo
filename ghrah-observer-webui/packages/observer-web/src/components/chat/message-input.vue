@@ -14,8 +14,10 @@ const input = ref("");
 const selectedTargets = ref<Set<string>>(new Set());
 
 /** 候选 = 当前 room 的 agent 成员（定向范围不超出本 room）。 */
-const memberAgentNames = computed(() =>
-  (rooms.activeRoom?.members ?? []).filter((m) => m.subject_type === "agent").map((m) => m.subject),
+const memberAgents = computed(() =>
+  (rooms.activeRoom?.members ?? [])
+    .filter((member) => member.subject_type === "agent")
+    .map((member) => ({ id: member.subject, name: member.subject_name || member.subject })),
 );
 
 // @-补全：输入以 @ 开头时弹出过滤列表
@@ -31,18 +33,18 @@ const mentionQuery = computed(() => {
 const mentionCandidates = computed(() => {
   const q = mentionQuery.value;
   if (q === null) return [];
-  return memberAgentNames.value.filter((n) => n.toLowerCase().includes(q));
+  return memberAgents.value.filter((agent) => agent.name.toLowerCase().includes(q));
 });
 
-function toggleTarget(name: string) {
+function toggleTarget(id: string) {
   const next = new Set(selectedTargets.value);
-  if (next.has(name)) next.delete(name);
-  else next.add(name);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
   selectedTargets.value = next;
 }
 
-function pickMention(name: string) {
-  toggleTarget(name);
+function pickMention(id: string) {
+  toggleTarget(id);
   input.value = "";
 }
 
@@ -56,8 +58,9 @@ function parseLeadingMentions(text: string): { targets: string[]; content: strin
   let m = rest.match(re);
   while (m) {
     const name = m[1];
-    if (memberAgentNames.value.includes(name)) {
-      targets.add(name);
+    const member = memberAgents.value.find((agent) => agent.name === name);
+    if (member) {
+      targets.add(member.id);
       // 剥离整个匹配（含分隔符）；若分隔符是 \s+，content 去掉该空白
       rest = rest.slice(m[0].length);
       m = rest.match(re);
@@ -85,7 +88,11 @@ function handleSubmit() {
 
 const placeholder = computed(() =>
   selectedTargets.value.size > 0
-    ? t("chat.input.toTarget", { name: [...selectedTargets.value].join(" ") })
+    ? t("chat.input.toTarget", {
+        name: [...selectedTargets.value]
+          .map((id) => memberAgents.value.find((agent) => agent.id === id)?.name ?? id)
+          .join(" "),
+      })
     : t("chat.input.broadcast"),
 );
 </script>
@@ -96,20 +103,20 @@ const placeholder = computed(() =>
     @submit.prevent="handleSubmit"
   >
     <!-- room 成员多选 target chips（空选 = 广播） -->
-    <div v-if="memberAgentNames.length > 0" class="flex flex-wrap gap-2">
+    <div v-if="memberAgents.length > 0" class="flex flex-wrap gap-2">
       <button
-        v-for="name in memberAgentNames"
-        :key="name"
+        v-for="agent in memberAgents"
+        :key="agent.id"
         type="button"
         :class="[
           'px-2 py-0.5 rounded-full text-xs border transition-colors',
-          selectedTargets.has(name)
+          selectedTargets.has(agent.id)
             ? 'bg-blue-100 dark:bg-blue-900 border-blue-400 text-blue-900 dark:text-blue-100'
             : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-blue-400',
         ]"
-        @click="toggleTarget(name)"
+        @click="toggleTarget(agent.id)"
       >
-        @{{ name }}
+        @{{ agent.name }}
       </button>
     </div>
 
@@ -128,12 +135,12 @@ const placeholder = computed(() =>
         class="absolute bottom-full mb-1 left-0 right-0 max-h-40 overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded shadow-lg z-10"
       >
         <li
-          v-for="name in mentionCandidates"
-          :key="name"
+          v-for="agent in mentionCandidates"
+          :key="agent.id"
           class="px-3 py-1.5 text-sm cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900 text-gray-700 dark:text-gray-200"
-          @mousedown.prevent="pickMention(name)"
+          @mousedown.prevent="pickMention(agent.id)"
         >
-          @{{ name }}
+          @{{ agent.name }}
         </li>
       </ul>
       <button

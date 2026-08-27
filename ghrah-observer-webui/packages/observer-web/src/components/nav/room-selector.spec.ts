@@ -35,7 +35,12 @@ function room(
     project_id: projectId,
     name,
     status: "active",
-    members: members.map((s) => ({ subject: s, subject_type: "agent" as const, joined_at: "" })),
+    members: members.map((s) => ({
+      subject: s,
+      subject_type: "agent" as const,
+      subject_name: s,
+      joined_at: "",
+    })),
     seq_watermark: 0,
     version: 1,
     created_at: "",
@@ -237,5 +242,39 @@ describe("RoomSelector", () => {
     const addBtn = wrapper.findAll("button").find((b) => b.text().includes("Add member"));
     expect(addBtn).toBeDefined();
     expect(addBtn!.attributes("disabled")).toBeDefined();
+  });
+
+  it("uses stable member IDs on the wire but renders and matches the display name", async () => {
+    const rooms = useRoomsStore();
+    const agents = useAgentsStore();
+    const stableRoom = room("r1", "p1", "stable-room");
+    stableRoom.members = [
+      {
+        subject: "stable-shuoxi",
+        subject_type: "agent",
+        subject_name: "shuoxi",
+        joined_at: "",
+      },
+    ];
+    rooms.setRoomsFromList([stableRoom]);
+    rooms.setActiveRoom("r1");
+    agents.setAgentsFromList([
+      { name: "shuoxi", agent_id: "stable-shuoxi", config: {} as never },
+      { name: "tester", agent_id: "stable-tester", config: {} as never },
+    ]);
+
+    const wrapper = mount(RoomSelector);
+    await wrapper.vm.$nextTick();
+    await wrapper.find('button[title="Manage members"]').trigger("click");
+
+    expect(wrapper.text()).toContain("shuoxi");
+    expect(wrapper.text()).not.toContain("stable-shuoxi");
+
+    joinRoomMock.mockResolvedValue({ success: true, data: {} });
+    const addBtn = wrapper.findAll("button").find((b) => b.text().includes("Add member"));
+    await addBtn!.trigger("click");
+    const candidate = wrapper.findAll("li").find((li) => li.text().includes("tester"));
+    await candidate!.trigger("click");
+    expect(joinRoomMock).toHaveBeenCalledWith("r1", "stable-tester", "agent");
   });
 });

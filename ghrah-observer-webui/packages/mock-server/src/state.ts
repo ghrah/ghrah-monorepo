@@ -292,6 +292,7 @@ export class MockState {
       const member: RoomMember = {
         subject: p.subject,
         subject_type: p.subject_type,
+        subject_name: p.subject,
         joined_at: isoNow(),
       };
       room.members.push(member);

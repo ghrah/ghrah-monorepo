@@ -16,16 +16,21 @@ const agentRooms = computed<Map<string, string[]>>(() => {
   for (const room of rooms.roomList) {
     for (const member of room.members) {
       if (member.subject_type !== "agent") continue;
-      const list = map.get(member.subject) ?? [];
-      list.push(room.name);
-      map.set(member.subject, list);
+      const identities = new Set<string>([member.subject]);
+      if (member.subject_name) identities.add(member.subject_name);
+      for (const identity of identities) {
+        const list = map.get(identity) ?? [];
+        list.push(room.name);
+        map.set(identity, list);
+      }
     }
   }
   return map;
 });
 
 function roomsOf(agentName: string): string[] {
-  return agentRooms.value.get(agentName) ?? [];
+  const agent = agents.agents.get(agentName);
+  return agentRooms.value.get(agent?.agentId || "") ?? agentRooms.value.get(agentName) ?? [];
 }
 
 function selectAgent(agentName: string) {

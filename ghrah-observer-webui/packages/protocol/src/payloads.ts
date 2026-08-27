@@ -656,6 +656,8 @@ export const RoomStatusSchema = z.enum(["active", "archived"]);
 export const RoomMemberSchema = z.object({
   subject: z.string(),
   subject_type: RoomSubjectTypeSchema,
+  /** 可读名称；subject 对 agent 成员保存 project-scoped 稳定 ID。 */
+  subject_name: z.string().optional(),
   joined_at: z.string().optional().default(""),
 });
 
@@ -710,6 +712,7 @@ export const RoomJoinPayloadSchema = z.object({
   room_id: z.string(),
   subject: z.string(),
   subject_type: RoomSubjectTypeSchema,
+  subject_name: z.string().optional(),
 });
 
 export const RoomLeavePayloadSchema = z.object({

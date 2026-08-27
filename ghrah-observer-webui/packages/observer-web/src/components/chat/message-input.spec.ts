@@ -14,8 +14,13 @@ function roomWithAgents(id: string, agents: string[]): RoomInfoPayload {
     name: id,
     status: "active",
     members: [
-      ...agents.map((a) => ({ subject: a, subject_type: "agent" as const, joined_at: "" })),
-      { subject: "human:user", subject_type: "human" as const, joined_at: "" },
+      ...agents.map((a) => ({
+        subject: a,
+        subject_type: "agent" as const,
+        subject_name: a,
+        joined_at: "",
+      })),
+      { subject: "human:user", subject_type: "human" as const, subject_name: "", joined_at: "" },
     ],
     seq_watermark: 0,
     version: 1,
@@ -112,5 +117,27 @@ describe("MessageInput", () => {
     rooms.setActiveRoom("r1");
     const wrapper = mount(MessageInput, { props: { disabled: false } });
     expect(wrapper.findAll('button[type="button"]')).toHaveLength(0);
+  });
+
+  it("renders member names but emits stable IDs for chips and mentions", async () => {
+    setActivePinia(createPinia());
+    const rooms = useRoomsStore();
+    const stableRoom = roomWithAgents("r1", []);
+    stableRoom.members = [
+      {
+        subject: "stable-shuoxi",
+        subject_type: "agent",
+        subject_name: "shuoxi",
+        joined_at: "",
+      },
+    ];
+    rooms.setRoomsFromList([stableRoom]);
+    rooms.setActiveRoom("r1");
+
+    const wrapper = mount(MessageInput, { props: { disabled: false } });
+    expect(wrapper.find('button[type="button"]').text()).toBe("@shuoxi");
+    await wrapper.find('input[type="text"]').setValue("@shuoxi 下午好");
+    await wrapper.find("form").trigger("submit");
+    expect(wrapper.emitted("send")![0]).toEqual([["stable-shuoxi"], "下午好"]);
   });
 });
