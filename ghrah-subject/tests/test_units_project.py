@@ -59,7 +59,7 @@ class _FakeCoreUnit(SubjectUnit):
 
 
 def _fake_registry() -> CoreClusterRegistry:
-    def factory(cluster_id: str) -> _FakeCoreUnit:
+    def factory(cluster_id: str, project_id: str, project_root_locator: str) -> _FakeCoreUnit:
         return _FakeCoreUnit(cluster_id)
 
     return CoreClusterRegistry(unit_factory=factory)

@@ -42,6 +42,7 @@ from ghrah.protocol.types import (
     RecoveryAction,
     SpawnAgentPayload,
 )
+from ghrah.subject.errors import StableError
 from ghrah.subject.project.isolation import (
     validate_path_grants_non_overlapping,
     validate_workspace_locators_non_nested,
@@ -99,6 +100,9 @@ _LOCKED_PROJECT_MUTATIONS = frozenset(
     }
 )
 
+# terminate 回执中的"运行侧已无该 agent"错误码（remove 语义 = 已终止，继续删定义）。
+_TERMINATE_ABSENT_ERRORS = frozenset({"agent_identity_mismatch", "agent_not_found"})
+
 
 def _strip_envelope(payload: dict[str, Any]) -> dict[str, Any]:
     if _ENVELOPE_KEYS.isdisjoint(payload):
@@ -108,6 +112,16 @@ def _strip_envelope(payload: dict[str, Any]) -> dict[str, Any]:
 __all__ = ["ProjectManager"]
 
 OnEvent = Callable[[str, dict[str, Any]], Awaitable[None]]
+
+
+def _err_code(code: str, detail: str = "") -> dict[str, Any]:
+    """稳定码 + 细节的双字段失败回执（R6 契约）。"""
+    return {
+        "success": False,
+        "data": None,
+        "error": code,
+        "error_detail": detail,
+    }
 
 
 def _ok(data: dict[str, Any]) -> dict[str, Any]:
@@ -183,6 +197,8 @@ class ProjectManager:
             return _err(f"invalid payload: {e}")
         except (ProjectNotFoundError, ConcurrentModificationError) as e:
             return _err(str(e))
+        except StableError as e:
+            return _err_code(e.code, e.detail)
         except ValueError as e:
             return _err(str(e))
 
@@ -319,9 +335,15 @@ class ProjectManager:
             raise ValueError(f"agent {agent.name!r} cluster_id {agent.cluster_id!r} not in project")
         for existing in project.agents:
             if agent.agent_id and existing.agent_id == agent.agent_id:
-                raise ValueError(f"agent_id {agent.agent_id!r} already exists in project")
+                raise StableError(
+                    "agent_name_exists",
+                    f"agent_id {agent.agent_id!r} already exists in project",
+                )
             if existing.name == agent.name:
-                raise ValueError(f"agent {agent.name!r} already exists in project")
+                raise StableError(
+                    "agent_name_exists",
+                    f"agent {agent.name!r} already exists in project",
+                )
         validate_path_grants_non_overlapping(agent, project.workspaces)
 
     # ─── 命令 handlers ───
@@ -373,9 +395,10 @@ class ProjectManager:
             receipt = project_paths.initialize(record.project_id)
             mounts: list[WorkspaceMount] = []
             known_ids = {r.workspace_id for r in self._workspace_mgr.list_records()}
-            for item in normalized_workspaces:
+            for normalized_item in normalized_workspaces:
                 ws = await self._workspace_mgr.register_workspace(
-                    str(item["locator"]), name=str(item.get("name") or "default")
+                    str(normalized_item["locator"]),
+                    name=str(normalized_item.get("name") or "default"),
                 )
                 if ws.record.workspace_id not in known_ids:
                     registered_ids.append(ws.record.workspace_id)
@@ -383,8 +406,8 @@ class ProjectManager:
                 mounts.append(
                     WorkspaceMount(
                         workspace_id=ws.record.workspace_id,
-                        role=item.get("role"),
-                        default_for_agents=bool(item["default_for_agents"]),
+                        role=normalized_item.get("role"),
+                        default_for_agents=bool(normalized_item["default_for_agents"]),
                     )
                 )
             WorkspaceMount.validate_single_default(mounts)
@@ -544,11 +567,11 @@ class ProjectManager:
                 return conflict
             shutdown_error = await self._shutdown_project_clusters(existing)
             if shutdown_error is not None:
-                return _err(f"project_shutdown_failed: {shutdown_error}")
+                return _err_code("project_shutdown_failed", str(shutdown_error))
             close_error = await self._close_project_resources(existing.project_id)
             if close_error is not None:
                 await self._restore_project_resources(existing.project_id)
-                return _err(f"project_resource_close_failed: {close_error}")
+                return _err_code("project_resource_close_failed", str(close_error))
             try:
                 updated = await self._store.archive(
                     existing.project_id, p.expected_version
@@ -622,18 +645,18 @@ class ProjectManager:
                 return _err("project_has_rooms")
             shutdown_error = await self._shutdown_project_clusters(existing)
             if shutdown_error is not None:
-                return _err(f"project_shutdown_failed: {shutdown_error}")
+                return _err_code("project_shutdown_failed", str(shutdown_error))
             close_error = await self._close_project_resources(existing.project_id)
             if close_error is not None:
                 if existing.archived_at is None:
                     await self._restore_project_resources(existing.project_id)
-                return _err(f"project_resource_close_failed: {close_error}")
+                return _err_code("project_resource_close_failed", str(close_error))
             try:
                 paths.purge(existing.project_id)
             except Exception as exc:  # noqa: BLE001
                 if existing.archived_at is None:
                     await self._restore_project_resources(existing.project_id)
-                return _err(f"project_root_purge_failed: {exc}")
+                return _err_code("project_root_purge_failed", str(exc))
             deleted = await self._store.hard_delete(
                 existing.project_id, p.expected_version
             )
@@ -715,16 +738,67 @@ class ProjectManager:
             runtime_error = await self._ensure_agent_spawned(
                 agent, updated.project_id, updated.project_root_locator
             )
-        await self._emit_agent("project_agent_added", updated, agent)
+        # 运行诊断持久化（pending→running/error）：失败不改变命令结果，
+        # 只影响重启后的可诊断性，best-effort。
+        await self.mark_agent_runtime(updated.project_id, agent.agent_id, runtime_error)
+        refreshed = await self._store.get(updated.project_id) or updated
+        await self._emit_agent("project_agent_added", refreshed, agent)
         return _ok(
             {
-                "project": updated.to_wire(),
+                "project": refreshed.to_wire(),
                 "agent_name": agent.name,
                 "agent_id": agent.agent_id,
                 "runtime_pending": runtime_error is not None,
                 "runtime_error": runtime_error,
             }
         )
+
+    async def mark_agent_runtime(
+        self, project_id: str, agent_id: str, runtime_error: str | None
+    ) -> None:
+        """持久化 agent 运行诊断（running / error）。
+
+        命令路径（lifecycle lock 内）与 reconcile 后台路径共用；不持锁，
+        以最新 version 写入，冲突时重试一次，仍失败仅告警（诊断字段允许
+        陈旧，不作为一致性边界）。
+        """
+        if not agent_id:
+            return
+        status = "running" if runtime_error is None else "error"
+
+        def mutator(r: ProjectRecord) -> ProjectRecord:
+            agents = [
+                (
+                    a.model_copy(
+                        update={
+                            "runtime_status": status,
+                            "runtime_error": runtime_error or "",
+                        }
+                    )
+                    if a.agent_id == agent_id
+                    else a
+                )
+                for a in r.agents
+            ]
+            return r.model_copy(update={"agents": agents})
+
+        for attempt in range(2):
+            record = await self._store.get(project_id)
+            if record is None:
+                return
+            try:
+                await self._store.update(project_id, record.version, mutator)
+                return
+            except ConcurrentModificationError:
+                if attempt:
+                    logger.warning(
+                        "mark_agent_runtime: version conflict persisted "
+                        "project=%s agent=%s status=%s",
+                        project_id,
+                        agent_id,
+                        status,
+                    )
+        return
 
     async def _ensure_agent_spawned(
         self, agent: AgentSpec, project_id: str, project_root_locator: str
@@ -785,7 +859,7 @@ class ProjectManager:
         )
         if target is None:
             identity = p.agent_id or p.agent_name
-            return _err(f"agent not found: {identity}")
+            return _err_code("agent_not_found", str(identity))
 
         def mutator(r: ProjectRecord) -> ProjectRecord:
             def is_target(candidate: AgentSpec) -> bool:
@@ -800,14 +874,37 @@ class ProjectManager:
                 update={"agents": [a for a in r.agents if not is_target(a)]}
             )
 
-        updated = await self._store.update(p.project_id, expected, mutator)
-        # terminate agent
+        # 先 terminate runtime、成功后再删定义：terminate 失败保留定义并返回
+        # 稳定错误码——宁可不删，不留"定义已删、runtime 仍在运行"的游离
+        # Agent。cluster 未挂载（stopped/archived 后）视为无 runtime。
+        # 运行侧已无该 agent（shutdown 竞态/已被终止）视为已终止，继续删除。
+        handle = None
         if self._cluster_transport.has_cluster(target.cluster_id):
             try:
-                handle = self._cluster_transport.get_handle(target.cluster_id)
-                await handle.terminate_agent(target.agent_id, target.name)
+                candidate_handle = self._cluster_transport.get_handle(target.cluster_id)
+                if candidate_handle.is_connected:
+                    handle = candidate_handle
+            except KeyError:
+                handle = None
+        if handle is not None:
+            terminate_error: str | None = None
+            try:
+                result = await handle.terminate_agent(target.agent_id, target.name)
+                if not result.get("success"):
+                    error_text = str(result.get("error") or "")
+                    if error_text not in _TERMINATE_ABSENT_ERRORS:
+                        terminate_error = error_text or "terminate rejected"
             except Exception as exc:  # noqa: BLE001
-                logger.warning("remove_agent: terminate %s failed: %s", p.agent_name, exc)
+                terminate_error = str(exc)
+            if terminate_error is not None:
+                logger.warning(
+                    "remove_agent: terminate %s failed: %s (definition kept)",
+                    p.agent_name,
+                    terminate_error,
+                )
+                return _err_code("agent_terminate_failed", terminate_error)
+
+        updated = await self._store.update(p.project_id, expected, mutator)
         await self._emit_agent("project_agent_removed", updated, target)
         return _ok(
             {

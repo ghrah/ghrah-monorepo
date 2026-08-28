@@ -47,6 +47,22 @@ def _project(tmp_path: Path, project_id: str, agent_name: str):
     )
 
 
+async def test_migration_markers_gate_one_time_migrations(tmp_path: Path) -> None:
+    """R5：一次性迁移标记——标记后 completed 为真、二次调用幂等。"""
+    from ghrah.subject.project.migration import (
+        mark_migration_completed,
+        migration_completed,
+    )
+
+    db_path = tmp_path / "subject.db"
+    db_path.write_bytes(b"")  # 占位空库，标记表自动创建
+    assert await migration_completed(db_path, "legacy_database_backup") is False
+    await mark_migration_completed(db_path, "legacy_database_backup")
+    await mark_migration_completed(db_path, "legacy_database_backup")  # 幂等
+    assert await migration_completed(db_path, "legacy_database_backup") is True
+    assert await migration_completed(db_path, "legacy_action_chains") is False
+
+
 async def test_action_chains_split_by_unique_agent_and_are_idempotent(
     tmp_path: Path,
 ) -> None:

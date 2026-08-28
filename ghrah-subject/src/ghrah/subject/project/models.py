@@ -140,6 +140,11 @@ class AgentSpec(BaseModel):
     system_prompt: str = ""
     abilities: list[str] | None = None
     path_grants: list[PathGrant] = Field(default_factory=list)
+    # 运行诊断（desired-state 的一部分，随定义持久化，重启后可读）：
+    # pending = 定义已写入、runtime 尚未确认；running = 已在 cluster 上启动；
+    # error = 启动失败，runtime_error 记录可诊断原因（reconcile 可重试收敛）。
+    runtime_status: str = "pending"
+    runtime_error: str = ""
 
 
 class IsolationSpec(BaseModel):

@@ -170,7 +170,7 @@ class WorkspaceUnit(SubjectUnit):
         result = await manager.handle_command("project_get", {"project_id": project_id})
         project = (result.get("data") or {}).get("project") if result.get("success") else None
         if not project:
-            return result
+            return dict(result)
         if project.get("archived_at") or project.get("deleted_at"):
             return {"success": False, "data": None, "error": "resource_archived"}
         matches = [

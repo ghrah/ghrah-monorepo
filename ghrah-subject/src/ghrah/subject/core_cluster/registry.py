@@ -20,6 +20,8 @@ subject 仅注入 ManifestStore（``CoreUnitConfig.manifest_store``）。
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -30,6 +32,7 @@ from ghrah.protocol.types import (
     SpawnAgentPayload,
     TerminateAgentPayload,
 )
+from ghrah.subject.errors import StableError
 from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.runtime.ouroboros_bridge import mount_unit, wait_active
 from ghrah.subject.unit.base import CommandContext
@@ -183,18 +186,22 @@ class _ClusterEntry:
 class CoreClusterRegistry:
     """cluster → CoreUnit 实例注册表（ensure/get/shutdown，幂等）。
 
-    ``unit_factory: (cluster_id) -> unit``（duck-typed，默认
-    ``default_core_unit_factory``；测试注入假工厂）。
+    ``unit_factory: (cluster_id, project_id, project_root_locator) -> unit``
+    （duck-typed，默认 ``default_core_unit_factory``；测试注入假工厂）。
     """
 
     def __init__(
         self,
         *,
-        unit_factory: Callable[[str], Any],
+        unit_factory: Callable[[str, str, str], Any],
     ) -> None:
         self._unit_factory = unit_factory
         self._ctx: Context | None = None
         self._clusters: dict[str, _ClusterEntry] = {}
+        # per-cluster 互斥：ensure/shutdown 的检查-挂载-登记窗口含多个 await
+        # （wait_active 最长 10s），无锁时并发调用会双挂载 CoreUnit（双 fiber
+        # 指向同一 project sqlite），必须串行化。
+        self._locks: dict[str, asyncio.Lock] = {}
 
     def bind(self, ctx: Context) -> None:
         """绑定宿主 ctx（unit.init 时调用；运行时挂载经它 ctx.plugin）。"""
@@ -204,6 +211,14 @@ class CoreClusterRegistry:
     def cluster_ids(self) -> list[str]:
         return list(self._clusters)
 
+    def _lock_for(self, cluster_id: str) -> asyncio.Lock:
+        """取/建 per-cluster 锁（事件循环内同步完成，无竞态窗口）。"""
+        lock = self._locks.get(cluster_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[cluster_id] = lock
+        return lock
+
     async def ensure_cluster(
         self,
         cluster_id: str,
@@ -211,43 +226,48 @@ class CoreClusterRegistry:
         project_id: str,
         project_root_locator: str,
     ) -> CoreUnitHandle:
-        """幂等挂载/取某 cluster 的 CoreUnit 实例。"""
+        """幂等挂载/取某 cluster 的 CoreUnit 实例（per-cluster 互斥）。"""
         if not project_id:
             raise ValueError("project_id required")
         if not project_root_locator:
             raise ValueError("project_root_locator required")
-        entry = self._clusters.get(cluster_id)
-        if entry is not None:
-            if (
-                entry.project_id != project_id
-                or entry.project_root_locator != project_root_locator
-            ):
+        async with self._lock_for(cluster_id):
+            entry = self._clusters.get(cluster_id)
+            if entry is not None:
+                if (
+                    entry.project_id != project_id
+                    or entry.project_root_locator != project_root_locator
+                ):
+                    raise StableError(
+                        "cluster_owner_conflict",
+                        f"{cluster_id} belongs to project {entry.project_id}",
+                    )
+                return entry.handle
+            if self._ctx is None:
                 raise ValueError(
-                    f"cluster_owner_conflict: {cluster_id} belongs to "
-                    f"project {entry.project_id}"
+                    "cluster_mount_failed: CoreClusterRegistry has not been "
+                    "bound to a Context."
                 )
-            return entry.handle
-        if self._ctx is None:
-            raise RuntimeError("CoreClusterRegistry has not been bound to a Context.")
 
-        try:
-            unit = self._unit_factory(cluster_id, project_id, project_root_locator)
-        except TypeError:
+            fiber: Fiber | None = None
             try:
-                unit = self._unit_factory(cluster_id, project_root_locator)
-            except TypeError:
-                # 兼容现有测试/扩展的一参数 factory。
-                unit = self._unit_factory(cluster_id)
-        fiber = self._ctx.plugin(mount_unit(unit))
-        await wait_active(fiber, timeout=10.0)
-        handle = CoreUnitHandle(
-            self, cluster_id, project_id, project_root_locator, unit
-        )
-        self._clusters[cluster_id] = _ClusterEntry(
-            unit, fiber, handle, project_id, project_root_locator
-        )
-        logger.info("CoreClusterRegistry: mounted cluster '%s'", cluster_id)
-        return handle
+                unit = self._unit_factory(cluster_id, project_id, project_root_locator)
+                fiber = self._ctx.plugin(mount_unit(unit))
+                await wait_active(fiber, timeout=10.0)
+            except Exception as exc:  # noqa: BLE001
+                if fiber is not None:
+                    # 半挂载回收：不留无主 fiber（泄漏 + 双写同一 project sqlite）。
+                    with contextlib.suppress(Exception):
+                        await fiber.dispose()
+                raise ValueError(f"cluster_mount_failed: {cluster_id}: {exc}") from exc
+            handle = CoreUnitHandle(
+                self, cluster_id, project_id, project_root_locator, unit
+            )
+            self._clusters[cluster_id] = _ClusterEntry(
+                unit, fiber, handle, project_id, project_root_locator
+            )
+            logger.info("CoreClusterRegistry: mounted cluster '%s'", cluster_id)
+            return handle
 
     def get_handle(self, cluster_id: str) -> CoreUnitHandle:
         """取已挂载 handle；不存在 raise KeyError。"""
@@ -260,12 +280,13 @@ class CoreClusterRegistry:
         return cluster_id in self._clusters
 
     async def shutdown_cluster(self, cluster_id: str) -> None:
-        """dispose 某 cluster 的 fiber（handle 失效，幂等）。"""
-        entry = self._clusters.pop(cluster_id, None)
-        if entry is None:
-            return
-        entry.handle._alive = False
-        await entry.fiber.dispose()
+        """dispose 某 cluster 的 fiber（handle 失效，幂等；与 ensure 互斥）。"""
+        async with self._lock_for(cluster_id):
+            entry = self._clusters.pop(cluster_id, None)
+            if entry is None:
+                return
+            entry.handle._alive = False
+            await entry.fiber.dispose()
         logger.info("CoreClusterRegistry: disposed cluster '%s'", cluster_id)
 
     async def stop(self) -> None:
@@ -277,11 +298,12 @@ class CoreClusterRegistry:
 def default_core_unit_factory(
     config: SubjectConfig,
     manifest_store: Any = None,
-) -> Callable[[str], Any]:
-    """生产工厂：cluster_id → CoreUnit（CoreUnitConfig 从 SubjectConfig 派生）。
+) -> Callable[[str, str, str], Any]:
+    """生产工厂：(cluster_id, project_id, root_locator) → CoreUnit。
 
-    persistence_factory 注入 Core sqlite（``core_db_path``，与 ledger 读侧
-    同源派生）——agent 链真相源落 Core 内建 backend（聚合裁决 D-C）。
+    persistence_factory 注入 Project Root 内的 chain sqlite（经
+    ProjectPaths 定位）——agent 链真相源永远落在目标 Project Root；
+    空 locator 直接拒绝（不再回退实例级全局库）。
 
     ``manifest_store`` 注入 CoreUnitConfig.manifest_store，供 CoreUnit 内部
     解析 manifest_ref spawn（对齐 Core 独立库 runner 范式）。由
@@ -299,10 +321,10 @@ def default_core_unit_factory(
     def factory(
         cluster_id: str, project_id: str, project_root_locator: str
     ) -> Any:
-        core_db_path = (
-            str(ProjectPaths.from_locator(project_root_locator).action_chain_db_path)
-            if project_root_locator
-            else config.core_db_path
+        if not project_root_locator:
+            raise ValueError("project_root_locator required")
+        core_db_path = str(
+            ProjectPaths.from_locator(project_root_locator).action_chain_db_path
         )
 
         def persistence_factory(agent_config: Any) -> Any:

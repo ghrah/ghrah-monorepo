@@ -31,6 +31,12 @@ class FakeProjectMgr:
         self._agents = agents or []
         self.bootstrap_called = False
         self.adopt_called = False
+        self.runtime_marks: list[tuple[str, str, str | None]] = []
+
+    async def mark_agent_runtime(
+        self, project_id: str, agent_id: str, runtime_error: str | None
+    ) -> None:
+        self.runtime_marks.append((project_id, agent_id, runtime_error))
 
     async def handle_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         if command == "project_list":

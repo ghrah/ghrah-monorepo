@@ -113,9 +113,17 @@ def _register_routes(ctx: Context, unit: SubjectUnit) -> None:
             _make_command_handler(unit, command, cmd_ctx),
         )
     for event_type in routes.events:
+        handler = _make_event_handler(unit, event_type)
         ctx.on(
             f"event/{event_type}",
-            _make_event_handler(unit, event_type),
+            handler,
+        )
+        # 同一事件同时绑定 core: 域：CoreUnit 实例只以 ``core:{type}`` 发射
+        # （如 agent_spawned/agent_terminated），Subject 单元声明订阅这些
+        # 生命周期事件时必须能收到 Core 域来源，否则接线死亡。
+        ctx.on(
+            f"core:{event_type}",
+            handler,
         )
 
 

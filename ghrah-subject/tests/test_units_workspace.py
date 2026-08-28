@@ -89,6 +89,44 @@ async def test_workspace_unit_registers_typed_service_and_missing_workspace_resu
         assert result["error"] == "project_id required"
 
 
+async def test_core_lifecycle_events_drive_workspace_create_destroy(
+    tmp_path: Path,
+) -> None:
+    """core: 域生命周期事件驱动 workspace 建立/销毁（死接线回归）。"""
+
+    config = _config(tmp_path)
+
+    async with Context() as ctx:
+        unit, fiber = _mount(ctx, config)
+        await wait_active(fiber)
+
+        # CoreUnit 只以 core: 前缀发射 agent 生命周期事件
+        ctx.emit(
+            "core:agent_spawned",
+            {"name": "agent-a", "project_id": "p1", "agent_id": "a1"},
+        )
+        for _ in range(200):
+            if unit.manager.get_workspace("a1") is not None:
+                break
+            await asyncio.sleep(0.01)
+        assert unit.manager.get_workspace("a1") is not None
+
+        ctx.emit(
+            "core:agent_terminated",
+            {"name": "agent-a", "project_id": "p1", "agent_id": "a1"},
+        )
+        for _ in range(200):
+            if unit.manager.get_workspace("a1") is None:
+                break
+            await asyncio.sleep(0.01)
+        assert unit.manager.get_workspace("a1") is None
+
+        # 无 agent_id 的事件（不满足归属契约）不触发任何 workspace 操作
+        ctx.emit("core:agent_spawned", {"name": "agent-a"})
+        await asyncio.sleep(0.05)
+        assert unit.manager.get_workspace("a1") is None
+
+
 async def test_workspace_register_get_list_commands(tmp_path: Path) -> None:
     """workspace_register/get/list 3 新命令（W6）。"""
 

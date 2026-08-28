@@ -47,7 +47,8 @@ async def test_coexistence_assembly_all_fibers_active(tmp_path: Path) -> None:
 
         assert ctx.get("sandbox_executor") is not None
         assert ctx.get("manifest_store") is not None
-        assert ctx.get("ledger") is not None
+        # D6：ledger 不再发布实例级服务（chain 永远读 Project Root）。
+        assert ctx.get("ledger") is None
         assert ctx.get("workspace_service") is not None
         assert ctx.get("workspace_manager") is not None
         assert ctx.get("task_manager") is not None

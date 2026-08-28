@@ -24,8 +24,6 @@ from ghrah.subject.workspace.models import WorkspaceRecord
 
 if TYPE_CHECKING:
     from ghrah.subject.project.models import AgentSpec, ProjectRecord
-    from ghrah.subject.room.manager import RoomManager
-    from ghrah.subject.room.store import RoomStore
 
 __all__ = [
     "COMMAND_BRIDGE",
@@ -122,6 +120,11 @@ class ProjectManagerService(Protocol):
     async def adopt_existing_agents(self, project_id: str, cluster_id: str) -> list[AgentSpec]:
         """经 registry.list_agents 取现有 agent，构造 AgentSpec 并加入
         project.agents desired-state，返回列表。"""
+
+    async def mark_agent_runtime(
+        self, project_id: str, agent_id: str, runtime_error: str | None
+    ) -> None:
+        """持久化 agent 运行诊断（running / error；best-effort，允许陈旧）。"""
 
 
 class RoomManagerService(Protocol):

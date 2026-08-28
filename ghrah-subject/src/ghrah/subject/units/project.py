@@ -19,8 +19,10 @@ from ghrah.subject.config import SubjectConfig
 from ghrah.subject.project.manager import ProjectManager
 from ghrah.subject.project.migration import (
     backup_legacy_database,
+    mark_migration_completed,
     migrate_legacy_action_chains,
     migrate_project_agent_ids,
+    migration_completed,
 )
 from ghrah.subject.project.store import ProjectStore
 from ghrah.subject.recovery.desired_state import DesiredStateRecord, DesiredStateStore
@@ -39,6 +41,9 @@ from ghrah.subject.units._commands import PROJECT_COMMANDS
 __all__ = ["ProjectUnit"]
 
 logger = logging.getLogger(__name__)
+
+# 不改变 ProjectStore 权威状态的命令：跳过 DesiredStateStore 全量重投影。
+_READ_ONLY_COMMANDS = frozenset({"project_get", "project_list"})
 
 
 class ProjectUnit(SubjectUnit):
@@ -117,61 +122,79 @@ class ProjectUnit(SubjectUnit):
                 )
                 await self._task_store.close_project(project.project_id)
             projects = await self._store.list()
-            if projects:
-                await backup_legacy_database(self._config.persistence.db_path)
+            catalog_db = self._config.persistence.db_path
+            # 一次性迁移以 catalog 内标记门控：二次启动不再重跑/重备份。
+            if projects and not await migration_completed(
+                catalog_db, "legacy_database_backup"
+            ):
+                await backup_legacy_database(catalog_db)
+                await mark_migration_completed(catalog_db, "legacy_database_backup")
             for project in projects:
                 self._task_store.register_project_root(
                     project.project_id, project.project_root_locator
                 )
                 await self._task_store.migrate_project(project.project_id)
-            report = await migrate_legacy_action_chains(
-                self._config.core_db_path, projects
-            )
-            if report.total_rows or report.ambiguous_agents:
-                logger.info(
-                    "legacy ActionChain migration: rows=%s ambiguous_agents=%s backup=%s",
-                    report.total_rows,
-                    report.ambiguous_agents,
-                    report.backup_path,
+            if not await migration_completed(catalog_db, "legacy_action_chains"):
+                report = await migrate_legacy_action_chains(
+                    self._config.core_db_path, projects
                 )
-            # 全局旧库先拆到 Project Root，再把唯一 name-key 原子迁到稳定 UUID。
-            for project in projects:
-                identity_report = await migrate_project_agent_ids(project)
-                if identity_report.ambiguous_names:
-                    logger.error(
-                        "agent identity migration skipped ambiguous names: "
-                        "project=%s names=%s",
-                        project.project_id,
-                        identity_report.ambiguous_names,
+                if report.total_rows or report.ambiguous_agents:
+                    logger.info(
+                        "legacy ActionChain migration: rows=%s ambiguous_agents=%s "
+                        "backup=%s",
+                        report.total_rows,
+                        report.ambiguous_agents,
+                        report.backup_path,
                     )
-                if not identity_report.agent_ids:
+                await mark_migration_completed(catalog_db, "legacy_action_chains")
+            # 全局旧库先拆到 Project Root，再把唯一 name-key 原子迁到稳定 UUID。
+            # 身份迁移按 project 粒度标记：首启后才出现/才被识别为旧数据的
+            # project 在后续启动仍会迁移（实例级标记会在该场景错误跳过）。
+            for project in projects:
+                marker_key = f"legacy_agent_identity:{project.project_id}"
+                if await migration_completed(catalog_db, marker_key):
                     continue
+                await self._migrate_agent_identity(project)
+                await mark_migration_completed(catalog_db, marker_key)
 
-                def assign_agent_ids(record: Any) -> Any:
-                    agents = [
-                        agent.model_copy(
-                            update={
-                                "agent_id": identity_report.agent_ids.get(
-                                    (agent.cluster_id, agent.name), agent.agent_id
-                                )
-                            }
+    async def _migrate_agent_identity(self, project: Any) -> None:
+        identity_report = await migrate_project_agent_ids(project)
+        if identity_report.ambiguous_names:
+            logger.error(
+                "agent identity migration skipped ambiguous names: "
+                "project=%s names=%s",
+                project.project_id,
+                identity_report.ambiguous_names,
+            )
+        if not identity_report.agent_ids:
+            return
+
+        def assign_agent_ids(record: Any) -> Any:
+            agents = [
+                agent.model_copy(
+                    update={
+                        "agent_id": identity_report.agent_ids.get(
+                            (agent.cluster_id, agent.name), agent.agent_id
                         )
-                        for agent in record.agents
-                    ]
-                    return record.model_copy(update={"agents": agents})
+                    }
+                )
+                for agent in record.agents
+            ]
+            return record.model_copy(update={"agents": agents})
 
-                project = await self._store.update(
-                    project.project_id,
-                    project.version,
-                    assign_agent_ids,
-                )
-                logger.info(
-                    "agent identity migration: project=%s agents=%s rows=%s backup=%s",
-                    project.project_id,
-                    len(identity_report.agent_ids),
-                    identity_report.migrated_rows,
-                    identity_report.backup_path,
-                )
+        assert self._store is not None
+        project = await self._store.update(
+            project.project_id,
+            project.version,
+            assign_agent_ids,
+        )
+        logger.info(
+            "agent identity migration: project=%s agents=%s rows=%s backup=%s",
+            project.project_id,
+            len(identity_report.agent_ids),
+            identity_report.migrated_rows,
+            identity_report.backup_path,
+        )
 
     async def stop(self) -> None:
         if self._store is not None:
@@ -184,7 +207,8 @@ class ProjectUnit(SubjectUnit):
         cmd_ctx: CommandContext,
     ) -> dict[str, Any]:
         result = await self.service.handle_command(command, payload)
-        if result.get("success"):
+        # 只读命令不触发 desired-state 全量重投影（写放大收敛）。
+        if result.get("success") and command not in _READ_ONLY_COMMANDS:
             await self._save_desired()
         return result
 

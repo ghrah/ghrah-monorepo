@@ -25,6 +25,7 @@ from ghrah.subject.core_cluster.registry import (
     CoreClusterRegistry,
     default_core_unit_factory,
 )
+from ghrah.subject.errors import StableError
 from ghrah.subject.runtime.service_keys import (
     CORE_CLUSTER_REGISTRY,
     MANIFEST_STORE,
@@ -67,6 +68,35 @@ _TARGET_FIELDS = {
     "session_delete": "agent_name",
 }
 
+# 会挂载/复活 cluster 或向运行时投递消息的命令：Project 非 ACTIVE 时拒绝，
+# 防止 stopped/paused Project 被一条消息惰性复活（spawn 的 ACTIVE 校验同源）。
+_RUNTIME_REVIVING_COMMANDS = frozenset(
+    {
+        "spawn_agent",
+        "send_message",
+        "broadcast_message",
+        "delegate",
+        "register_ability",
+        "unregister_ability",
+        "session_create",
+        "session_switch",
+        "session_archive",
+        "session_delete",
+    }
+)
+
+# cluster 未挂载时无需（也不得）挂载即可完成的命令：读定义态或收敛性终止。
+# stopped/archived 后 cluster 已 dispose，这些命令从 Project AgentSpec 兜底。
+_NO_MOUNT_COMMANDS = frozenset({"get_agent_info", "session_list", "terminate_agent"})
+
+
+def _is_version_conflict(project_id: str, error: str) -> bool:
+    """识别 project_add_agent 回执中的乐观锁冲突文案（store 抛错的透传）。"""
+    return (
+        f"Project {project_id} modified" in error
+        or "concurrent modification during update" in error
+    )
+
 
 class CoreClusterRegistryUnit(SubjectUnit):
     """Provides the CORE_CLUSTER_REGISTRY service (cluster = CoreUnit 实例)."""
@@ -75,7 +105,7 @@ class CoreClusterRegistryUnit(SubjectUnit):
         self,
         config: SubjectConfig,
         *,
-        unit_factory: Callable[[str], Any] | None = None,
+        unit_factory: Callable[[str, str, str], Any] | None = None,
     ) -> None:
         self._config = config
         # 测试可注入假工厂；生产默认工厂在 init 时构造（需 ctx 取 MANIFEST_STORE
@@ -135,7 +165,7 @@ class CoreClusterRegistryUnit(SubjectUnit):
                 "error": f"unknown project agent command: {command}",
             }
         try:
-            project, manager = await self._project(payload)
+            project, manager = await self._project(payload, command)
             if command == "spawn_agent":
                 return await self._spawn(manager, project, payload)
             if command == "list_agents":
@@ -145,8 +175,11 @@ class CoreClusterRegistryUnit(SubjectUnit):
             if command == "delegate":
                 return await self._delegate(project, payload)
             agent = self._resolve_agent(project, payload, _TARGET_FIELDS[command])
+            cluster_id = str(agent["cluster_id"])
+            if command in _NO_MOUNT_COMMANDS and not self.service.has_cluster(cluster_id):
+                return self._no_mount_result(command, project, agent)
             handle = await self.service.ensure_cluster(
-                str(agent["cluster_id"]),
+                cluster_id,
                 project_id=str(project["project_id"]),
                 project_root_locator=str(project["project_root_locator"]),
             )
@@ -165,11 +198,18 @@ class CoreClusterRegistryUnit(SubjectUnit):
                     }
                 )
             return result
+        except StableError as exc:
+            return {
+                "success": False,
+                "data": None,
+                "error": exc.code,
+                "error_detail": exc.detail,
+            }
         except ValueError as exc:
             return {"success": False, "data": None, "error": str(exc)}
 
     async def _project(
-        self, payload: dict[str, Any]
+        self, payload: dict[str, Any], command: str = ""
     ) -> tuple[dict[str, Any], Any]:
         project_id = str(payload.get("project_id") or "")
         if not project_id:
@@ -186,7 +226,42 @@ class CoreClusterRegistryUnit(SubjectUnit):
             raise ValueError(result.get("error") or f"project not found: {project_id}")
         if project.get("archived_at") or project.get("deleted_at"):
             raise ValueError("resource_archived")
+        if (
+            command in _RUNTIME_REVIVING_COMMANDS
+            and project.get("status") != ProjectStatus.ACTIVE.value
+        ):
+            raise ValueError("project_not_active")
         return project, manager
+
+    @staticmethod
+    def _no_mount_result(
+        command: str, project: dict[str, Any], agent: dict[str, Any]
+    ) -> dict[str, Any]:
+        """cluster 未挂载时的免挂载回执（读定义态 / 收敛性终止）。
+
+        stopped/archived 后 cluster 已 dispose：无 runtime 可终止、无活跃
+        session；get_agent_info 从 Project AgentSpec 返回定义态。
+        """
+        identity = {
+            "project_id": project["project_id"],
+            "agent_id": agent["agent_id"],
+            "agent_name": agent["name"],
+            "cluster_id": agent["cluster_id"],
+        }
+        if command == "terminate_agent":
+            return {"success": True, "data": {**identity, "terminated": True}}
+        if command == "session_list":
+            return {"success": True, "data": {"sessions": [], **identity}}
+        return {
+            "success": True,
+            "data": {
+                "name": agent["name"],
+                "system_prompt": agent.get("system_prompt") or "",
+                "abilities": list(agent.get("abilities") or []),
+                "runtime_state": "stopped",
+                **identity,
+            },
+        }
 
     @staticmethod
     def _resolve_agent(
@@ -203,7 +278,7 @@ class CoreClusterRegistryUnit(SubjectUnit):
         ]
         if len(matches) != 1:
             raise ValueError(f"agent not found in project: {agent_id}")
-        agent = matches[0]
+        agent = dict(matches[0])
         if name and agent.get("name") != name:
             raise ValueError("agent_identity_mismatch")
         return agent
@@ -211,42 +286,57 @@ class CoreClusterRegistryUnit(SubjectUnit):
     async def _spawn(
         self, manager: Any, project: dict[str, Any], payload: dict[str, Any]
     ) -> dict[str, Any]:
-        if project.get("status") != ProjectStatus.ACTIVE.value:
-            raise ValueError("project_not_active")
+        # ACTIVE 校验已在 _project() 的 _RUNTIME_REVIVING_COMMANDS 守卫统一完成。
         config = payload.get("config") or {}
         name = str(config.get("name") or "")
         if not name:
             raise ValueError("config.name required")
-        cluster_id = str(payload.get("cluster_id") or "")
-        cluster_ids = [str(value) for value in project.get("cluster_ids") or []]
-        if not cluster_id:
-            if len(cluster_ids) != 1:
-                raise ValueError("cluster_id required")
-            cluster_id = cluster_ids[0]
-        if cluster_id not in cluster_ids:
-            raise ValueError("cluster_project_mismatch")
-        result = await manager.handle_command(
-            "project_add_agent",
-            {
-                "project_id": project["project_id"],
-                "expected_version": project["version"],
-                "agent": {
-                    "agent_id": str(config.get("agent_id") or ""),
-                    "name": name,
-                    "cluster_id": cluster_id,
-                    "manifest_ref": str(payload.get("manifest_ref") or ""),
-                    "system_prompt": str(config.get("system_prompt") or ""),
-                    "abilities": [
-                        str(item.get("ability_type") or "")
-                        for item in payload.get("abilities") or []
-                        if item.get("ability_type")
-                    ]
-                    or None,
+        # 乐观锁冲突（并发写同 Project）时重取最新快照重试，最多 3 次：
+        # 合法的不同 name 并发 spawn 不应因陈旧 version 快照被误拒；
+        # 重试中同名重复由 add_agent 的 name 唯一性校验正常拦截。
+        for attempt in range(3):
+            cluster_id = str(payload.get("cluster_id") or "")
+            cluster_ids = [str(value) for value in project.get("cluster_ids") or []]
+            if not cluster_id:
+                if len(cluster_ids) != 1:
+                    raise ValueError("cluster_id required")
+                cluster_id = cluster_ids[0]
+            if cluster_id not in cluster_ids:
+                raise ValueError("cluster_project_mismatch")
+            result = await manager.handle_command(
+                "project_add_agent",
+                {
+                    "project_id": project["project_id"],
+                    "expected_version": project["version"],
+                    "agent": {
+                        "agent_id": str(config.get("agent_id") or ""),
+                        "name": name,
+                        "cluster_id": cluster_id,
+                        "manifest_ref": str(payload.get("manifest_ref") or ""),
+                        "system_prompt": str(config.get("system_prompt") or ""),
+                        "abilities": [
+                            str(item.get("ability_type") or "")
+                            for item in payload.get("abilities") or []
+                            if item.get("ability_type")
+                        ]
+                        or None,
+                    },
                 },
-            },
-        )
-        if not result.get("success"):
-            return result
+            )
+            if result.get("success"):
+                break
+            error_text = str(result.get("error") or "")
+            if attempt < 2 and _is_version_conflict(project["project_id"], error_text):
+                # 重取快照（同时重验 ACTIVE/归档状态，防并发暂停后继续 spawn）
+                project, manager = await self._project(payload, "spawn_agent")
+                continue
+            if _is_version_conflict(project["project_id"], error_text):
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "project_version_conflict",
+                }
+            return dict(result)
         data = result.get("data") or {}
         return {
             "success": True,
@@ -264,9 +354,11 @@ class CoreClusterRegistryUnit(SubjectUnit):
     async def _list(self, project: dict[str, Any]) -> dict[str, Any]:
         running: dict[str, dict[str, Any]] = {}
         for cluster_id in project.get("cluster_ids") or []:
-            if not self.service.has_cluster(str(cluster_id)):
+            try:
+                handle = self.service.get_handle(str(cluster_id))
+            except KeyError:
+                # has_cluster→get_handle 之间 cluster 可能被并发 shutdown。
                 continue
-            handle = self.service.get_handle(str(cluster_id))
             for item in await handle.list_agents(str(project["project_id"])):
                 identity = str(item.get("agent_id") or "")
                 if identity:
@@ -328,7 +420,7 @@ class CoreClusterRegistryUnit(SubjectUnit):
             project_id=str(project["project_id"]),
             project_root_locator=str(project["project_root_locator"]),
         )
-        return await handle.dispatch(
+        result = await handle.dispatch(
             "delegate",
             {
                 **payload,
@@ -337,3 +429,4 @@ class CoreClusterRegistryUnit(SubjectUnit):
                 "to_agent": target["name"],
             },
         )
+        return dict(result)

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.project.errors import ProjectArchivedError
@@ -71,7 +71,7 @@ class TaskUnit(SubjectUnit):
         self._store = ProjectScopedTaskStore(
             self._config.persistence.db_path, project_roots
         )
-        self._manager = TaskManager(self._store, on_event=self._emit_event)
+        self._manager = TaskManager(cast(Any, self._store), on_event=self._emit_event)
         ctx.provide(TASK_MANAGER.name, self._manager)
         ctx.provide(TASK_STORE.name, self._store)
 

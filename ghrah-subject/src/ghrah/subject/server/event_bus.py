@@ -11,6 +11,7 @@ from collections import deque
 from typing import Any
 
 from ghrah.protocol.types import (
+    AGENT_SCOPED_EVENT_TYPES,
     EventType,
     Message,
     payload_agent_name,
@@ -56,6 +57,9 @@ class EventBus:
         self._connection_manager = connection_manager
         self._running = False
         self.event_store = EventStore(capacity=event_store_capacity)
+        # Agent 作用域事件缺失 project_id/agent_id 被丢弃的计数（诊断口径，
+        # 供健康检查/metrics 消费；正常应为 0，增长说明存在漏归属的生产者）。
+        self.dropped_unattributed_events = 0
 
     async def start(self) -> None:
         self._running = True
@@ -162,6 +166,10 @@ class EventBus:
 
         用于将从 Core 连接收到的事件（agent_spawned 等）转发给 Observer。
         将 payload 中 "name" 键映射为 "agent_name" 以确保订阅过滤正常工作。
+
+        Agent 作用域事件（AGENT_SCOPED_EVENT_TYPES）缺失非空
+        project_id/agent_id 时丢弃并计数——不猜测归属，防止污染 Observer
+        侧的 Project 分桶。
         """
         from ghrah.protocol.types import BaseModel
 
@@ -172,6 +180,16 @@ class EventBus:
             payload = {}
         else:
             payload = dict(payload)
+        if event.type in AGENT_SCOPED_EVENT_TYPES and (
+            not str(payload.get("project_id") or "")
+            or not str(payload.get("agent_id") or "")
+        ):
+            self.dropped_unattributed_events += 1
+            logger.warning(
+                "Dropped unattributed core event '%s' (missing project_id/agent_id)",
+                event.type,
+            )
+            return 0
         if "agent_name" not in payload and "name" in payload:
             payload["agent_name"] = payload["name"]
         event = Message(type=event.type, payload=payload)

@@ -165,7 +165,7 @@ class TestRoomRealEndToEnd:
                     ctx, "room_create", {"project_id": project_id, "name": "arch"}
                 )
             )["room"]
-            await _spawn_agent_with_send(ctx, project_id, "architect")
+            architect_id = await _spawn_agent_with_send(ctx, project_id, "architect")
             await bridge_command(
                 ctx,
                 "room_join",
@@ -203,7 +203,8 @@ class TestRoomRealEndToEnd:
             )
             assert log["count"] == 1
             entry = log["entries"][0]
-            assert entry["author"] == "architect"
+            # author 为 project-scoped 稳定 agent_id（成员按稳定 ID 保存）
+            assert entry["author"] == architect_id
             assert entry["author_type"] == "agent"
             assert entry["data"]["message"] == "via send ability (real)"
             assert events and events[0][1]["entry"]["id"] == entry["id"]
@@ -398,6 +399,12 @@ class TestRoomRealEndToEnd:
                     "node": {
                         "id": "node-e1",
                         "agent_name": "planner",
+                        "metadata": {
+                            "delivery_context": {
+                                "agent_id": spawned["data"]["agent_id"],
+                                "room_id": room["room_id"],
+                            }
+                        },
                         "action_results": [
                             {
                                 "ability_name": "conversation",
@@ -423,7 +430,7 @@ class TestRoomRealEndToEnd:
             )
             assert log["count"] == 1
             entry = log["entries"][0]
-            assert entry["author"] == "planner"
+            assert entry["author"] == spawned["data"]["agent_id"]
             assert entry["author_type"] == "agent"
             assert entry["data"]["message"] == "收到，开始规划"
             assert entry["data"]["via"] == "chain_filter"

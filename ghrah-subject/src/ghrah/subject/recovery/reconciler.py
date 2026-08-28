@@ -350,7 +350,7 @@ class ReconciliationService:
                     not agent.agent_id and agent.name in existing_names
                 ):
                     continue
-                recovery_mode, error = await self._spawn_agent(
+                recovery_mode, spawn_error = await self._spawn_agent(
                     handle, project.project_id, agent
                 )
                 if recovery_mode is not None:
@@ -368,11 +368,14 @@ class ReconciliationService:
                             "outcome": recovery_mode,
                         }
                     )
+                    await self._project_mgr.mark_agent_runtime(
+                        project.project_id, agent.agent_id, None
+                    )
                 else:
                     report.agents_failed += 1
                     message = (
                         f"project {project.project_id} cluster {cluster_id} agent "
-                        f"{agent.agent_id or agent.name}: {error or 'spawn failed'}"
+                        f"{agent.agent_id or agent.name}: {spawn_error or 'spawn failed'}"
                     )
                     report.errors.append(message)
                     report.agent_results.append(
@@ -382,8 +385,13 @@ class ReconciliationService:
                             "agent_id": agent.agent_id,
                             "agent_name": agent.name,
                             "outcome": "failed",
-                            "error": error or "spawn failed",
+                            "error": spawn_error or "spawn failed",
                         }
+                    )
+                    await self._project_mgr.mark_agent_runtime(
+                        project.project_id,
+                        agent.agent_id,
+                        error or "spawn failed",
                     )
 
     async def _spawn_agent(

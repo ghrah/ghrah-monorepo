@@ -245,7 +245,11 @@ async def test_room_delivery_routes_agent_id_to_owning_cluster(tmp_path: Path) -
             self.ensure_calls: list[str] = []
 
         async def ensure_cluster(
-            self, cluster_id: str, *, project_root_locator: str = ""
+            self,
+            cluster_id: str,
+            *,
+            project_id: str = "",
+            project_root_locator: str = "",
         ) -> HandleStub:
             self.ensure_calls.append(cluster_id)
             return self.handles[cluster_id]

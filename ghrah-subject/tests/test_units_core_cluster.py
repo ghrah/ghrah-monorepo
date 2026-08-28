@@ -32,7 +32,7 @@ from ghrah.subject.runtime.service_keys import (
     WORKSPACE_SERVICE,
 )
 from ghrah.subject.sandbox.executor import SandboxExecutor
-from ghrah.subject.unit.base import RouteSpec, SubjectUnit, UnitMeta
+from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units.core_cluster import CoreClusterRegistryUnit
 
 AGENT_YAML = """\
@@ -89,6 +89,24 @@ class _FakeCoreUnit(SubjectUnit):
         return {"success": True, "data": {}}
 
 
+class _FlakyStartCoreUnit(_FakeCoreUnit):
+    """按共享开关在 start 抛错的假 CoreUnit（验证挂载失败回收与重试）。
+
+    失败开关由工厂持有（只失败第一次挂载），重试创建的新实例可正常启动。
+    """
+
+    def __init__(self, cluster_id: str, fail: dict[str, bool]) -> None:
+        super().__init__(cluster_id)
+        self._fail = fail
+        self.start_attempts = 0
+
+    async def start(self) -> None:
+        self.start_attempts += 1
+        if self._fail.get("on"):
+            self._fail["on"] = False
+            raise RuntimeError("boom")
+
+
 class _FakeWorkspaceService:
     def __init__(self, workspace_root: str) -> None:
         self._workspace_root = workspace_root
@@ -127,17 +145,19 @@ def _config(tmp_path: Path) -> SubjectConfig:
 
 async def _boot(
     tmp_path: Path,
+    *,
+    unit_factory: Any = None,
 ) -> tuple[Context, Any, CoreClusterRegistry, dict[str, _FakeCoreUnit]]:
     """挂载 registry unit（假工厂），返回 ctx/unit/registry/创建的假 units。"""
     created: dict[str, _FakeCoreUnit] = []
 
-    def factory(cluster_id: str) -> _FakeCoreUnit:
+    def factory(cluster_id: str, project_id: str, project_root_locator: str) -> _FakeCoreUnit:
         unit = _FakeCoreUnit(cluster_id)
         created.append(unit)
         return unit
 
     config = _config(tmp_path)
-    unit = CoreClusterRegistryUnit(config, unit_factory=factory)
+    unit = CoreClusterRegistryUnit(config, unit_factory=unit_factory or factory)
     workspace = _FakeWorkspaceService(str(tmp_path / "workspace"))
 
     ctx = await Context().__aenter__()
@@ -313,6 +333,302 @@ class TestCoreClusterRegistryUnit:
             assert not registry.has_cluster("secondary")
             assert all(u.stopped for u in created)
             await ctx.__aexit__(None, None, None)
+
+    async def test_concurrent_ensure_mounts_single_instance(
+        self, tmp_path: Path
+    ) -> None:
+        """回归 H2：并发 ensure 同一 cluster 只挂载一个 CoreUnit 实例。"""
+        import asyncio
+
+        ctx, _, registry, created = await _boot(tmp_path)
+        try:
+            handles = await asyncio.gather(
+                *[
+                    registry.ensure_cluster(
+                        "race", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+                    )
+                    for _ in range(5)
+                ]
+            )
+            assert len(created) == 1
+            assert all(h is handles[0] for h in handles)
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+    async def test_mount_failure_recycled_and_retry_succeeds(
+        self, tmp_path: Path
+    ) -> None:
+        """回归 H2/H3：挂载失败回收 fiber、返回稳定错误码，重试可成功。"""
+        created: list[_FlakyStartCoreUnit] = []
+        fail = {"on": True}
+
+        def flaky_factory(
+            cluster_id: str, project_id: str, project_root_locator: str
+        ) -> _FlakyStartCoreUnit:
+            unit = _FlakyStartCoreUnit(cluster_id, fail)
+            created.append(unit)
+            return unit
+
+        ctx, _, registry, _ = await _boot(tmp_path, unit_factory=flaky_factory)
+        try:
+            with pytest.raises(ValueError, match="cluster_mount_failed"):
+                await registry.ensure_cluster(
+                    "flaky", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+                )
+            # 半挂载不留在注册表
+            assert not registry.has_cluster("flaky")
+
+            handle = await registry.ensure_cluster(
+                "flaky", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
+            assert handle.is_connected
+            # 失败实例已被放弃，重试创建新实例并成功
+            assert len(created) == 2
+            assert created[0].start_attempts == 1
+            assert created[1].start_attempts == 1
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+
+class _ProjectManagerStub:
+    def __init__(self, project: dict[str, Any]) -> None:
+        self._project = project
+
+    async def handle_command(
+        self, command: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        assert command == "project_get"
+        return {"success": True, "data": {"project": self._project}}
+
+
+class TestProjectRuntimeStateGuards:
+    """H4 回归：非 ACTIVE Project 拒绝会复活 cluster 的命令；读/终止免挂载。"""
+
+    @staticmethod
+    def _project(status: str) -> dict[str, Any]:
+        return {
+            "project_id": PROJECT_ID,
+            "version": 3,
+            "status": status,
+            "archived_at": None,
+            "deleted_at": None,
+            "cluster_ids": ["c1"],
+            "project_root_locator": PROJECT_ROOT,
+            "agents": [
+                {
+                    "agent_id": "agent-1",
+                    "name": "coder",
+                    "cluster_id": "c1",
+                    "system_prompt": "",
+                    "abilities": ["conversation"],
+                }
+            ],
+        }
+
+    async def _boot_guard(
+        self, tmp_path: Path, project: dict[str, Any]
+    ) -> tuple[Context, Any, CoreClusterRegistry, list[_FakeCoreUnit]]:
+        ctx, unit, registry, created = await _boot(tmp_path)
+        ctx.provide("project_manager", _ProjectManagerStub(project))
+        return ctx, unit, registry, created
+
+    async def test_stopped_project_rejects_runtime_reviving_commands(
+        self, tmp_path: Path
+    ) -> None:
+        ctx, unit, registry, created = await self._boot_guard(
+            tmp_path, self._project("stopped")
+        )
+        try:
+            cases = [
+                ("spawn_agent", {"project_id": PROJECT_ID, "config": {"name": "x"}}),
+                (
+                    "send_message",
+                    {
+                        "project_id": PROJECT_ID,
+                        "agent_id": "agent-1",
+                        "target": "coder",
+                        "content": "hi",
+                    },
+                ),
+                ("broadcast_message", {"project_id": PROJECT_ID}),
+                (
+                    "delegate",
+                    {
+                        "project_id": PROJECT_ID,
+                        "from_agent_id": "agent-1",
+                        "to_agent_id": "agent-1",
+                    },
+                ),
+                (
+                    "session_create",
+                    {"project_id": PROJECT_ID, "agent_id": "agent-1"},
+                ),
+            ]
+            for command, payload in cases:
+                result = await unit.handle_command(
+                    command, payload, CommandContext.internal()
+                )
+                assert result["success"] is False, command
+                assert result["error"] == "project_not_active", (command, result["error"])
+            # cluster 全程未被惰性挂载
+            assert created == []
+            assert not registry.has_cluster("c1")
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+    async def test_stopped_project_reads_and_terminate_without_mount(
+        self, tmp_path: Path
+    ) -> None:
+        ctx, unit, registry, created = await self._boot_guard(
+            tmp_path, self._project("stopped")
+        )
+        try:
+            listed = await unit.handle_command(
+                "list_agents", {"project_id": PROJECT_ID}, CommandContext.internal()
+            )
+            assert listed["success"]
+            assert listed["data"]["agents"][0]["runtime_state"] == "stopped"
+
+            info = await unit.handle_command(
+                "get_agent_info",
+                {"project_id": PROJECT_ID, "agent_id": "agent-1", "name": "coder"},
+                CommandContext.internal(),
+            )
+            assert info["success"]
+            assert info["data"]["runtime_state"] == "stopped"
+            assert info["data"]["agent_id"] == "agent-1"
+
+            sessions = await unit.handle_command(
+                "session_list",
+                {"project_id": PROJECT_ID, "agent_id": "agent-1"},
+                CommandContext.internal(),
+            )
+            assert sessions["success"]
+            assert sessions["data"]["sessions"] == []
+
+            terminated = await unit.handle_command(
+                "terminate_agent",
+                {"project_id": PROJECT_ID, "agent_id": "agent-1", "name": "coder"},
+                CommandContext.internal(),
+            )
+            assert terminated["success"]
+
+            # 读与终止均不挂载 cluster
+            assert created == []
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+
+class TestSpawnRetryAndDiagnostics:
+    """R4 回归：并发 spawn 乐观锁重试 + 运行诊断持久化。"""
+
+    @staticmethod
+    def _active_project() -> dict[str, Any]:
+        return {
+            "project_id": PROJECT_ID,
+            "version": 1,
+            "status": "active",
+            "archived_at": None,
+            "deleted_at": None,
+            "cluster_ids": ["c1"],
+            "project_root_locator": PROJECT_ROOT,
+            "agents": [],
+        }
+
+    async def test_spawn_retries_on_version_conflict(self, tmp_path: Path) -> None:
+        """首个 add_agent 因陈旧 version 冲突 → 重取快照重试成功。"""
+        ctx, unit, registry, created = await _boot(tmp_path)
+        project = self._active_project()
+        calls: list[dict[str, Any]] = []
+
+        class RetryManagerStub:
+            async def handle_command(self, command: str, payload: dict[str, Any]):
+                assert command == "project_get" or command == "project_add_agent"
+                if command == "project_get":
+                    # 每次 get 都推进 version（模拟并发写入者）
+                    project["version"] += 1
+                    return {"success": True, "data": {"project": dict(project)}}
+                calls.append(payload)
+                if len(calls) == 1:
+                    return {
+                        "success": False,
+                        "data": None,
+                        "error": (
+                            f"Project {PROJECT_ID} modified: expected version "
+                            f"{payload['expected_version']}, got 99"
+                        ),
+                    }
+                return {
+                    "success": True,
+                    "data": {
+                        "agent_name": "coder",
+                        "agent_id": "agent-9",
+                        "runtime_pending": False,
+                        "runtime_error": None,
+                    },
+                }
+
+        ctx.provide("project_manager", RetryManagerStub())
+        try:
+            payload = {
+                "project_id": PROJECT_ID,
+                "config": {"name": "coder", "agent_id": "agent-9"},
+            }
+            result = await unit.handle_command(
+                "spawn_agent", payload, CommandContext.internal()
+            )
+            assert result["success"], result.get("error")
+            assert result["data"]["agent_id"] == "agent-9"
+            assert len(calls) == 2  # 第一次冲突、重试成功
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+    async def test_spawn_returns_stable_code_after_retry_exhausted(
+        self, tmp_path: Path
+    ) -> None:
+        ctx, unit, registry, created = await _boot(tmp_path)
+        project = self._active_project()
+
+        class AlwaysConflictStub:
+            async def handle_command(self, command: str, payload: dict[str, Any]):
+                if command == "project_get":
+                    project["version"] += 1
+                    return {"success": True, "data": {"project": dict(project)}}
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": (
+                        f"Project {PROJECT_ID} modified: expected version "
+                        f"{payload['expected_version']}, got 99"
+                    ),
+                }
+
+        ctx.provide("project_manager", AlwaysConflictStub())
+        try:
+            result = await unit.handle_command(
+                "spawn_agent",
+                {"project_id": PROJECT_ID, "config": {"name": "coder"}},
+                CommandContext.internal(),
+            )
+            assert result["success"] is False
+            assert result["error"] == "project_version_conflict"
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+
+async def test_default_factory_rejects_empty_locator(tmp_path: Path) -> None:
+    """R5：生产工厂空 project_root_locator 直接拒绝（无全局库回退）。"""
+    from ghrah.subject.core_cluster.registry import default_core_unit_factory
+
+    factory = default_core_unit_factory(_config(tmp_path))
+    with pytest.raises(ValueError, match="project_root_locator required"):
+        factory("c1", "p1", "")
 
 
 class TestRealCoreUnitMultiCluster:

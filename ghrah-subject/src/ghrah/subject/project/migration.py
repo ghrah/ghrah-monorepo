@@ -6,6 +6,7 @@ import asyncio
 import sqlite3
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import UTC
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
@@ -16,6 +17,8 @@ __all__ = [
     "ActionChainMigrationReport",
     "AgentIdentityMigrationReport",
     "backup_legacy_database",
+    "mark_migration_completed",
+    "migration_completed",
     "migrate_project_agent_ids",
     "migrate_legacy_action_chains",
 ]
@@ -316,3 +319,40 @@ def _backup_sync(source_path: Path) -> Path | None:
 async def backup_legacy_database(source_path: str | Path) -> Path | None:
     """Create a consistent, one-time SQLite backup before destructive splits."""
     return await asyncio.to_thread(_backup_sync, Path(source_path))
+
+
+_MARKER_TABLE_SQL = (
+    "CREATE TABLE IF NOT EXISTS migration_markers ("
+    "key TEXT PRIMARY KEY, completed_at TEXT NOT NULL)"
+)
+
+
+async def migration_completed(db_path: str | Path, key: str) -> bool:
+    """一次性迁移标记：key 是否已标记完成（标记表建在 catalog 库内）。"""
+
+    def _check() -> bool:
+        with sqlite3.connect(str(db_path)) as db:
+            db.execute(_MARKER_TABLE_SQL)
+            row = db.execute(
+                "SELECT 1 FROM migration_markers WHERE key = ?", (key,)
+            ).fetchone()
+            return row is not None
+
+    return await asyncio.to_thread(_check)
+
+
+async def mark_migration_completed(db_path: str | Path, key: str) -> None:
+    """标记一次性迁移完成（幂等；仅在迁移全量成功后调用）。"""
+    from datetime import datetime
+
+    def _mark() -> None:
+        with sqlite3.connect(str(db_path)) as db:
+            db.execute(_MARKER_TABLE_SQL)
+            db.execute(
+                "INSERT OR IGNORE INTO migration_markers (key, completed_at) "
+                "VALUES (?, ?)",
+                (key, datetime.now(UTC).isoformat()),
+            )
+            db.commit()
+
+    await asyncio.to_thread(_mark)

@@ -19,7 +19,7 @@ from ghrah.protocol.types import GetChainHistoryPayload
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.ledger.chain import ActionChainLedger
 from ghrah.subject.project.paths import ProjectPaths
-from ghrah.subject.runtime.service_keys import LEDGER, PROJECT_MANAGER
+from ghrah.subject.runtime.service_keys import PROJECT_MANAGER
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units._commands import CHAIN_HISTORY_COMMANDS
 
@@ -33,13 +33,14 @@ class LedgerUnit(SubjectUnit):
 
     def __init__(self, config: SubjectConfig) -> None:
         self._config = config
-        self._ledger: ActionChainLedger | None = None
         self._project_ledgers: dict[str, ActionChainLedger] = {}
         self._frozen_projects: set[str] = set()
         self._ctx: Any | None = None
         self._meta = UnitMeta(
             name="ledger",
-            provides=frozenset({LEDGER}),
+            # LEDGER 服务键保留但不再发布实例级实现（D6：chain 永远读取
+            # 目标 Project Root，不留全局库读后门）。
+            provides=frozenset(),
             routes=RouteSpec(commands=CHAIN_HISTORY_COMMANDS),
         )
 
@@ -47,28 +48,16 @@ class LedgerUnit(SubjectUnit):
     def meta(self) -> UnitMeta:
         return self._meta
 
-    @property
-    def service(self) -> ActionChainLedger:
-        if self._ledger is None:
-            raise RuntimeError("LedgerUnit has not been initialized.")
-        return self._ledger
-
     async def init(self, ctx: Any) -> None:
         self._ctx = ctx
-        # 读侧直连：db 路径从 SubjectConfig.core_db_path 派生（与 registry
-        # 构造 CoreUnit 的 persistence_factory 同源），无 requires。
-        self._ledger = ActionChainLedger(self._config.core_db_path)
-        ctx.provide(LEDGER.name, self._ledger)
 
     async def start(self) -> None:
-        await self.service.start()
+        pass
 
     async def stop(self) -> None:
         for ledger in self._project_ledgers.values():
             await ledger.stop()
         self._project_ledgers.clear()
-        if self._ledger is not None:
-            await self._ledger.stop()
 
     async def _ledger_for_project(self, project_id: str) -> ActionChainLedger:
         if not project_id:

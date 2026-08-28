@@ -51,13 +51,19 @@ async def test_unified_events_forward_to_observer_event_bus() -> None:
         await wait_active(fiber)
 
         # 事件统一：core 域（core:{type}）与 subject 域（event/{type}）双前缀直发
-        ctx.emit("core:agent_spawned", {"name": "agent-a"})
+        # Agent 作用域事件必须携带非空 project_id/agent_id，否则被转发守卫丢弃
+        ctx.emit(
+            "core:agent_spawned",
+            {"name": "agent-a", "project_id": "p1", "agent_id": "a1"},
+        )
         ctx.emit("event/task_created", {"task_id": "t-1"})
         ctx.emit(
             f"core:{EventType.HITL_REQUEST.value}",
             {
                 "promise_id": "promise-1",
                 "agent_name": "agent-a",
+                "project_id": "p1",
+                "agent_id": "a1",
                 "ability_name": "write_file",
                 "tool_args": {"file_path": "notes.md"},
             },
@@ -72,7 +78,12 @@ async def test_unified_events_forward_to_observer_event_bus() -> None:
             await asyncio.sleep(0.01)
 
         assert events[0]["type"] == "agent_spawned"
-        assert events[0]["payload"] == {"name": "agent-a", "agent_name": "agent-a"}
+        assert events[0]["payload"] == {
+            "name": "agent-a",
+            "agent_name": "agent-a",
+            "project_id": "p1",
+            "agent_id": "a1",
+        }
         assert events[1]["type"] == "task_created"
         assert events[1]["payload"]["task_id"] == "t-1"
         assert events[2]["type"] == EventType.HITL_REQUEST.value
@@ -90,12 +101,48 @@ async def test_observer_event_bus_service_adapter_publishes_wire_event() -> None
 
         adapter = ctx.get(OBSERVER_EVENT_BUS.name)
 
-        count = await adapter.publish("agent_terminated", {"name": "agent-a"})
+        count = await adapter.publish(
+            "agent_terminated",
+            {"name": "agent-a", "project_id": "p1", "agent_id": "a1"},
+        )
 
         assert count == 0
         events = unit.observer_event_bus.event_store.replay_since(0)
         assert events[-1]["type"] == "agent_terminated"
-        assert events[-1]["payload"] == {"name": "agent-a", "agent_name": "agent-a"}
+        assert events[-1]["payload"] == {
+            "name": "agent-a",
+            "agent_name": "agent-a",
+            "project_id": "p1",
+            "agent_id": "a1",
+        }
+
+
+async def test_unattributed_agent_scoped_events_are_dropped_and_counted() -> None:
+    """Agent 作用域事件缺失 project_id/agent_id → 丢弃 + 计数，不落库。"""
+    config = SubjectConfig()
+    unit = WebSocketObserverEndpointUnit(config)
+
+    async with Context() as ctx:
+        fiber = ctx.plugin(mount_unit(unit))
+        await wait_active(fiber)
+
+        # 无任何归属
+        ctx.emit("core:agent_terminated", {"name": "agent-a"})
+        # 只有 project_id，缺 agent_id
+        ctx.emit("core:action_chain_updated", {"project_id": "p1"})
+        # 非 Agent 作用域事件不受影响
+        ctx.emit("event/task_created", {"task_id": "t-1"})
+
+        events: list[dict[str, Any]] = []
+        for _ in range(200):
+            events = unit.observer_event_bus.event_store.replay_since(0)
+            if events:
+                break
+            await asyncio.sleep(0.01)
+
+        # 只剩非 Agent 作用域事件；被丢弃的事件永不落库
+        assert [e["type"] for e in events] == ["task_created"]
+        assert unit.observer_event_bus.dropped_unattributed_events == 2
 
 
 async def test_observer_preserves_project_agent_scope_for_subject_router() -> None:

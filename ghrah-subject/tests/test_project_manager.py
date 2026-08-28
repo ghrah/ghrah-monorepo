@@ -118,6 +118,8 @@ class _FakeHandle:
         self.terminated: list[str] = []
         self._list: list[dict[str, Any]] = []
         self.fail_spawn = False
+        # 非 None 时 terminate_agent 返回该错误（模拟运行侧失败/已不存在）
+        self.terminate_error: str | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -134,6 +136,8 @@ class _FakeHandle:
 
     async def terminate_agent(self, agent_id: str, agent_name: str) -> dict[str, Any]:
         self.terminated.append(agent_name)
+        if self.terminate_error is not None:
+            return {"success": False, "data": None, "error": self.terminate_error}
         return {"success": True, "data": None, "error": None}
 
     async def shutdown(self) -> None:
@@ -546,7 +550,8 @@ class TestProjectAddRemoveAgent:
             },
         )
         assert duplicate["success"] is False
-        assert "already exists in project" in duplicate["error"]
+        assert duplicate["error"] == "agent_name_exists"
+        assert "already exists in project" in duplicate["error_detail"]
 
     async def test_remove_agent(
         self, store: ProjectStore, tmp_path: Path
@@ -574,6 +579,175 @@ class TestProjectAddRemoveAgent:
         assert result["success"], result.get("error")
         assert result["data"]["project"]["agents"] == []
         assert events[-1][0] == "project_agent_removed"
+
+    async def test_add_agent_persists_runtime_diagnostics(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        """R4：运行诊断随定义持久化（error/running），重启后仍可读。"""
+        events: list[tuple[str, dict[str, Any]]] = []
+        transport = _FakeClusterTransport()
+        mgr = _make_manager(
+            store,
+            events=events,
+            default_locator=_default_locator(tmp_path),
+            cluster_transport=transport,
+        )
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        pid = project["project_id"]
+        cluster_id = project["cluster_ids"][0]
+
+        # 失败路径：spawn 失败 → runtime_status=error + 诊断原因
+        transport._handle.fail_spawn = True
+        failed = await mgr.handle_command(
+            "project_add_agent",
+            {"project_id": pid, "agent": {"name": "broken", "cluster_id": cluster_id}},
+        )
+        assert failed["success"]
+        assert failed["data"]["runtime_pending"] is True
+        stored = await store.get(pid)
+        assert stored is not None
+        broken = next(a for a in stored.agents if a.name == "broken")
+        assert broken.runtime_status == "error"
+        assert broken.runtime_error == "spawn unavailable"
+
+        # 成功路径：runtime_status=running、error 清空
+        transport._handle.fail_spawn = False
+        ok_add = await mgr.handle_command(
+            "project_add_agent",
+            {"project_id": pid, "agent": {"name": "healthy", "cluster_id": cluster_id}},
+        )
+        assert ok_add["success"]
+        stored = await store.get(pid)
+        assert stored is not None
+        healthy = next(a for a in stored.agents if a.name == "healthy")
+        assert healthy.runtime_status == "running"
+        assert healthy.runtime_error == ""
+
+        # 重启（同 db 新 store）后诊断仍可读
+        reopened = ProjectStore(store._db_path)
+        await reopened.start()
+        try:
+            reread = await reopened.get(pid)
+        finally:
+            await reopened.stop()
+        assert reread is not None
+        statuses = {a.name: a.runtime_status for a in reread.agents}
+        assert statuses == {"broken": "error", "healthy": "running"}
+
+    async def test_remove_agent_terminate_failure_keeps_definition(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        """回归 H1：terminate 失败 → 定义保留、无 removed 事件、稳定错误码。"""
+        events: list[tuple[str, dict[str, Any]]] = []
+        transport = _FakeClusterTransport()
+        mgr = _make_manager(
+            store,
+            events=events,
+            default_locator=_default_locator(tmp_path),
+            cluster_transport=transport,
+        )
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        added = await mgr.handle_command(
+            "project_add_agent",
+            {
+                "project_id": project["project_id"],
+                "agent": {"name": "a1", "cluster_id": project["cluster_ids"][0]},
+            },
+        )
+        transport._handle.terminate_error = "core transport down"
+        event_count = len(events)
+
+        result = await mgr.handle_command(
+            "project_remove_agent",
+            {
+                "project_id": project["project_id"],
+                "agent_id": added["data"]["agent_id"],
+                "agent_name": "a1",
+            },
+        )
+        assert result["success"] is False
+        assert result["error"] == "agent_terminate_failed"
+        assert result["error_detail"] == "core transport down"
+        # 定义仍在、无 removed 事件（宁可不删，不留游离 runtime）
+        stored = await store.get(project["project_id"])
+        assert stored is not None
+        assert [a.name for a in stored.agents] == ["a1"]
+        assert len(events) == event_count
+
+    async def test_remove_agent_terminate_absent_proceeds(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        """运行侧已无该 agent（identity mismatch）→ 视为已终止，继续删定义。"""
+        events: list[tuple[str, dict[str, Any]]] = []
+        transport = _FakeClusterTransport()
+        mgr = _make_manager(
+            store,
+            events=events,
+            default_locator=_default_locator(tmp_path),
+            cluster_transport=transport,
+        )
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        added = await mgr.handle_command(
+            "project_add_agent",
+            {
+                "project_id": project["project_id"],
+                "agent": {"name": "a1", "cluster_id": project["cluster_ids"][0]},
+            },
+        )
+        transport._handle.terminate_error = "agent_identity_mismatch"
+
+        result = await mgr.handle_command(
+            "project_remove_agent",
+            {
+                "project_id": project["project_id"],
+                "agent_id": added["data"]["agent_id"],
+                "agent_name": "a1",
+            },
+        )
+        assert result["success"], result.get("error")
+        assert result["data"]["project"]["agents"] == []
+        assert events[-1][0] == "project_agent_removed"
+
+    async def test_remove_agent_unmounted_cluster_skips_terminate(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        """cluster 未挂载（stopped 后）→ 无 runtime 可终止，直接删定义。"""
+
+        class _EmptyTransport(_FakeClusterTransport):
+            def has_cluster(self, cluster_id: str) -> bool:
+                return False
+
+        events: list[tuple[str, dict[str, Any]]] = []
+        transport = _EmptyTransport()
+        mgr = _make_manager(
+            store,
+            events=events,
+            default_locator=_default_locator(tmp_path),
+            cluster_transport=transport,
+        )
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        added = await mgr.handle_command(
+            "project_add_agent",
+            {
+                "project_id": project["project_id"],
+                "agent": {"name": "a1", "cluster_id": project["cluster_ids"][0]},
+            },
+        )
+        result = await mgr.handle_command(
+            "project_remove_agent",
+            {
+                "project_id": project["project_id"],
+                "agent_id": added["data"]["agent_id"],
+                "agent_name": "a1",
+            },
+        )
+        assert result["success"], result.get("error")
+        assert result["data"]["project"]["agents"] == []
+        assert transport._handle.terminated == []
 
 
 class TestProjectStatusTransitions:
