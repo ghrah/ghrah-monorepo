@@ -25,6 +25,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from ghrah.protocol.types import (
+    ListAgentsPayload,
     SendMessagePayload,
     SpawnAgentPayload,
     TerminateAgentPayload,
@@ -60,16 +61,28 @@ class CoreUnitHandle:
         self,
         registry: CoreClusterRegistry,
         cluster_id: str,
+        project_id: str,
+        project_root_locator: str,
         unit: Any,
     ) -> None:
         self._registry = registry
         self._cluster_id = cluster_id
+        self._project_id = project_id
+        self._project_root_locator = project_root_locator
         self._unit = unit
         self._alive = True
 
     @property
     def cluster_id(self) -> str:
         return self._cluster_id
+
+    @property
+    def project_id(self) -> str:
+        return self._project_id
+
+    @property
+    def project_root_locator(self) -> str:
+        return self._project_root_locator
 
     @property
     def is_connected(self) -> bool:
@@ -80,13 +93,23 @@ class CoreUnitHandle:
         """经进程内 CoreUnit 发 spawn_agent（manifest_ref 由 CoreUnit 内部解析）。"""
         if not self._alive:
             return {"success": False, "error": f"cluster '{self._cluster_id}' is shut down"}
+        if payload.project_id != self._project_id:
+            return {"success": False, "error": "cluster_project_mismatch"}
+        if payload.cluster_id and payload.cluster_id != self._cluster_id:
+            return {"success": False, "error": "cluster_id_mismatch"}
         return await self._dispatch("spawn_agent", payload.model_dump(mode="json"))
 
-    async def list_agents(self) -> list[dict[str, Any]]:
+    async def list_agents(self, project_id: str | None = None) -> list[dict[str, Any]]:
         """经进程内 CoreUnit 发 list_agents，返回 agent 信息列表。"""
         if not self._alive:
             return []
-        result = await self._dispatch("list_agents", {})
+        requested_project = project_id or self._project_id
+        if requested_project != self._project_id:
+            return []
+        result = await self._dispatch(
+            "list_agents",
+            ListAgentsPayload(project_id=requested_project).model_dump(mode="json"),
+        )
         if not result.get("success"):
             return []
         data = result.get("data")
@@ -98,23 +121,32 @@ class CoreUnitHandle:
                 return [a for a in agents if isinstance(a, dict)]
         return []
 
-    async def terminate_agent(self, agent_name: str) -> dict[str, Any]:
+    async def terminate_agent(self, agent_id: str, agent_name: str) -> dict[str, Any]:
         """经进程内 CoreUnit 发 terminate_agent，返回回执 dict。"""
         if not self._alive:
             return {"success": False, "error": f"cluster '{self._cluster_id}' is shut down"}
-        payload = TerminateAgentPayload(name=agent_name).model_dump(mode="json")
+        payload = TerminateAgentPayload(
+            project_id=self._project_id,
+            agent_id=agent_id,
+            name=agent_name,
+        ).model_dump(mode="json")
         return await self._dispatch("terminate_agent", payload)
 
     async def send_message(self, payload: SendMessagePayload) -> dict[str, Any]:
         """把消息定向发给本 cluster 的 CoreUnit，避免全局命令路由串群。"""
         if not self._alive:
             return {"success": False, "error": f"cluster '{self._cluster_id}' is shut down"}
+        if payload.project_id != self._project_id:
+            return {"success": False, "error": "cluster_project_mismatch"}
         return await self._dispatch("send_message", payload.model_dump(mode="json"))
 
     async def dispatch(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         """向本 cluster CoreUnit 定向派发内部命令。"""
         if not self._alive:
             return {"success": False, "error": f"cluster '{self._cluster_id}' is shut down"}
+        payload_project_id = str(payload.get("project_id") or "")
+        if payload_project_id and payload_project_id != self._project_id:
+            return {"success": False, "error": "cluster_project_mismatch"}
         return await self._dispatch(command, payload)
 
     async def shutdown(self) -> None:
@@ -131,12 +163,21 @@ class CoreUnitHandle:
 class _ClusterEntry:
     """一个已挂载 cluster 的登记项。"""
 
-    __slots__ = ("fiber", "handle", "unit")
+    __slots__ = ("fiber", "handle", "project_id", "project_root_locator", "unit")
 
-    def __init__(self, unit: Any, fiber: Fiber, handle: CoreUnitHandle) -> None:
+    def __init__(
+        self,
+        unit: Any,
+        fiber: Fiber,
+        handle: CoreUnitHandle,
+        project_id: str,
+        project_root_locator: str,
+    ) -> None:
         self.unit = unit
         self.fiber = fiber
         self.handle = handle
+        self.project_id = project_id
+        self.project_root_locator = project_root_locator
 
 
 class CoreClusterRegistry:
@@ -164,24 +205,47 @@ class CoreClusterRegistry:
         return list(self._clusters)
 
     async def ensure_cluster(
-        self, cluster_id: str, *, project_root_locator: str = ""
+        self,
+        cluster_id: str,
+        *,
+        project_id: str,
+        project_root_locator: str,
     ) -> CoreUnitHandle:
         """幂等挂载/取某 cluster 的 CoreUnit 实例。"""
+        if not project_id:
+            raise ValueError("project_id required")
+        if not project_root_locator:
+            raise ValueError("project_root_locator required")
         entry = self._clusters.get(cluster_id)
         if entry is not None:
+            if (
+                entry.project_id != project_id
+                or entry.project_root_locator != project_root_locator
+            ):
+                raise ValueError(
+                    f"cluster_owner_conflict: {cluster_id} belongs to "
+                    f"project {entry.project_id}"
+                )
             return entry.handle
         if self._ctx is None:
             raise RuntimeError("CoreClusterRegistry has not been bound to a Context.")
 
         try:
-            unit = self._unit_factory(cluster_id, project_root_locator)
+            unit = self._unit_factory(cluster_id, project_id, project_root_locator)
         except TypeError:
-            # 兼容现有测试/扩展的一参数 factory。
-            unit = self._unit_factory(cluster_id)
+            try:
+                unit = self._unit_factory(cluster_id, project_root_locator)
+            except TypeError:
+                # 兼容现有测试/扩展的一参数 factory。
+                unit = self._unit_factory(cluster_id)
         fiber = self._ctx.plugin(mount_unit(unit))
         await wait_active(fiber, timeout=10.0)
-        handle = CoreUnitHandle(self, cluster_id, unit)
-        self._clusters[cluster_id] = _ClusterEntry(unit, fiber, handle)
+        handle = CoreUnitHandle(
+            self, cluster_id, project_id, project_root_locator, unit
+        )
+        self._clusters[cluster_id] = _ClusterEntry(
+            unit, fiber, handle, project_id, project_root_locator
+        )
         logger.info("CoreClusterRegistry: mounted cluster '%s'", cluster_id)
         return handle
 
@@ -232,7 +296,9 @@ def default_core_unit_factory(
         create_core_unit,
     )
 
-    def factory(cluster_id: str, project_root_locator: str = "") -> Any:
+    def factory(
+        cluster_id: str, project_id: str, project_root_locator: str
+    ) -> Any:
         core_db_path = (
             str(ProjectPaths.from_locator(project_root_locator).action_chain_db_path)
             if project_root_locator
@@ -244,6 +310,7 @@ def default_core_unit_factory(
 
         core_config = CoreUnitConfig(
             cluster_id=cluster_id,
+            project_id=project_id,
             hitl_timeout=config.core.command_timeout,
             workspace_root=config.workspace_root,
             auto_approve_abilities=tuple(config.hitl_policy.auto_approve_abilities),

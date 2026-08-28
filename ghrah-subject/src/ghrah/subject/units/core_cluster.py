@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from ghrah.protocol.types import ProjectStatus
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.core_cluster.registry import (
     CoreClusterRegistry,
@@ -33,6 +34,38 @@ from ghrah.subject.runtime.service_keys import (
 from ghrah.subject.unit.base import CommandContext, RouteSpec, SubjectUnit, UnitMeta
 
 __all__ = ["CoreClusterRegistryUnit"]
+
+_PROJECT_AGENT_COMMANDS = frozenset(
+    {
+        "spawn_agent",
+        "terminate_agent",
+        "send_message",
+        "broadcast_message",
+        "register_ability",
+        "unregister_ability",
+        "list_agents",
+        "delegate",
+        "get_agent_info",
+        "session_create",
+        "session_switch",
+        "session_list",
+        "session_archive",
+        "session_delete",
+    }
+)
+
+_TARGET_FIELDS = {
+    "terminate_agent": "name",
+    "send_message": "target",
+    "register_ability": "agent_name",
+    "unregister_ability": "agent_name",
+    "get_agent_info": "name",
+    "session_create": "agent_name",
+    "session_switch": "agent_name",
+    "session_list": "agent_name",
+    "session_archive": "agent_name",
+    "session_delete": "agent_name",
+}
 
 
 class CoreClusterRegistryUnit(SubjectUnit):
@@ -49,11 +82,12 @@ class CoreClusterRegistryUnit(SubjectUnit):
         # 注入 CoreUnitConfig.manifest_store，对齐 Core 独立库 runner 范式）。
         self._unit_factory = unit_factory
         self._registry: CoreClusterRegistry | None = None
+        self._ctx: Any | None = None
         self._meta = UnitMeta(
             name="core_cluster_registry",
             requires=frozenset({MANIFEST_STORE, WORKSPACE_SERVICE, SANDBOX_EXECUTOR}),
             provides=frozenset({CORE_CLUSTER_REGISTRY}),
-            routes=RouteSpec(commands=frozenset()),
+            routes=RouteSpec(commands=_PROJECT_AGENT_COMMANDS),
         )
 
     @property
@@ -67,6 +101,7 @@ class CoreClusterRegistryUnit(SubjectUnit):
         return self._registry
 
     async def init(self, ctx: Any) -> None:
+        self._ctx = ctx
         store = ctx.get(MANIFEST_STORE.name)
         if self._unit_factory is None:
             # 生产默认工厂：注入 manifest_store（从 ctx 取），
@@ -93,4 +128,212 @@ class CoreClusterRegistryUnit(SubjectUnit):
         payload: dict[str, Any],
         cmd_ctx: CommandContext,
     ) -> dict[str, Any]:
-        return {"success": False, "data": None, "error": "core_cluster_registry has no commands"}
+        if command not in _PROJECT_AGENT_COMMANDS:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"unknown project agent command: {command}",
+            }
+        try:
+            project, manager = await self._project(payload)
+            if command == "spawn_agent":
+                return await self._spawn(manager, project, payload)
+            if command == "list_agents":
+                return await self._list(project)
+            if command == "broadcast_message":
+                return await self._broadcast(project, payload)
+            if command == "delegate":
+                return await self._delegate(project, payload)
+            agent = self._resolve_agent(project, payload, _TARGET_FIELDS[command])
+            handle = await self.service.ensure_cluster(
+                str(agent["cluster_id"]),
+                project_id=str(project["project_id"]),
+                project_root_locator=str(project["project_root_locator"]),
+            )
+            core_payload = dict(payload)
+            core_payload["project_id"] = project["project_id"]
+            core_payload["agent_id"] = agent["agent_id"]
+            core_payload[_TARGET_FIELDS[command]] = agent["name"]
+            result = await handle.dispatch(command, core_payload)
+            if result.get("success") and isinstance(result.get("data"), dict):
+                result["data"].update(
+                    {
+                        "project_id": project["project_id"],
+                        "agent_id": agent["agent_id"],
+                        "agent_name": agent["name"],
+                        "cluster_id": agent["cluster_id"],
+                    }
+                )
+            return result
+        except ValueError as exc:
+            return {"success": False, "data": None, "error": str(exc)}
+
+    async def _project(
+        self, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any], Any]:
+        project_id = str(payload.get("project_id") or "")
+        if not project_id:
+            raise ValueError("project_id required")
+        if self._ctx is None:
+            raise ValueError("project_manager unavailable")
+        try:
+            manager = self._ctx.get("project_manager")
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError("project_manager unavailable") from exc
+        result = await manager.handle_command("project_get", {"project_id": project_id})
+        project = (result.get("data") or {}).get("project") if result.get("success") else None
+        if not project:
+            raise ValueError(result.get("error") or f"project not found: {project_id}")
+        if project.get("archived_at") or project.get("deleted_at"):
+            raise ValueError("resource_archived")
+        return project, manager
+
+    @staticmethod
+    def _resolve_agent(
+        project: dict[str, Any], payload: dict[str, Any], name_field: str
+    ) -> dict[str, Any]:
+        agent_id = str(payload.get("agent_id") or "")
+        if not agent_id:
+            raise ValueError("agent_id required")
+        name = str(payload.get(name_field) or "")
+        matches = [
+            agent
+            for agent in project.get("agents") or []
+            if agent.get("agent_id") == agent_id
+        ]
+        if len(matches) != 1:
+            raise ValueError(f"agent not found in project: {agent_id}")
+        agent = matches[0]
+        if name and agent.get("name") != name:
+            raise ValueError("agent_identity_mismatch")
+        return agent
+
+    async def _spawn(
+        self, manager: Any, project: dict[str, Any], payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        if project.get("status") != ProjectStatus.ACTIVE.value:
+            raise ValueError("project_not_active")
+        config = payload.get("config") or {}
+        name = str(config.get("name") or "")
+        if not name:
+            raise ValueError("config.name required")
+        cluster_id = str(payload.get("cluster_id") or "")
+        cluster_ids = [str(value) for value in project.get("cluster_ids") or []]
+        if not cluster_id:
+            if len(cluster_ids) != 1:
+                raise ValueError("cluster_id required")
+            cluster_id = cluster_ids[0]
+        if cluster_id not in cluster_ids:
+            raise ValueError("cluster_project_mismatch")
+        result = await manager.handle_command(
+            "project_add_agent",
+            {
+                "project_id": project["project_id"],
+                "expected_version": project["version"],
+                "agent": {
+                    "agent_id": str(config.get("agent_id") or ""),
+                    "name": name,
+                    "cluster_id": cluster_id,
+                    "manifest_ref": str(payload.get("manifest_ref") or ""),
+                    "system_prompt": str(config.get("system_prompt") or ""),
+                    "abilities": [
+                        str(item.get("ability_type") or "")
+                        for item in payload.get("abilities") or []
+                        if item.get("ability_type")
+                    ]
+                    or None,
+                },
+            },
+        )
+        if not result.get("success"):
+            return result
+        data = result.get("data") or {}
+        return {
+            "success": True,
+            "data": {
+                "name": data.get("agent_name", name),
+                "agent_id": data.get("agent_id", ""),
+                "project_id": project["project_id"],
+                "cluster_id": cluster_id,
+                "runtime_pending": bool(data.get("runtime_pending")),
+                "runtime_error": data.get("runtime_error"),
+            },
+            "error": None,
+        }
+
+    async def _list(self, project: dict[str, Any]) -> dict[str, Any]:
+        running: dict[str, dict[str, Any]] = {}
+        for cluster_id in project.get("cluster_ids") or []:
+            if not self.service.has_cluster(str(cluster_id)):
+                continue
+            handle = self.service.get_handle(str(cluster_id))
+            for item in await handle.list_agents(str(project["project_id"])):
+                identity = str(item.get("agent_id") or "")
+                if identity:
+                    running[identity] = item
+        agents = []
+        for spec in project.get("agents") or []:
+            item = dict(spec)
+            runtime = running.get(str(spec.get("agent_id") or ""))
+            item["runtime_state"] = (
+                runtime.get("state", "running") if runtime is not None else "stopped"
+            )
+            if runtime is not None:
+                item.update(runtime)
+            item.update(
+                {
+                    "project_id": project["project_id"],
+                    "cluster_id": spec.get("cluster_id", ""),
+                    "agent_id": spec.get("agent_id", ""),
+                    "name": spec.get("name", ""),
+                }
+            )
+            agents.append(item)
+        return {"success": True, "data": {"agents": agents}, "error": None}
+
+    async def _broadcast(
+        self, project: dict[str, Any], payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        responses: dict[str, Any] = {}
+        cluster_ids = {
+            str(agent.get("cluster_id") or "") for agent in project.get("agents") or []
+        }
+        for cluster_id in sorted(cluster_ids - {""}):
+            handle = await self.service.ensure_cluster(
+                cluster_id,
+                project_id=str(project["project_id"]),
+                project_root_locator=str(project["project_root_locator"]),
+            )
+            result = await handle.dispatch(
+                "broadcast_message",
+                {**payload, "project_id": project["project_id"]},
+            )
+            responses[cluster_id] = result
+        return {"success": True, "data": {"clusters": responses}, "error": None}
+
+    async def _delegate(
+        self, project: dict[str, Any], payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        from_id = str(payload.get("from_agent_id") or "")
+        to_id = str(payload.get("to_agent_id") or "")
+        agents = project.get("agents") or []
+        source = next((agent for agent in agents if agent.get("agent_id") == from_id), None)
+        target = next((agent for agent in agents if agent.get("agent_id") == to_id), None)
+        if source is None or target is None:
+            raise ValueError("agent_project_mismatch")
+        if source.get("cluster_id") != target.get("cluster_id"):
+            raise ValueError("cross_cluster_delegate_unsupported")
+        handle = await self.service.ensure_cluster(
+            str(source["cluster_id"]),
+            project_id=str(project["project_id"]),
+            project_root_locator=str(project["project_root_locator"]),
+        )
+        return await handle.dispatch(
+            "delegate",
+            {
+                **payload,
+                "project_id": project["project_id"],
+                "from_agent": source["name"],
+                "to_agent": target["name"],
+            },
+        )

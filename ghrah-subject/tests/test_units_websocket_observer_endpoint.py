@@ -98,54 +98,14 @@ async def test_observer_event_bus_service_adapter_publishes_wire_event() -> None
         assert events[-1]["payload"] == {"name": "agent-a", "agent_name": "agent-a"}
 
 
-async def test_observer_scoped_agent_command_routes_to_uuid_cluster() -> None:
-    class ProjectManagerStub:
-        async def handle_command(
-            self, command: str, payload: dict[str, Any]
-        ) -> dict[str, Any]:
-            return {
-                "success": True,
-                "data": {
-                    "project": {
-                        "project_id": "p1",
-                        "project_root_locator": "file:///tmp/p1",
-                        "agents": [
-                            {"agent_id": "a" * 32, "name": "planner", "cluster_id": "c1"},
-                            {"agent_id": "b" * 32, "name": "planner", "cluster_id": "c2"},
-                        ],
-                    }
-                },
-            }
-
-    class HandleStub:
+async def test_observer_preserves_project_agent_scope_for_subject_router() -> None:
+    class ContextStub:
         def __init__(self) -> None:
             self.calls: list[tuple[str, dict[str, Any]]] = []
 
-        async def dispatch(
-            self, command: str, payload: dict[str, Any]
-        ) -> dict[str, Any]:
-            self.calls.append((command, payload))
+        async def serial(self, topic: str, payload: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append((topic, payload))
             return {"success": True, "data": {"routed": True}, "error": None}
-
-    class RegistryStub:
-        def __init__(self) -> None:
-            self.handles = {"c1": HandleStub(), "c2": HandleStub()}
-
-        async def ensure_cluster(
-            self, cluster_id: str, *, project_root_locator: str = ""
-        ) -> HandleStub:
-            return self.handles[cluster_id]
-
-    class ContextStub:
-        def __init__(self) -> None:
-            self.registry = RegistryStub()
-
-        def get(self, name: str) -> Any:
-            if name == "project_manager":
-                return ProjectManagerStub()
-            if name == "core_cluster_registry":
-                return self.registry
-            raise KeyError(name)
 
     ctx = ContextStub()
     adapter = _EngineDispatchAdapter(ctx)
@@ -160,7 +120,14 @@ async def test_observer_scoped_agent_command_routes_to_uuid_cluster() -> None:
     )
 
     assert result["success"] is True
-    assert ctx.registry.handles["c1"].calls == []
-    assert ctx.registry.handles["c2"].calls == [
-        ("send_message", {"target": "planner", "content": "resume"})
+    assert ctx.calls == [
+        (
+            "command/send_message",
+            {
+                "project_id": "p1",
+                "agent_id": "b" * 32,
+                "target": "planner",
+                "content": "resume",
+            },
+        )
     ]

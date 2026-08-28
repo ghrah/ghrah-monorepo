@@ -55,6 +55,9 @@ abilities:
   - type: conversation
 """
 
+PROJECT_ID = "project-1"
+PROJECT_ROOT = "file:///tmp/project-1"
+
 
 class _FakeCoreUnit(SubjectUnit):
     """假 CoreUnit：记录命令并返回成功回执。"""
@@ -157,7 +160,7 @@ class TestCoreClusterRegistryUnit:
     async def test_meta_shape(self, tmp_path: Path) -> None:
         unit = CoreClusterRegistryUnit(_config(tmp_path))
         assert unit.meta.name == "core_cluster_registry"
-        assert unit.meta.routes.commands == frozenset()
+        assert {"spawn_agent", "list_agents", "send_message"} <= unit.meta.routes.commands
         assert {k.name for k in unit.meta.requires} == {
             "manifest_store",
             "workspace_service",
@@ -172,13 +175,17 @@ class TestCoreClusterRegistryUnit:
 
         try:
             assert not registry.has_cluster("default")
-            handle = await registry.ensure_cluster("default")
+            handle = await registry.ensure_cluster(
+                "default", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
             assert handle.is_connected
             assert registry.has_cluster("default")
             assert by_id("default").stopped is False
 
             # 幂等：同 cluster 返回同一 handle、不新建实例
-            again = await registry.ensure_cluster("default")
+            again = await registry.ensure_cluster(
+                "default", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
             assert again is handle
             assert len(created) == 1
 
@@ -197,9 +204,15 @@ class TestCoreClusterRegistryUnit:
             return next(u for u in created if u.cluster_id == cluster_id)
 
         try:
-            handle = await registry.ensure_cluster("default")
+            handle = await registry.ensure_cluster(
+                "default", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
             payload = SpawnAgentPayload(
-                config=AgentConfigPayload(name="coder-1", system_prompt=""),
+                project_id=PROJECT_ID,
+                cluster_id="default",
+                config=AgentConfigPayload(
+                    name="coder-1", agent_id="agent-1", system_prompt=""
+                ),
                 manifest_ref="ghrah.coder",
             )
             result = await handle.spawn_agent(payload)
@@ -217,10 +230,12 @@ class TestCoreClusterRegistryUnit:
     async def test_list_and_terminate_shapes(self, tmp_path: Path) -> None:
         ctx, _, registry, _ = await _boot(tmp_path)
         try:
-            handle = await registry.ensure_cluster("default")
+            handle = await registry.ensure_cluster(
+                "default", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
             agents = await handle.list_agents()
             assert agents == [{"name": "coder"}]
-            result = await handle.terminate_agent("coder")
+            result = await handle.terminate_agent("agent-1", "coder")
             assert result["success"]
         finally:
             await registry.stop()
@@ -233,7 +248,9 @@ class TestCoreClusterRegistryUnit:
             return next(u for u in created if u.cluster_id == cluster_id)
 
         try:
-            handle = await registry.ensure_cluster("default")
+            handle = await registry.ensure_cluster(
+                "default", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
             await registry.shutdown_cluster("default")
             assert not handle.is_connected
             assert by_id("default").stopped is True
@@ -241,15 +258,41 @@ class TestCoreClusterRegistryUnit:
 
             # 关闭后命令走失败回执（不抛）
             spawn_result = await handle.spawn_agent(
-                SpawnAgentPayload(config=AgentConfigPayload(name="x", system_prompt=""))
+                SpawnAgentPayload(
+                    project_id=PROJECT_ID,
+                    cluster_id="default",
+                    config=AgentConfigPayload(
+                        name="x", agent_id="agent-x", system_prompt=""
+                    ),
+                )
             )
             assert spawn_result["success"] is False
             assert await handle.list_agents() == []
 
             # 重挂：新实例
-            new_handle = await registry.ensure_cluster("default")
+            new_handle = await registry.ensure_cluster(
+                "default", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
             assert new_handle is not handle
             assert new_handle.is_connected
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+    async def test_cluster_cannot_be_reused_by_another_project(
+        self, tmp_path: Path
+    ) -> None:
+        ctx, _, registry, _ = await _boot(tmp_path)
+        try:
+            await registry.ensure_cluster(
+                "shared", project_id="project-a", project_root_locator="file:///tmp/a"
+            )
+            with pytest.raises(ValueError, match="cluster_owner_conflict"):
+                await registry.ensure_cluster(
+                    "shared",
+                    project_id="project-b",
+                    project_root_locator="file:///tmp/b",
+                )
         finally:
             await registry.stop()
             await ctx.__aexit__(None, None, None)
@@ -257,8 +300,12 @@ class TestCoreClusterRegistryUnit:
     async def test_unit_stop_disposes_all_clusters(self, tmp_path: Path) -> None:
         ctx, unit, registry, created = await _boot(tmp_path)
         try:
-            await registry.ensure_cluster("default")
-            await registry.ensure_cluster("secondary")
+            await registry.ensure_cluster(
+                "default", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
+            await registry.ensure_cluster(
+                "secondary", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
             assert len(created) == 2
         finally:
             await unit.stop()
@@ -280,8 +327,10 @@ class TestRealCoreUnitMultiCluster:
     async def test_two_real_core_units_coexist_and_isolate(self, tmp_path: Path) -> None:
         from ghrah.core.unit import CoreUnitConfig, create_core_unit
 
-        def factory(cluster_id: str, project_root_locator: str = "") -> Any:
-            return create_core_unit(CoreUnitConfig(cluster_id=cluster_id))
+        def factory(cluster_id: str, project_id: str, project_root_locator: str) -> Any:
+            return create_core_unit(
+                CoreUnitConfig(cluster_id=cluster_id, project_id=project_id)
+            )
 
         config = _config(tmp_path)
         unit = CoreClusterRegistryUnit(config, unit_factory=factory)
@@ -298,19 +347,31 @@ class TestRealCoreUnitMultiCluster:
             registry = ctx.get(CORE_CLUSTER_REGISTRY.name)
 
             # 两个真实 CoreUnit 实例挂载不冲突（provide 删除前必炸）
-            handle_a = await registry.ensure_cluster("alpha")
-            handle_b = await registry.ensure_cluster("beta")
+            handle_a = await registry.ensure_cluster(
+                "alpha", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
+            handle_b = await registry.ensure_cluster(
+                "beta", project_id=PROJECT_ID, project_root_locator=PROJECT_ROOT
+            )
             assert handle_a.is_connected and handle_b.is_connected
 
             spawn_a = await handle_a.spawn_agent(
                 SpawnAgentPayload(
-                    config=AgentConfigPayload(name="agent-a", system_prompt="x")
+                    project_id=PROJECT_ID,
+                    cluster_id="alpha",
+                    config=AgentConfigPayload(
+                        name="agent-a", agent_id="agent-a-id", system_prompt="x"
+                    ),
                 )
             )
             assert spawn_a["success"], spawn_a.get("error")
             spawn_b = await handle_b.spawn_agent(
                 SpawnAgentPayload(
-                    config=AgentConfigPayload(name="agent-b", system_prompt="x")
+                    project_id=PROJECT_ID,
+                    cluster_id="beta",
+                    config=AgentConfigPayload(
+                        name="agent-b", agent_id="agent-b-id", system_prompt="x"
+                    ),
                 )
             )
             assert spawn_b["success"], spawn_b.get("error")

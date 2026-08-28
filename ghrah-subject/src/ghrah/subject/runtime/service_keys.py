@@ -161,10 +161,10 @@ class ClusterHandle(Protocol):
     async def spawn_agent(self, payload: Any) -> dict[str, Any]:
         """发 spawn_agent，返回 command_result dict。"""
 
-    async def list_agents(self) -> list[dict[str, Any]]:
+    async def list_agents(self, project_id: str | None = None) -> list[dict[str, Any]]:
         """发 list_agents，返回 agent 信息列表。"""
 
-    async def terminate_agent(self, agent_name: str) -> dict[str, Any]:
+    async def terminate_agent(self, agent_id: str, agent_name: str) -> dict[str, Any]:
         """发 terminate_agent，返回 command_result dict。"""
 
     async def send_message(self, payload: Any) -> dict[str, Any]:
@@ -175,7 +175,11 @@ class CoreClusterRegistryService(Protocol):
     """cluster = CoreUnit 实例注册表契约（进程内运行时挂载/卸载）。"""
 
     async def ensure_cluster(
-        self, cluster_id: str, *, project_root_locator: str = ""
+        self,
+        cluster_id: str,
+        *,
+        project_id: str,
+        project_root_locator: str,
     ) -> ClusterHandle:
         """幂等挂载/取某 cluster 的 CoreUnit 实例 handle。"""
 

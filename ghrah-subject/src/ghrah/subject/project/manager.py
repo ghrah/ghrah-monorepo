@@ -26,6 +26,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from ghrah.protocol.types import (
+    AbilityDefinitionPayload,
     AgentConfigPayload,
     ProjectAddAgentPayload,
     ProjectCreatePayload,
@@ -201,8 +202,10 @@ class ProjectManager:
             event_type,
             {
                 "project": record.to_wire(),
+                "project_id": record.project_id,
                 "agent_name": agent.name,
                 "agent_id": agent.agent_id,
+                "cluster_id": agent.cluster_id,
             },
         )
 
@@ -311,16 +314,14 @@ class ProjectManager:
         return canonical_file_locator(value)
 
     def _validate_agent(self, agent: AgentSpec, project: ProjectRecord) -> None:
-        """agent_id project 内唯一 + name cluster 内唯一 + 归属/授权校验。"""
+        """agent_id/name 在 Project 内唯一 + cluster 归属/授权校验。"""
         if agent.cluster_id not in project.cluster_ids:
             raise ValueError(f"agent {agent.name!r} cluster_id {agent.cluster_id!r} not in project")
         for existing in project.agents:
             if agent.agent_id and existing.agent_id == agent.agent_id:
                 raise ValueError(f"agent_id {agent.agent_id!r} already exists in project")
-            if existing.name == agent.name and existing.cluster_id == agent.cluster_id:
-                raise ValueError(
-                    f"agent {agent.name!r} already exists in cluster {agent.cluster_id!r}"
-                )
+            if existing.name == agent.name:
+                raise ValueError(f"agent {agent.name!r} already exists in project")
         validate_path_grants_non_overlapping(agent, project.workspaces)
 
     # ─── 命令 handlers ───
@@ -398,7 +399,9 @@ class ProjectManager:
             stored = True
             cluster_attempted = True
             await self._cluster_transport.ensure_cluster(
-                cluster_id, project_root_locator=record.project_root_locator
+                cluster_id,
+                project_id=record.project_id,
+                project_root_locator=record.project_root_locator,
             )
         except Exception as exc:  # noqa: BLE001 — 创建事务在此统一补偿
             if cluster_attempted:
@@ -707,8 +710,9 @@ class ProjectManager:
                 agent.name,
             )
         # active 且 cluster 缺该 agent 则 spawn
-        if updated.status == ProjectStatus.ACTIVE and migration_error is None:
-            await self._ensure_agent_spawned(
+        runtime_error = migration_error
+        if updated.status == ProjectStatus.ACTIVE and runtime_error is None:
+            runtime_error = await self._ensure_agent_spawned(
                 agent, updated.project_id, updated.project_root_locator
             )
         await self._emit_agent("project_agent_added", updated, agent)
@@ -717,22 +721,24 @@ class ProjectManager:
                 "project": updated.to_wire(),
                 "agent_name": agent.name,
                 "agent_id": agent.agent_id,
-                "runtime_pending": migration_error is not None,
-                "runtime_error": migration_error,
+                "runtime_pending": runtime_error is not None,
+                "runtime_error": runtime_error,
             }
         )
 
     async def _ensure_agent_spawned(
         self, agent: AgentSpec, project_id: str, project_root_locator: str
-    ) -> None:
-        """若 cluster 缺该 agent 则 spawn（MVP：不预检 list，直接 spawn，幂等由 Core 保证）。"""
+    ) -> str | None:
+        """启动 desired Agent；失败保留定义并返回可诊断 pending 原因。"""
         try:
             handle = await self._cluster_transport.ensure_cluster(
-                agent.cluster_id, project_root_locator=project_root_locator
+                agent.cluster_id,
+                project_id=project_id,
+                project_root_locator=project_root_locator,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("add_agent: ensure_cluster %s failed: %s", agent.cluster_id, exc)
-            return
+            return str(exc)
         spawn_payload = SpawnAgentPayload(
             project_id=project_id,
             cluster_id=agent.cluster_id,
@@ -741,15 +747,25 @@ class ProjectManager:
                 agent_id=agent.agent_id,
                 system_prompt=agent.system_prompt or "",
             ),
-            abilities=None,
+            abilities=(
+                [
+                    AbilityDefinitionPayload(ability_type=name, params={})
+                    for name in agent.abilities
+                ]
+                if agent.abilities
+                else None
+            ),
             manifest_ref=agent.manifest_ref or None,
         )
         try:
             result = await handle.spawn_agent(spawn_payload)
             if not result.get("success"):
                 logger.warning("add_agent: spawn %s rejected: %s", agent.name, result.get("error"))
+                return str(result.get("error") or "spawn rejected")
         except Exception as exc:  # noqa: BLE001
             logger.warning("add_agent: spawn %s failed: %s", agent.name, exc)
+            return str(exc)
+        return None
 
     async def _handle_remove_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectRemoveAgentPayload.model_validate(payload)
@@ -789,7 +805,7 @@ class ProjectManager:
         if self._cluster_transport.has_cluster(target.cluster_id):
             try:
                 handle = self._cluster_transport.get_handle(target.cluster_id)
-                await handle.terminate_agent(target.name)
+                await handle.terminate_agent(target.agent_id, target.name)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("remove_agent: terminate %s failed: %s", p.agent_name, exc)
         await self._emit_agent("project_agent_removed", updated, target)
@@ -823,9 +839,14 @@ class ProjectManager:
         assert existing is not None
         exp = expected_version if expected_version is not None else existing.version
         # 校验 task 存在（经 task_get 命令）
-        task_result = await self._task_mgr.handle_command("task_get", {"task_id": task_id})
+        task_result = await self._task_mgr.handle_command(
+            "task_get", {"task_id": task_id, "project_id": project_id}
+        )
         if not task_result.get("success"):
             return _err(f"task not found: {task_id}")
+        task = (task_result.get("data") or {}).get("task") or {}
+        if task.get("project_id") != project_id:
+            return _err("task_project_mismatch")
 
         def mutator(r: ProjectRecord) -> ProjectRecord:
             task_ids = list(r.task_ids)
@@ -903,6 +924,7 @@ class ProjectManager:
                 try:
                     await self._cluster_transport.ensure_cluster(
                         cluster_id,
+                        project_id=existing.project_id,
                         project_root_locator=existing.project_root_locator,
                     )
                 except Exception as exc:  # noqa: BLE001
@@ -952,7 +974,9 @@ class ProjectManager:
             stored = True
             cluster_attempted = True
             await self._cluster_transport.ensure_cluster(
-                cluster_id, project_root_locator=record.project_root_locator
+                cluster_id,
+                project_id=record.project_id,
+                project_root_locator=record.project_root_locator,
             )
         except Exception:
             if cluster_attempted:
@@ -987,11 +1011,13 @@ class ProjectManager:
             raise ValueError(str(error["error"]))
         assert existing is not None
         handle = await self._cluster_transport.ensure_cluster(
-            cluster_id, project_root_locator=existing.project_root_locator
+            cluster_id,
+            project_id=existing.project_id,
+            project_root_locator=existing.project_root_locator,
         )
         agents_info: list[dict[str, Any]] = []
         try:
-            agents_info = await handle.list_agents()
+            agents_info = await handle.list_agents(existing.project_id)
         except Exception as exc:  # noqa: BLE001
             logger.warning("adopt_existing_agents: list_agents failed: %s", exc)
             return []
@@ -1012,9 +1038,9 @@ class ProjectManager:
             specs.append(spec)
 
         def mutator(r: ProjectRecord) -> ProjectRecord:
-            # 去重：已有同名（同 cluster）不重复加入
-            existing_names = {(a.name, a.cluster_id) for a in r.agents}
-            new_agents = [s for s in specs if (s.name, s.cluster_id) not in existing_names]
+            # Project 内 name 唯一；跨 Project 可复用同名。
+            existing_names = {a.name for a in r.agents}
+            new_agents = [s for s in specs if s.name not in existing_names]
             return r.model_copy(update={"agents": [*r.agents, *new_agents]})
 
         await self._store.update(project_id, existing.version, mutator)

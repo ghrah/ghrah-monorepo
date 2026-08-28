@@ -17,13 +17,13 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from ghrah.protocol.types import AgentConfigPayload, SpawnAgentPayload
 from ouroboros import Context  # type: ignore[import-untyped]
 
 from ghrah.subject.config import ProjectConfig, RecoveryConfig, SubjectConfig
 from ghrah.subject.ledger.chain import ActionChainLedger
 from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.runtime.assembly import assemble_subject
+from ghrah.subject.runtime.ouroboros_bridge import bridge_command
 from ghrah.subject.runtime.service_keys import RECONCILIATION_SERVICE
 from ghrah.subject.server.app import create_app
 
@@ -101,19 +101,23 @@ class TestAssembleSubject:
 
             # 聚合裁决 D-C：spawn 的 agent 链落 Core sqlite（core_db_path），
             # 与 ledger 读侧投影同源（persistence_factory 注入验证）
-            spawn = await handle.spawn_agent(
-                SpawnAgentPayload(
-                    config=AgentConfigPayload(name="ledger-probe", system_prompt="x"),
-                )
+            project_result = await ctx.get("project_manager").handle_command(
+                "project_list", {}
+            )
+            project = project_result["data"]["projects"][0]
+            spawn = await bridge_command(
+                ctx,
+                "spawn_agent",
+                {
+                    "project_id": project["project_id"],
+                    "cluster_id": "default",
+                    "config": {"name": "ledger-probe", "system_prompt": "x"},
+                },
             )
             assert spawn["success"], spawn.get("error")
             supervisor = handle._unit.supervisor
             actor = supervisor._registry.get_info("ledger-probe").actor_handle
             assert actor._context_manager.persistence is not None
-            project_result = await ctx.get("project_manager").handle_command(
-                "project_list", {}
-            )
-            project = project_result["data"]["projects"][0]
             action_chain_db_path = ProjectPaths.from_locator(
                 project["project_root_locator"]
             ).action_chain_db_path
@@ -126,10 +130,10 @@ class TestAssembleSubject:
             # 行当场落库（非旧「首次 save_node 才登记」语义）
             ledger = ActionChainLedger(action_chain_db_path)
             await ledger.start()
-            history = await ledger.get_chain_history("ledger-probe")
+            history = await ledger.get_chain_history(spawn["data"]["agent_id"])
             assert len(history) == 1
             assert history[0].parent_id is None
-            assert await ledger.list_agents() == ["ledger-probe"]
+            assert await ledger.list_agents() == [spawn["data"]["agent_id"]]
             await ledger.stop()
 
     async def test_reconcile_disabled_leaves_no_report(self, tmp_path: Path) -> None:

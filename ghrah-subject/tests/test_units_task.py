@@ -200,3 +200,48 @@ async def test_archived_project_freezes_task_root_until_restore(tmp_path: Path) 
         assert _data(
             await _dispatch(ctx, "task_get", {"task_id": task["task_id"]})
         )["task"]["task_id"] == task["task_id"]
+
+
+async def test_task_rejects_agent_owned_by_another_project(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    async with Context() as ctx:
+        await mount_builtin_units(ctx, config, profile="full")
+        projects = []
+        for name in ("one", "two"):
+            projects.append(
+                _data(
+                    await _dispatch(
+                        ctx,
+                        "project_create",
+                        {"name": name, "writable_workspaces": []},
+                    )
+                )["project"]
+            )
+        spawned = _data(
+            await _dispatch(
+                ctx,
+                "spawn_agent",
+                {
+                    "project_id": projects[0]["project_id"],
+                    "config": {"name": "owned-by-one", "system_prompt": "test"},
+                },
+            )
+        )
+        task = _data(
+            await _dispatch(
+                ctx,
+                "task_create",
+                {"title": "two task", "project_id": projects[1]["project_id"]},
+            )
+        )["task"]
+        rejected = await _dispatch(
+            ctx,
+            "task_assign",
+            {
+                "task_id": task["task_id"],
+                "agent_id": spawned["agent_id"],
+                "agent_name": "owned-by-one",
+            },
+        )
+        assert rejected["success"] is False
+        assert rejected["error"] == "agent_project_mismatch"

@@ -75,17 +75,19 @@ async def _make_project(ctx: Context, name: str = "demo") -> str:
     ]["project_id"]
 
 
-async def _spawn_agent_with_send(ctx: Context, name: str) -> None:
+async def _spawn_agent_with_send(ctx: Context, project_id: str, name: str) -> str:
     """spawn 一个带 ``send`` ability 的 agent（CoreUnit 经 AbilityRegistry 物化）。"""
     result = await bridge_command(
         ctx,
         "spawn_agent",
         {
+            "project_id": project_id,
             "config": {"name": name, "system_prompt": "test", "max_iterations": 1},
             "abilities": [{"ability_type": "send", "params": {}}],
         },
     )
     assert result["success"], result.get("error")
+    return str(result["data"]["agent_id"])
 
 
 class TestRoomRealEndToEnd:
@@ -109,7 +111,7 @@ class TestRoomRealEndToEnd:
                 room_ids.append(room["room_id"])
 
             arch = room_ids[0]
-            await _spawn_agent_with_send(ctx, "architect")
+            await _spawn_agent_with_send(ctx, project_id, "architect")
             join = await bridge_command(
                 ctx,
                 "room_join",
@@ -163,7 +165,7 @@ class TestRoomRealEndToEnd:
                     ctx, "room_create", {"project_id": project_id, "name": "arch"}
                 )
             )["room"]
-            await _spawn_agent_with_send(ctx, "architect")
+            await _spawn_agent_with_send(ctx, project_id, "architect")
             await bridge_command(
                 ctx,
                 "room_join",
@@ -259,7 +261,14 @@ class TestRoomRealEndToEnd:
             spawn = await bridge_command(
                 ctx,
                 "spawn_agent",
-                {"config": {"name": "planner", "system_prompt": "test", "max_iterations": 1}},
+                {
+                    "project_id": project_id,
+                    "config": {
+                        "name": "planner",
+                        "system_prompt": "test",
+                        "max_iterations": 1,
+                    },
+                },
             )
             assert spawn["success"], spawn.get("error")
 
@@ -282,7 +291,7 @@ class TestRoomRealEndToEnd:
                 agent_rows = [
                     row[0] for row in conn.execute("SELECT agent_name FROM agents")
                 ]
-                assert agent_rows == ["planner"]
+                assert agent_rows == [spawn["data"]["agent_id"]]
             finally:
                 conn.close()
 
@@ -361,10 +370,13 @@ class TestRoomRealEndToEnd:
                     ctx, "room_create", {"project_id": project_id, "name": "test"}
                 )
             )["room"]
-            await bridge_command(
+            spawned = await bridge_command(
                 ctx,
                 "spawn_agent",
-                {"config": {"name": "planner", "system_prompt": "t"}},
+                {
+                    "project_id": project_id,
+                    "config": {"name": "planner", "system_prompt": "t"},
+                },
             )
             await bridge_command(
                 ctx,
@@ -379,6 +391,9 @@ class TestRoomRealEndToEnd:
             ctx.emit(
                 "core:action_chain_updated",
                 {
+                    "project_id": project_id,
+                    "agent_id": spawned["data"]["agent_id"],
+                    "cluster_id": spawned["data"]["cluster_id"],
                     "agent_name": "planner",
                     "node": {
                         "id": "node-e1",

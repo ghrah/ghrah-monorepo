@@ -118,30 +118,11 @@ class RoomUnit(SubjectUnit):
                 cluster_id = str(agent.get("cluster_id") or "")
                 handle = await cluster_registry.ensure_cluster(
                     cluster_id,
+                    project_id=room.project_id,
                     project_root_locator=str(project.get("project_root_locator") or ""),
                 )
                 resolved.append((agent, handle))
 
-            # 兼容旧的直接 Core spawn（ephemeral，不在 ProjectRecord.agents）：
-            # 仅在本 project 的 cluster 集合内发现唯一目标时允许投递。
-            if not resolved:
-                for cluster_id in project.get("cluster_ids") or []:
-                    handle = await cluster_registry.ensure_cluster(
-                        str(cluster_id),
-                        project_root_locator=str(project.get("project_root_locator") or ""),
-                    )
-                    for running in await handle.list_agents():
-                        if running.get("agent_id") == target or running.get("name") == target:
-                            resolved.append(
-                                (
-                                    {
-                                        "agent_id": running.get("agent_id") or target,
-                                        "name": running.get("name") or target,
-                                        "cluster_id": cluster_id,
-                                    },
-                                    handle,
-                                )
-                            )
             if len(resolved) != 1:
                 reason = "ambiguous" if resolved else "not found"
                 return {

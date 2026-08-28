@@ -53,21 +53,6 @@ class _EngineDispatchAdapter:
     def __init__(self, ctx: Any) -> None:
         self._ctx = ctx
 
-    _AGENT_FIELDS = {
-        "send_message": "target",
-        "terminate_agent": "name",
-        "get_agent_info": "name",
-        "execute_ability": "agent_name",
-        "register_ability": "agent_name",
-        "unregister_ability": "agent_name",
-        "hitl_response": "agent_name",
-        "session_create": "agent_name",
-        "session_switch": "agent_name",
-        "session_list": "agent_name",
-        "session_archive": "agent_name",
-        "session_delete": "agent_name",
-    }
-
     async def dispatch_observer_command(
         self,
         command: str,
@@ -80,70 +65,7 @@ class _EngineDispatchAdapter:
             enriched.setdefault("request_id", request_id)
         if session_id is not None:
             enriched.setdefault("session_id", session_id)
-        scoped = await self._dispatch_scoped_agent(command, enriched)
-        if scoped is not None:
-            return scoped
         return await bridge_command(self._ctx, command, enriched)
-
-    async def _dispatch_scoped_agent(
-        self, command: str, payload: dict[str, Any]
-    ) -> dict[str, Any] | None:
-        """显式带 project/cluster/agent_id 时绕过全局 Core 命令路由。"""
-        field = self._AGENT_FIELDS.get(command)
-        if field is None or not any(
-            payload.get(key) for key in ("project_id", "cluster_id", "agent_id")
-        ):
-            return None
-        try:
-            project_manager = self._ctx.get("project_manager")
-            cluster_registry = self._ctx.get("core_cluster_registry")
-        except Exception:  # noqa: BLE001
-            return {"success": False, "data": None, "error": "agent resolver unavailable"}
-        if project_manager is None or cluster_registry is None:
-            return {"success": False, "data": None, "error": "agent resolver unavailable"}
-
-        project_id = str(payload.get("project_id") or "")
-        if project_id:
-            result = await project_manager.handle_command(
-                "project_get", {"project_id": project_id}
-            )
-            projects = [((result.get("data") or {}).get("project") or {})]
-        else:
-            result = await project_manager.handle_command("project_list", {})
-            projects = (result.get("data") or {}).get("projects") or []
-        agent_id = str(payload.get("agent_id") or "")
-        display_name = str(payload.get(field) or "")
-        requested_cluster = str(payload.get("cluster_id") or "")
-        matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
-        for project in projects:
-            for agent in project.get("agents") or []:
-                if requested_cluster and agent.get("cluster_id") != requested_cluster:
-                    continue
-                if agent_id:
-                    matched = agent.get("agent_id") == agent_id
-                else:
-                    matched = agent.get("name") == display_name
-                if matched:
-                    matches.append((project, agent))
-        if len(matches) != 1:
-            reason = "ambiguous" if matches else "not found"
-            return {
-                "success": False,
-                "data": None,
-                "error": f"agent {reason}: {agent_id or display_name}",
-            }
-        project, agent = matches[0]
-        handle = await cluster_registry.ensure_cluster(
-            str(agent["cluster_id"]),
-            project_root_locator=str(project.get("project_root_locator") or ""),
-        )
-        core_payload = {
-            key: value
-            for key, value in payload.items()
-            if key not in {"project_id", "cluster_id", "agent_id"}
-        }
-        core_payload[field] = agent["name"]
-        return await handle.dispatch(command, core_payload)
 
 
 class WebSocketObserverEndpointUnit(SubjectUnit):

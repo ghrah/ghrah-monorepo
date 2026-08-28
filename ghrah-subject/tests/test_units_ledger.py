@@ -37,50 +37,89 @@ def _config(tmp_path: Path) -> SubjectConfig:
 
 async def test_ledger_unit_reads_core_sqlite(tmp_path: Path) -> None:
     config = _config(tmp_path)
+    project_id = "project-a"
+    agent_id = "agent-a-id"
+    paths = ProjectPaths.from_locator((tmp_path / "project-a-root").as_uri())
+    paths.action_chain_db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 模拟 Core 侧 agent 链落库（真相源；与 ledger 派生同一 core_db_path）
-    writer = SqliteBackend(db_path=config.core_db_path)
+    # 模拟 Core 侧 agent 链落入目标 Project Root。
+    writer = SqliteBackend(db_path=paths.action_chain_db_path)
     await writer.connect()
-    root = ContextNode.create_root(agent_name="agent-a", messages=[])
+    root = ContextNode.create_root(agent_name=agent_id, messages=[])
     child = ContextNode(
         parent_id=root.id,
-        agent_name="agent-a",
+        agent_name=agent_id,
         iteration=1,
         ability_names=["tool_a"],
     )
     await writer.save_node(root)
     await writer.save_node(child)
     await writer.save_chain_meta(
-        "agent-a",
+        agent_id,
         branches={"main": child.id},
         current_state={"phase": "run"},
         active_session_id="sess-1",
     )
     await writer.close()
 
+    class FakeProjectManager:
+        async def handle_command(self, command: str, payload: dict[str, object]):
+            assert command == "project_get"
+            return {
+                "success": True,
+                "data": {
+                    "project": {
+                        "project_id": project_id,
+                        "project_root_locator": paths.root.as_uri(),
+                        "agents": [
+                            {
+                                "name": "agent-a",
+                                "agent_id": agent_id,
+                                "cluster_id": "default",
+                            }
+                        ],
+                    }
+                },
+            }
+
     ledger = LedgerUnit(config)
     async with Context() as ctx:
+        ctx.provide(PROJECT_MANAGER.name, FakeProjectManager())
         ledger_fiber = ctx.plugin(mount_unit(ledger))
         await wait_active(ledger_fiber)
 
         assert ctx.get(LEDGER.name) is ledger.service
 
-        # agent_name 缺失 → 参数错误
+        # 任何缺失的作用域字段都被严格拒绝。
         missing = await bridge_command(ctx, "get_chain_history", {})
-        assert missing == {"success": False, "error": "agent_name is required"}
+        assert missing["success"] is False
 
-        # 读侧直连：命令返回 Core sqlite 中的节点
-        result = await bridge_command(ctx, "get_chain_history", {"agent_name": "agent-a"})
+        result = await bridge_command(
+            ctx,
+            "get_chain_history",
+            {
+                "project_id": project_id,
+                "agent_id": agent_id,
+                "agent_name": "agent-a",
+            },
+        )
         assert result["success"] is True
         data = result["data"]
         assert data["agent_name"] == "agent-a"
         assert data["active_session_id"] == "sess-1"
         assert [n["id"] for n in data["nodes"]] == [root.id, child.id]
 
-        # 未知 agent → 空节点列表（成功）
-        empty = await bridge_command(ctx, "get_chain_history", {"agent_name": "nobody"})
-        assert empty["success"] is True
-        assert empty["data"]["nodes"] == []
+        wrong = await bridge_command(
+            ctx,
+            "get_chain_history",
+            {
+                "project_id": project_id,
+                "agent_id": "other-agent",
+                "agent_name": "agent-a",
+            },
+        )
+        assert wrong["success"] is False
+        assert wrong["error"] == "agent_project_mismatch"
 
 
 async def test_ledger_resolves_project_agent_name_to_checkpoint_agent_id(
@@ -141,7 +180,11 @@ async def test_ledger_resolves_project_agent_name_to_checkpoint_agent_id(
         result = await bridge_command(
             ctx,
             "get_chain_history",
-            {"agent_name": "shuoxi", "project_id": project_id},
+            {
+                "agent_name": "shuoxi",
+                "agent_id": agent_id,
+                "project_id": project_id,
+            },
         )
 
         assert result["success"] is True

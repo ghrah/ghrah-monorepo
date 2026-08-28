@@ -23,6 +23,17 @@ from ghrah.subject.units._commands import WORKSPACE_COMMANDS
 
 __all__ = ["WorkspaceUnit"]
 
+_AGENT_WORKSPACE_COMMANDS = frozenset(
+    {
+        "create_workspace",
+        "destroy_workspace",
+        "workspace_snapshot",
+        "workspace_rollback",
+        "workspace_diff",
+        "workspace_status",
+    }
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +77,7 @@ class WorkspaceUnit(SubjectUnit):
         self._config = config
         self._manager: WorkspaceManager | None = None
         self._service: _WorkspaceServiceAdapter | None = None
+        self._ctx: Any | None = None
         self._meta = UnitMeta(
             name="workspace",
             requires=frozenset({SANDBOX_EXECUTOR}),
@@ -93,6 +105,7 @@ class WorkspaceUnit(SubjectUnit):
         return self._service
 
     async def init(self, ctx: Any) -> None:
+        self._ctx = ctx
         sandbox = ctx.get(SANDBOX_EXECUTOR.name)
         if not isinstance(sandbox, SandboxExecutor):
             raise TypeError("SANDBOX_EXECUTOR service must be SandboxExecutor.")
@@ -120,16 +133,60 @@ class WorkspaceUnit(SubjectUnit):
         payload: dict[str, Any],
         cmd_ctx: CommandContext,
     ) -> dict[str, Any]:
+        if command in _AGENT_WORKSPACE_COMMANDS:
+            resolved = await self._resolve_agent(payload)
+            if resolved.get("success") is False:
+                return resolved
+            payload = {
+                **payload,
+                "agent_name": resolved["agent_id"],
+                "display_name": resolved["agent_name"],
+            }
         return await self._handle_workspace_command(command, payload)
 
     async def handle_event(self, event_type: str, payload: dict[str, Any]) -> None:
-        agent_name = payload.get("name", "")
-        if not agent_name:
+        agent_id = str(payload.get("agent_id") or "")
+        if not agent_id:
             return
         if event_type == "agent_spawned":
-            await self.manager.create_workspace(agent_name)
+            await self.manager.create_workspace(agent_id)
         elif event_type == "agent_terminated":
-            await self.manager.destroy_workspace(agent_name)
+            await self.manager.destroy_workspace(agent_id)
+
+    async def _resolve_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        project_id = str(payload.get("project_id") or "")
+        agent_id = str(payload.get("agent_id") or "")
+        agent_name = str(payload.get("agent_name") or "")
+        if not project_id:
+            return {"success": False, "data": None, "error": "project_id required"}
+        if not agent_id:
+            return {"success": False, "data": None, "error": "agent_id required"}
+        if self._ctx is None:
+            return {"success": False, "data": None, "error": "project_manager unavailable"}
+        try:
+            manager = self._ctx.get("project_manager")
+        except Exception:  # noqa: BLE001
+            return {"success": False, "data": None, "error": "project_manager unavailable"}
+        result = await manager.handle_command("project_get", {"project_id": project_id})
+        project = (result.get("data") or {}).get("project") if result.get("success") else None
+        if not project:
+            return result
+        if project.get("archived_at") or project.get("deleted_at"):
+            return {"success": False, "data": None, "error": "resource_archived"}
+        matches = [
+            agent
+            for agent in project.get("agents") or []
+            if agent.get("agent_id") == agent_id
+        ]
+        if len(matches) != 1 or (
+            agent_name and matches[0].get("name") != agent_name
+        ):
+            return {"success": False, "data": None, "error": "agent_project_mismatch"}
+        return {
+            "success": True,
+            "agent_id": agent_id,
+            "agent_name": str(matches[0].get("name") or agent_name),
+        }
 
     async def _handle_workspace_command(
         self,
@@ -137,20 +194,31 @@ class WorkspaceUnit(SubjectUnit):
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         agent_name = payload.get("agent_name", "")
+        display_name = payload.get("display_name", agent_name)
 
         try:
             if command == "create_workspace":
                 created_workspace = await self.manager.create_workspace(agent_name)
                 return {
                     "success": True,
-                    "data": {"agent_name": agent_name, "path": created_workspace.path},
+                    "data": {
+                        "project_id": payload.get("project_id"),
+                        "agent_id": agent_name,
+                        "agent_name": display_name,
+                        "path": created_workspace.path,
+                    },
                 }
 
             if command == "destroy_workspace":
                 await self.manager.destroy_workspace(agent_name)
                 return {
                     "success": True,
-                    "data": {"agent_name": agent_name, "destroyed": True},
+                    "data": {
+                        "project_id": payload.get("project_id"),
+                        "agent_id": agent_name,
+                        "agent_name": display_name,
+                        "destroyed": True,
+                    },
                 }
 
             if command == "workspace_snapshot":
@@ -160,7 +228,12 @@ class WorkspaceUnit(SubjectUnit):
                 commit_hash = await snapshot_workspace.snapshot(message=payload.get("message", ""))
                 return {
                     "success": True,
-                    "data": {"agent_name": agent_name, "snapshot_id": commit_hash},
+                    "data": {
+                        "project_id": payload.get("project_id"),
+                        "agent_id": agent_name,
+                        "agent_name": display_name,
+                        "snapshot_id": commit_hash,
+                    },
                 }
 
             if command == "workspace_rollback":
@@ -172,7 +245,9 @@ class WorkspaceUnit(SubjectUnit):
                 return {
                     "success": True,
                     "data": {
-                        "agent_name": agent_name,
+                        "project_id": payload.get("project_id"),
+                        "agent_id": agent_name,
+                        "agent_name": display_name,
                         "rolled_back_to": snapshot_id,
                     },
                 }
@@ -184,7 +259,12 @@ class WorkspaceUnit(SubjectUnit):
                 diff_str = await diff_workspace.diff(snapshot_id=payload.get("snapshot_id"))
                 return {
                     "success": True,
-                    "data": {"agent_name": agent_name, "diff": diff_str},
+                    "data": {
+                        "project_id": payload.get("project_id"),
+                        "agent_id": agent_name,
+                        "agent_name": display_name,
+                        "diff": diff_str,
+                    },
                 }
 
             if command == "workspace_status":
@@ -195,7 +275,9 @@ class WorkspaceUnit(SubjectUnit):
                 return {
                     "success": True,
                     "data": {
-                        "agent_name": agent_name,
+                        "project_id": payload.get("project_id"),
+                        "agent_id": agent_name,
+                        "agent_name": display_name,
                         "branch": status.branch,
                         "is_clean": status.is_clean,
                         "staged_files": status.staged_files,

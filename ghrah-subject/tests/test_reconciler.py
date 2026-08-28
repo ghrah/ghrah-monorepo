@@ -70,10 +70,10 @@ class FakeClusterHandle:
         self.spawned.append(payload.config.name)
         return {"success": True, "data": {"name": payload.config.name}, "error": None}
 
-    async def list_agents(self) -> list[dict[str, Any]]:
+    async def list_agents(self, project_id: str | None = None) -> list[dict[str, Any]]:
         return [{"name": n} for n in self._existing]
 
-    async def terminate_agent(self, agent_name: str) -> dict[str, Any]:
+    async def terminate_agent(self, agent_id: str, agent_name: str) -> dict[str, Any]:
         return {"success": True, "data": None, "error": None}
 
     async def shutdown(self) -> None:
@@ -86,7 +86,11 @@ class FakeClusterTransport:
         self.ensure_calls: list[str] = []
 
     async def ensure_cluster(
-        self, cluster_id: str, *, project_root_locator: str = ""
+        self,
+        cluster_id: str,
+        *,
+        project_id: str,
+        project_root_locator: str,
     ) -> FakeClusterHandle:
         self.ensure_calls.append(cluster_id)
         return self._handle

@@ -183,7 +183,11 @@ class TaskUnit(SubjectUnit):
             normalized["agent_id"] = matches[0].get("agent_id") or ""
             normalized["agent_name"] = matches[0].get("name") or value_name
             return normalized
-        return payload
+        return {
+            "success": False,
+            "data": None,
+            "error": "agent_project_mismatch",
+        }
 
     async def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """TaskManager 的 ``on_event`` 回调：保留 async 签名，体内同步 ctx.emit。"""

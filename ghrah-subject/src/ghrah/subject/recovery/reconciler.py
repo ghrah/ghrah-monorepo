@@ -226,7 +226,9 @@ class ReconciliationService:
         for cluster_id in project.cluster_ids:
             try:
                 await self._cluster_transport.ensure_cluster(
-                    cluster_id, project_root_locator=project.project_root_locator
+                    cluster_id,
+                    project_id=project.project_id,
+                    project_root_locator=project.project_root_locator,
                 )
             except Exception as exc:  # noqa: BLE001
                 report.errors.append(
@@ -292,7 +294,9 @@ class ReconciliationService:
             except KeyError:
                 try:
                     handle = await self._cluster_transport.ensure_cluster(
-                        cluster_id, project_root_locator=project.project_root_locator
+                        cluster_id,
+                        project_id=project.project_id,
+                        project_root_locator=project.project_root_locator,
                     )
                 except Exception as exc:  # noqa: BLE001
                     report.errors.append(
@@ -301,7 +305,7 @@ class ReconciliationService:
                     )
                     continue
             try:
-                existing_agents = await handle.list_agents()
+                existing_agents = await handle.list_agents(project.project_id)
                 existing_ids = {
                     str(a.get("agent_id")) for a in existing_agents if a.get("agent_id")
                 }
@@ -346,7 +350,9 @@ class ReconciliationService:
                     not agent.agent_id and agent.name in existing_names
                 ):
                     continue
-                recovery_mode, error = await self._spawn_agent(handle, agent)
+                recovery_mode, error = await self._spawn_agent(
+                    handle, project.project_id, agent
+                )
                 if recovery_mode is not None:
                     report.agents_spawned += 1
                     if recovery_mode == "restored":
@@ -381,12 +387,14 @@ class ReconciliationService:
                     )
 
     async def _spawn_agent(
-        self, handle: ClusterHandle, agent: AgentSpec
+        self, handle: ClusterHandle, project_id: str, agent: AgentSpec
     ) -> tuple[str | None, str | None]:
         """spawn 单个 agent；返回 ``(outcome, error)``。"""
         from ghrah.protocol.types import AgentConfigPayload, SpawnAgentPayload
 
         payload = SpawnAgentPayload(
+            project_id=project_id,
+            cluster_id=agent.cluster_id,
             config=AgentConfigPayload(
                 name=agent.name,
                 agent_id=agent.agent_id,

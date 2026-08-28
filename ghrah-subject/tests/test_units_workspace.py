@@ -40,6 +40,33 @@ def _mount(ctx: Context, config: SubjectConfig) -> tuple[WorkspaceUnit, Fiber]:
     return unit, fiber
 
 
+class _ProjectManagerStub:
+    async def handle_command(
+        self, command: str, payload: dict[str, object]
+    ) -> dict[str, object]:
+        assert command == "project_get"
+        return {
+            "success": True,
+            "data": {
+                "project": {
+                    "project_id": "p1",
+                    "agents": [
+                        {
+                            "project_id": "p1",
+                            "agent_id": "a1",
+                            "name": "agent-a",
+                            "cluster_id": "c1",
+                        }
+                    ],
+                }
+            },
+        }
+
+
+def _agent_payload() -> dict[str, str]:
+    return {"project_id": "p1", "agent_id": "a1", "agent_name": "agent-a"}
+
+
 async def test_workspace_unit_registers_typed_service_and_missing_workspace_result(
     tmp_path: Path,
 ) -> None:
@@ -58,10 +85,8 @@ async def test_workspace_unit_registers_typed_service_and_missing_workspace_resu
         assert service.resolve_agent_path("missing") is None
 
         result = await bridge_command(ctx, "workspace_status", {"agent_name": "missing"})
-        assert result == {
-            "success": False,
-            "error": "Workspace not found for agent 'missing'",
-        }
+        assert result["success"] is False
+        assert result["error"] == "project_id required"
 
 
 async def test_workspace_register_get_list_commands(tmp_path: Path) -> None:
@@ -72,8 +97,9 @@ async def test_workspace_register_get_list_commands(tmp_path: Path) -> None:
     async with Context() as ctx:
         _, fiber = _mount(ctx, config)
         await wait_active(fiber)
+        ctx.provide("project_manager", _ProjectManagerStub())
 
-        created = await bridge_command(ctx, "create_workspace", {"agent_name": "agent-a"})
+        created = await bridge_command(ctx, "create_workspace", _agent_payload())
         assert created["success"] is True
 
         # register：把一个已存在的目录登记为 plain workspace
@@ -124,11 +150,12 @@ async def test_workspace_on_ouroboros_mount_route_dispose_remount(
 
         ws_fiber = ctx.plugin(mount_unit(WorkspaceUnit(config)))
         await wait_active(ws_fiber)
+        ctx.provide("project_manager", _ProjectManagerStub())
 
         assert ctx.get(WORKSPACE_SERVICE.name) is not None
         assert ctx.get(WORKSPACE_MANAGER.name) is not None
 
-        created = await bridge_command(ctx, "create_workspace", {"agent_name": "agent-a"})
+        created = await bridge_command(ctx, "create_workspace", _agent_payload())
         assert created["success"] is True
         assert created["data"]["agent_name"] == "agent-a"
         assert "path" in created["data"]
@@ -139,17 +166,15 @@ async def test_workspace_on_ouroboros_mount_route_dispose_remount(
         assert ctx.get(WORKSPACE_SERVICE.name, strict=False) is None
         assert ctx.get(WORKSPACE_MANAGER.name, strict=False) is None
 
-        gone = await bridge_command(ctx, "workspace_status", {"agent_name": "missing"})
+        gone = await bridge_command(ctx, "workspace_status", _agent_payload())
         assert gone == {"success": False, "error": "Unknown command: workspace_status"}
 
         ws_fiber2 = ctx.plugin(mount_unit(WorkspaceUnit(config)))
         await wait_active(ws_fiber2)
 
         assert ctx.get(WORKSPACE_SERVICE.name) is not None
-        recovered = await bridge_command(ctx, "workspace_status", {"agent_name": "missing"})
-        assert recovered == {
-            "success": False,
-            "error": "Workspace not found for agent 'missing'",
-        }
+        recovered = await bridge_command(ctx, "workspace_status", _agent_payload())
+        assert recovered["success"] is True
+        assert recovered["data"]["agent_id"] == "a1"
 
         await ws_fiber2.dispose()

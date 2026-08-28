@@ -64,7 +64,15 @@ class _FakeTaskMgr:
     async def handle_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         if command == "task_get":
             if self._exists:
-                return {"success": True, "data": {"task_id": payload.get("task_id")}}
+                return {
+                    "success": True,
+                    "data": {
+                        "task": {
+                            "task_id": payload.get("task_id"),
+                            "project_id": payload.get("project_id", ""),
+                        }
+                    },
+                }
             return {"success": False, "data": None, "error": "not found"}
         return {"success": False, "data": None, "error": "unsupported"}
 
@@ -78,7 +86,11 @@ class _FakeClusterTransport:
         self.fail_shutdown = False
 
     async def ensure_cluster(
-        self, cluster_id: str, *, project_root_locator: str = ""
+        self,
+        cluster_id: str,
+        *,
+        project_id: str,
+        project_root_locator: str,
     ) -> _FakeHandle:
         self.ensured.append(cluster_id)
         if self.fail_ensure:
@@ -105,6 +117,7 @@ class _FakeHandle:
         self.spawned: list[str] = []
         self.terminated: list[str] = []
         self._list: list[dict[str, Any]] = []
+        self.fail_spawn = False
 
     @property
     def is_connected(self) -> bool:
@@ -112,12 +125,14 @@ class _FakeHandle:
 
     async def spawn_agent(self, payload: Any) -> dict[str, Any]:
         self.spawned.append(payload.config.name)
+        if self.fail_spawn:
+            return {"success": False, "data": None, "error": "spawn unavailable"}
         return {"success": True, "data": {"name": payload.config.name}, "error": None}
 
-    async def list_agents(self) -> list[dict[str, Any]]:
+    async def list_agents(self, project_id: str | None = None) -> list[dict[str, Any]]:
         return list(self._list)
 
-    async def terminate_agent(self, agent_name: str) -> dict[str, Any]:
+    async def terminate_agent(self, agent_id: str, agent_name: str) -> dict[str, Any]:
         self.terminated.append(agent_name)
         return {"success": True, "data": None, "error": None}
 
@@ -478,6 +493,60 @@ class TestProjectAddRemoveAgent:
         )
         assert not result["success"]
         assert "cluster_id" in (result["error"] or "")
+
+    async def test_add_agent_spawn_failure_keeps_diagnostic_desired_state(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        cluster = _FakeClusterTransport()
+        cluster._handle.fail_spawn = True
+        mgr = _make_manager(
+            store,
+            default_locator=_default_locator(tmp_path),
+            cluster_transport=cluster,
+        )
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        result = await mgr.handle_command(
+            "project_add_agent",
+            {
+                "project_id": project["project_id"],
+                "agent": {
+                    "name": "pending-agent",
+                    "cluster_id": project["cluster_ids"][0],
+                },
+            },
+        )
+        assert result["success"] is True
+        assert result["data"]["runtime_pending"] is True
+        assert result["data"]["runtime_error"] == "spawn unavailable"
+        stored = await store.get(project["project_id"])
+        assert stored is not None
+        assert [agent.name for agent in stored.agents] == ["pending-agent"]
+
+    async def test_duplicate_name_is_rejected_within_project(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        cluster_id = project["cluster_ids"][0]
+        first = await mgr.handle_command(
+            "project_add_agent",
+            {
+                "project_id": project["project_id"],
+                "agent": {"name": "same-name", "cluster_id": cluster_id},
+            },
+        )
+        assert first["success"]
+        duplicate = await mgr.handle_command(
+            "project_add_agent",
+            {
+                "project_id": project["project_id"],
+                "agent": {"name": "same-name", "cluster_id": cluster_id},
+            },
+        )
+        assert duplicate["success"] is False
+        assert "already exists in project" in duplicate["error"]
 
     async def test_remove_agent(
         self, store: ProjectStore, tmp_path: Path
