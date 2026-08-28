@@ -10,6 +10,7 @@ export {
   type ChatEntry,
   type ChatEntryKind,
   type FileChange,
+  type FileChangeScope,
   projectNodeToChatEntries,
   projectNodeToFileChanges,
   rebuildChatEntriesFromChain,

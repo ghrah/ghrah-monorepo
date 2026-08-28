@@ -1,4 +1,7 @@
 {
+  "project_id": "proj-001",
+  "agent_id": "agent-001",
+  "cluster_id": "cluster-1",
   "agent_name": "agent-1",
   "node": {
     "id": "node-001",
@@ -6,10 +9,7 @@
     "agent_name": "agent-1",
     "timestamp": "2026-07-17T09:00:00+00:00",
     "iteration": 1,
-    "ability_names": [
-      "conversation",
-      "write_file"
-    ],
+    "ability_names": ["conversation", "write_file"],
     "agent_state": {
       "status": "running"
     },

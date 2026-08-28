@@ -3,5 +3,5 @@
   "agent_id": "agent-001",
   "cluster_id": "cluster-1",
   "agent_name": "agent-1",
-  "path": "/tmp/agent-1"
+  "session_id": "session-001"
 }

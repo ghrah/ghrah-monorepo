@@ -17,6 +17,7 @@ import {
   ErrorPayloadSchema,
   ExecuteAbilityPayloadSchema,
   GetAgentInfoPayloadSchema,
+  GetChainHistoryPayloadSchema,
   HealthCheckPayloadSchema,
   HealthStatusPayloadSchema,
   HITLRequestPayloadSchema,
@@ -38,8 +39,13 @@ import {
   PersistLoadPayloadSchema,
   PersistSavePayloadSchema,
   ProjectCreatePayloadSchema,
+  ProjectDeletePayloadSchema,
+  ProjectLifecyclePayloadSchema,
+  ProjectListPayloadSchema,
   ProjectUpdatePayloadSchema,
   RegisterAbilityPayloadSchema,
+  RoomDeletePayloadSchema,
+  RoomLifecyclePayloadSchema,
   SendMessagePayloadSchema,
   ShutdownClusterPayloadSchema,
   SpawnAgentPayloadSchema,
@@ -60,6 +66,8 @@ import {
   WorkspaceStatusPayloadSchema,
 } from "./payloads.js";
 
+const AGENT_SCOPE = { project_id: "proj-001", agent_id: "agent-001" };
+
 describe("Project payload schemas", () => {
   it("rejects removed legacy create fields", () => {
     expect(() =>
@@ -77,6 +85,24 @@ describe("Project payload schemas", () => {
         instance_manifest_dir: "/tmp/manifests",
       }),
     ).toThrow();
+  });
+
+  it("uses explicit lifecycle and permanent-delete contracts", () => {
+    expect(
+      ProjectLifecyclePayloadSchema.parse({ project_id: "proj-001", expected_version: 3 }),
+    ).toEqual({ project_id: "proj-001", expected_version: 3 });
+    expect(
+      ProjectDeletePayloadSchema.parse({ project_id: "proj-001", expected_version: 3 }),
+    ).toEqual({ project_id: "proj-001", expected_version: 3, cascade_rooms: false });
+    expect(ProjectListPayloadSchema.parse({}).archived).toBe(false);
+    expect(ProjectDeletePayloadSchema.safeParse({ project_id: "proj-001" }).success).toBe(false);
+  });
+
+  it("requires optimistic locking for Room lifecycle and delete", () => {
+    const target = { room_id: "room-001", expected_version: 5 };
+    expect(RoomLifecyclePayloadSchema.parse(target)).toEqual(target);
+    expect(RoomDeletePayloadSchema.parse(target)).toEqual(target);
+    expect(RoomDeletePayloadSchema.safeParse({ room_id: "room-001" }).success).toBe(false);
   });
 });
 
@@ -126,6 +152,7 @@ describe("AbilityDefinitionPayloadSchema", () => {
 describe("SpawnAgentPayloadSchema", () => {
   it("parses with config only", () => {
     const result = SpawnAgentPayloadSchema.parse({
+      project_id: "proj-001",
       config: { name: "agent-1" },
     });
     expect(result.config.name).toBe("agent-1");
@@ -134,6 +161,7 @@ describe("SpawnAgentPayloadSchema", () => {
 
   it("parses with abilities array", () => {
     const result = SpawnAgentPayloadSchema.parse({
+      project_id: "proj-001",
       config: { name: "agent-1" },
       abilities: [{ ability_type: "bash" }],
     });
@@ -143,7 +171,7 @@ describe("SpawnAgentPayloadSchema", () => {
 
 describe("TerminateAgentPayloadSchema", () => {
   it("parses with name", () => {
-    const result = TerminateAgentPayloadSchema.parse({ name: "agent-1" });
+    const result = TerminateAgentPayloadSchema.parse({ ...AGENT_SCOPE, name: "agent-1" });
     expect(result.name).toBe("agent-1");
   });
 
@@ -155,6 +183,8 @@ describe("TerminateAgentPayloadSchema", () => {
 describe("SendMessagePayloadSchema", () => {
   it("parses with required fields and default sender", () => {
     const result = SendMessagePayloadSchema.parse({
+      project_id: "proj-001",
+      agent_id: "agent-001",
       target: "agent-1",
       content: "hello",
     });
@@ -165,6 +195,8 @@ describe("SendMessagePayloadSchema", () => {
 
   it("parses with custom sender", () => {
     const result = SendMessagePayloadSchema.parse({
+      project_id: "proj-001",
+      agent_id: "agent-001",
       target: "agent-1",
       content: "hello",
       sender: "agent-2",
@@ -175,7 +207,10 @@ describe("SendMessagePayloadSchema", () => {
 
 describe("BroadcastMessagePayloadSchema", () => {
   it("parses with content and default sender", () => {
-    const result = BroadcastMessagePayloadSchema.parse({ content: "hello all" });
+    const result = BroadcastMessagePayloadSchema.parse({
+      project_id: "proj-001",
+      content: "hello all",
+    });
     expect(result.content).toBe("hello all");
     expect(result.sender).toBe("user");
   });
@@ -184,6 +219,7 @@ describe("BroadcastMessagePayloadSchema", () => {
 describe("RegisterAbilityPayloadSchema", () => {
   it("parses with agent_name and ability", () => {
     const result = RegisterAbilityPayloadSchema.parse({
+      ...AGENT_SCOPE,
       agent_name: "agent-1",
       ability: { ability_type: "bash" },
     });
@@ -195,6 +231,7 @@ describe("RegisterAbilityPayloadSchema", () => {
 describe("UnregisterAbilityPayloadSchema", () => {
   it("parses with agent_name and ability_name", () => {
     const result = UnregisterAbilityPayloadSchema.parse({
+      ...AGENT_SCOPE,
       agent_name: "agent-1",
       ability_name: "bash",
     });
@@ -203,9 +240,10 @@ describe("UnregisterAbilityPayloadSchema", () => {
 });
 
 describe("ListAgentsPayloadSchema", () => {
-  it("parses empty object", () => {
-    const result = ListAgentsPayloadSchema.parse({});
-    expect(result).toEqual({});
+  it("requires a Project scope", () => {
+    const result = ListAgentsPayloadSchema.parse({ project_id: "proj-001" });
+    expect(result).toEqual({ project_id: "proj-001" });
+    expect(ListAgentsPayloadSchema.safeParse({}).success).toBe(false);
   });
 });
 
@@ -219,6 +257,9 @@ describe("HealthCheckPayloadSchema", () => {
 describe("DelegatePayloadSchema", () => {
   it("parses with all fields", () => {
     const result = DelegatePayloadSchema.parse({
+      project_id: "proj-001",
+      from_agent_id: "agent-001",
+      to_agent_id: "agent-002",
       from_agent: "a1",
       to_agent: "a2",
       content: "delegate msg",
@@ -230,8 +271,20 @@ describe("DelegatePayloadSchema", () => {
 
 describe("GetAgentInfoPayloadSchema", () => {
   it("parses with name", () => {
-    const result = GetAgentInfoPayloadSchema.parse({ name: "agent-1" });
+    const result = GetAgentInfoPayloadSchema.parse({ ...AGENT_SCOPE, name: "agent-1" });
     expect(result.name).toBe("agent-1");
+  });
+});
+
+describe("Project-scoped compatibility", () => {
+  it("rejects new Agent commands without project_id/agent_id", () => {
+    expect(TerminateAgentPayloadSchema.safeParse({ name: "agent-1" }).success).toBe(false);
+    expect(GetChainHistoryPayloadSchema.safeParse({ agent_name: "agent-1" }).success).toBe(false);
+  });
+
+  it("accepts legacy events but exposes empty ownership fields", () => {
+    const event = AgentErrorPayloadSchema.parse({ agent_name: "agent-1", error: "boom" });
+    expect(event).toMatchObject({ project_id: "", agent_id: "", cluster_id: "" });
   });
 });
 
@@ -417,22 +470,23 @@ describe("PersistListPayloadSchema", () => {
 
 describe("Workspace command payload schemas", () => {
   it("CreateWorkspacePayloadSchema", () => {
-    const result = CreateWorkspacePayloadSchema.parse({ agent_name: "agent-1" });
+    const result = CreateWorkspacePayloadSchema.parse({ ...AGENT_SCOPE, agent_name: "agent-1" });
     expect(result.agent_name).toBe("agent-1");
   });
 
   it("DestroyWorkspacePayloadSchema", () => {
-    const result = DestroyWorkspacePayloadSchema.parse({ agent_name: "agent-1" });
+    const result = DestroyWorkspacePayloadSchema.parse({ ...AGENT_SCOPE, agent_name: "agent-1" });
     expect(result.agent_name).toBe("agent-1");
   });
 
   it("WorkspaceSnapshotPayloadSchema with default message", () => {
-    const result = WorkspaceSnapshotPayloadSchema.parse({ agent_name: "agent-1" });
+    const result = WorkspaceSnapshotPayloadSchema.parse({ ...AGENT_SCOPE, agent_name: "agent-1" });
     expect(result.message).toBe("");
   });
 
   it("WorkspaceRollbackPayloadSchema", () => {
     const result = WorkspaceRollbackPayloadSchema.parse({
+      ...AGENT_SCOPE,
       agent_name: "agent-1",
       snapshot_id: "snap-001",
     });
@@ -440,12 +494,12 @@ describe("Workspace command payload schemas", () => {
   });
 
   it("WorkspaceDiffPayloadSchema with optional snapshot_id", () => {
-    const result = WorkspaceDiffPayloadSchema.parse({ agent_name: "agent-1" });
+    const result = WorkspaceDiffPayloadSchema.parse({ ...AGENT_SCOPE, agent_name: "agent-1" });
     expect(result.snapshot_id).toBeUndefined();
   });
 
   it("WorkspaceStatusPayloadSchema", () => {
-    const result = WorkspaceStatusPayloadSchema.parse({ agent_name: "agent-1" });
+    const result = WorkspaceStatusPayloadSchema.parse({ ...AGENT_SCOPE, agent_name: "agent-1" });
     expect(result.agent_name).toBe("agent-1");
   });
 
@@ -741,6 +795,7 @@ describe("Manifest payload schemas", () => {
 
   it("SpawnAgentPayloadSchema with manifest_ref", () => {
     const result = SpawnAgentPayloadSchema.parse({
+      project_id: "proj-001",
       config: { name: "agent-1" },
       manifest_ref: "my_project.designer",
     });
@@ -749,6 +804,7 @@ describe("Manifest payload schemas", () => {
 
   it("SpawnAgentPayloadSchema without manifest_ref", () => {
     const result = SpawnAgentPayloadSchema.parse({
+      project_id: "proj-001",
       config: { name: "agent-1" },
     });
     expect(result.manifest_ref).toBeUndefined();

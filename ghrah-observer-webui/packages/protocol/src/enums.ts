@@ -37,6 +37,10 @@ export enum CommandType {
   PERSIST_LOAD_MESSAGES = "persist_load_messages",
   PERSIST_DELETE_CHAIN = "persist_delete_chain",
   PERSIST_LIST_AGENTS = "persist_list_agents",
+  PERSIST_SAVE_SESSION = "persist_save_session",
+  PERSIST_LOAD_SESSION = "persist_load_session",
+  PERSIST_LIST_SESSIONS = "persist_list_sessions",
+  PERSIST_DELETE_SESSIONS = "persist_delete_sessions",
 
   CREATE_WORKSPACE = "create_workspace",
   DESTROY_WORKSPACE = "destroy_workspace",
@@ -75,6 +79,8 @@ export enum CommandType {
   PROJECT_UPDATE = "project_update",
   PROJECT_LIST = "project_list",
   PROJECT_GET = "project_get",
+  PROJECT_ARCHIVE = "project_archive",
+  PROJECT_RESTORE = "project_restore",
   PROJECT_DELETE = "project_delete",
   PROJECT_ADD_AGENT = "project_add_agent",
   PROJECT_REMOVE_AGENT = "project_remove_agent",
@@ -89,6 +95,8 @@ export enum CommandType {
   ROOM_LIST = "room_list",
   ROOM_GET = "room_get",
   ROOM_UPDATE = "room_update",
+  ROOM_ARCHIVE = "room_archive",
+  ROOM_RESTORE = "room_restore",
   ROOM_DELETE = "room_delete",
   ROOM_JOIN = "room_join",
   ROOM_LEAVE = "room_leave",
@@ -117,7 +125,6 @@ export enum EventType {
   HEALTH_STATUS = "health_status",
   ABILITY_RESULT = "ability_result",
   HITL_REQUEST = "hitl_request",
-  HITL_RESPONSE = "hitl_response",
   WORKSPACE_CREATED = "workspace_created",
   WORKSPACE_DESTROYED = "workspace_destroyed",
   WORKSPACE_SNAPSHOT_CREATED = "workspace_snapshot_created",
@@ -142,6 +149,8 @@ export enum EventType {
 
   PROJECT_CREATED = "project_created",
   PROJECT_UPDATED = "project_updated",
+  PROJECT_ARCHIVED = "project_archived",
+  PROJECT_RESTORED = "project_restored",
   PROJECT_DELETED = "project_deleted",
   PROJECT_PAUSED = "project_paused",
   PROJECT_RESUMED = "project_resumed",
@@ -152,6 +161,8 @@ export enum EventType {
 
   ROOM_CREATED = "room_created",
   ROOM_UPDATED = "room_updated",
+  ROOM_ARCHIVED = "room_archived",
+  ROOM_RESTORED = "room_restored",
   ROOM_DELETED = "room_deleted",
   ROOM_MEMBER_JOINED = "room_member_joined",
   ROOM_MEMBER_LEFT = "room_member_left",
@@ -184,6 +195,10 @@ export const PERSIST_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.PERSIST_LOAD_MESSAGES,
   CommandType.PERSIST_DELETE_CHAIN,
   CommandType.PERSIST_LIST_AGENTS,
+  CommandType.PERSIST_SAVE_SESSION,
+  CommandType.PERSIST_LOAD_SESSION,
+  CommandType.PERSIST_LIST_SESSIONS,
+  CommandType.PERSIST_DELETE_SESSIONS,
 ]);
 
 export const CORE_COMMANDS: ReadonlySet<string> = new Set([
@@ -201,7 +216,22 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.SHUTDOWN_CLUSTER,
   CommandType.CLUSTER_STATUS,
   CommandType.LIST_CLUSTERS,
+  CommandType.SESSION_CREATE,
+  CommandType.SESSION_SWITCH,
+  CommandType.SESSION_LIST,
+  CommandType.SESSION_ARCHIVE,
+  CommandType.SESSION_DELETE,
 ]);
+
+export const SESSION_COMMANDS: ReadonlySet<string> = new Set([
+  CommandType.SESSION_CREATE,
+  CommandType.SESSION_SWITCH,
+  CommandType.SESSION_LIST,
+  CommandType.SESSION_ARCHIVE,
+  CommandType.SESSION_DELETE,
+]);
+
+export const CHAIN_HISTORY_COMMANDS: ReadonlySet<string> = new Set([CommandType.GET_CHAIN_HISTORY]);
 
 export const WORKSPACE_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.CREATE_WORKSPACE,
@@ -247,6 +277,8 @@ export const PROJECT_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.PROJECT_UPDATE,
   CommandType.PROJECT_LIST,
   CommandType.PROJECT_GET,
+  CommandType.PROJECT_ARCHIVE,
+  CommandType.PROJECT_RESTORE,
   CommandType.PROJECT_DELETE,
   CommandType.PROJECT_ADD_AGENT,
   CommandType.PROJECT_REMOVE_AGENT,
@@ -263,6 +295,8 @@ export const ROOM_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.ROOM_LIST,
   CommandType.ROOM_GET,
   CommandType.ROOM_UPDATE,
+  CommandType.ROOM_ARCHIVE,
+  CommandType.ROOM_RESTORE,
   CommandType.ROOM_DELETE,
   CommandType.ROOM_JOIN,
   CommandType.ROOM_LEAVE,

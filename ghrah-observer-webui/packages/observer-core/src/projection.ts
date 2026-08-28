@@ -25,6 +25,8 @@ export interface ChatEntry {
 }
 
 export interface FileChange {
+  projectId: string;
+  agentId: string;
   agentName: string;
   abilityName: string;
   filePath?: string;
@@ -34,6 +36,11 @@ export interface FileChange {
   outcome?: string;
   timestamp: string;
   nodeId: string;
+}
+
+export interface FileChangeScope {
+  projectId: string;
+  agentId: string;
 }
 
 const FILE_CHANGE_ABILITIES = new Set(["write_file", "edit_file", "delete_file"]);
@@ -205,7 +212,10 @@ export function rebuildChatEntriesFromChain(nodes: ActionNode[]): ChatEntry[] {
   return entries;
 }
 
-export function projectNodeToFileChanges(node: ActionNode): FileChange[] {
+export function projectNodeToFileChanges(
+  node: ActionNode,
+  scope: FileChangeScope = { projectId: "", agentId: "" },
+): FileChange[] {
   const out: FileChange[] = [];
   const agentName = node.agent_name ?? "";
   const timestamp = node.timestamp ?? "";
@@ -220,6 +230,8 @@ export function projectNodeToFileChanges(node: ActionNode): FileChange[] {
     const filePath = typeof data.file_path === "string" ? data.file_path : undefined;
     const outcome = actionResult.outcome;
     out.push({
+      projectId: scope.projectId,
+      agentId: scope.agentId,
       agentName,
       abilityName,
       filePath,

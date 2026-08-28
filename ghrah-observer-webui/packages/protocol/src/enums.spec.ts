@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  CHAIN_HISTORY_COMMANDS,
   ClientType,
-  CommandType,
   CORE_COMMANDS,
+  CommandType,
   EventType,
   MANIFEST_COMMANDS,
   PERSIST_COMMANDS,
   PROJECT_COMMANDS,
   ROOM_COMMANDS,
+  SESSION_COMMANDS,
   SystemType,
   TASK_COMMANDS,
   WORKSPACE_COMMANDS,
@@ -54,6 +56,10 @@ describe("CommandType", () => {
     "persist_load_messages",
     "persist_delete_chain",
     "persist_list_agents",
+    "persist_save_session",
+    "persist_load_session",
+    "persist_list_sessions",
+    "persist_delete_sessions",
     "create_workspace",
     "destroy_workspace",
     "workspace_snapshot",
@@ -88,6 +94,8 @@ describe("CommandType", () => {
     "project_update",
     "project_list",
     "project_get",
+    "project_archive",
+    "project_restore",
     "project_delete",
     "project_add_agent",
     "project_remove_agent",
@@ -101,6 +109,8 @@ describe("CommandType", () => {
     "room_list",
     "room_get",
     "room_update",
+    "room_archive",
+    "room_restore",
     "room_delete",
     "room_join",
     "room_leave",
@@ -117,7 +127,7 @@ describe("CommandType", () => {
     "reconcile_status",
   ]);
 
-  it("has exactly 83 values matching Python CommandType", () => {
+  it("has exactly 96 values matching Python CommandType", () => {
     const tsValues = new Set(Object.values(CommandType));
     expect(tsValues).toEqual(PYTHON_COMMAND_VALUES);
   });
@@ -138,7 +148,6 @@ describe("EventType", () => {
     "health_status",
     "ability_result",
     "hitl_request",
-    "hitl_response",
     "workspace_created",
     "workspace_destroyed",
     "workspace_snapshot_created",
@@ -160,6 +169,8 @@ describe("EventType", () => {
     "task_deleted",
     "project_created",
     "project_updated",
+    "project_archived",
+    "project_restored",
     "project_deleted",
     "project_paused",
     "project_resumed",
@@ -169,6 +180,8 @@ describe("EventType", () => {
     "project_recovery_set",
     "room_created",
     "room_updated",
+    "room_archived",
+    "room_restored",
     "room_deleted",
     "room_member_joined",
     "room_member_left",
@@ -182,7 +195,7 @@ describe("EventType", () => {
     "reconcile_failed",
   ]);
 
-  it("has exactly 50 values matching Python EventType", () => {
+  it("has exactly 53 values matching Python EventType", () => {
     const tsValues = new Set(Object.values(EventType));
     expect(tsValues).toEqual(PYTHON_EVENT_VALUES);
   });
@@ -212,9 +225,13 @@ describe("PERSIST_COMMANDS", () => {
     "persist_load_messages",
     "persist_delete_chain",
     "persist_list_agents",
+    "persist_save_session",
+    "persist_load_session",
+    "persist_list_sessions",
+    "persist_delete_sessions",
   ]);
 
-  it("contains exactly 9 persist command values", () => {
+  it("contains exactly 13 persist command values", () => {
     expect(PERSIST_COMMANDS).toEqual(PYTHON_PERSIST);
   });
 });
@@ -235,10 +252,35 @@ describe("CORE_COMMANDS", () => {
     "shutdown_cluster",
     "cluster_status",
     "list_clusters",
+    "session_create",
+    "session_switch",
+    "session_list",
+    "session_archive",
+    "session_delete",
   ]);
 
-  it("contains exactly 14 core command values", () => {
+  it("contains exactly 19 core command values", () => {
     expect(CORE_COMMANDS).toEqual(PYTHON_CORE_COMMANDS);
+  });
+});
+
+describe("SESSION_COMMANDS", () => {
+  it("contains the five Project-scoped Session commands", () => {
+    expect(SESSION_COMMANDS).toEqual(
+      new Set([
+        "session_create",
+        "session_switch",
+        "session_list",
+        "session_archive",
+        "session_delete",
+      ]),
+    );
+  });
+});
+
+describe("CHAIN_HISTORY_COMMANDS", () => {
+  it("contains get_chain_history", () => {
+    expect(CHAIN_HISTORY_COMMANDS).toEqual(new Set(["get_chain_history"]));
   });
 });
 
@@ -305,6 +347,8 @@ describe("PROJECT_COMMANDS", () => {
     "project_update",
     "project_list",
     "project_get",
+    "project_archive",
+    "project_restore",
     "project_delete",
     "project_add_agent",
     "project_remove_agent",
@@ -316,7 +360,7 @@ describe("PROJECT_COMMANDS", () => {
     "project_stop",
   ]);
 
-  it("contains exactly 13 project command values", () => {
+  it("contains exactly 15 project command values", () => {
     expect(PROJECT_COMMANDS).toEqual(PYTHON_PROJECT);
   });
 });
@@ -327,6 +371,8 @@ describe("ROOM_COMMANDS", () => {
     "room_list",
     "room_get",
     "room_update",
+    "room_archive",
+    "room_restore",
     "room_delete",
     "room_join",
     "room_leave",
@@ -335,7 +381,7 @@ describe("ROOM_COMMANDS", () => {
     "room_send",
   ]);
 
-  it("contains exactly 10 room command values", () => {
+  it("contains exactly 12 room command values", () => {
     expect(ROOM_COMMANDS).toEqual(PYTHON_ROOM);
   });
 });

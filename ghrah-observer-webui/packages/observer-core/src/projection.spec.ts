@@ -267,8 +267,7 @@ describe("roomLogToChatEntries", () => {
       roomLogToChatEntries(makeRoomEntry({ data: { message: "m", targets: [] } })).targets,
     ).toBeUndefined();
     expect(
-      roomLogToChatEntries(makeRoomEntry({ data: { message: "m", targets: "frontend" } }))
-        .targets,
+      roomLogToChatEntries(makeRoomEntry({ data: { message: "m", targets: "frontend" } })).targets,
     ).toBeUndefined();
     expect(
       roomLogToChatEntries(makeRoomEntry({ data: { message: "m", targets: [1, 2] } })).targets,
@@ -297,6 +296,7 @@ describe("projectNodeToFileChanges", () => {
       fcNode([
         { ability_name: "write_file", outcome: "success", data: { file_path: "/tmp/a.txt" } },
       ]),
+      { projectId: "proj-001", agentId: "agent-001" },
     );
     expect(fc).toHaveLength(1);
     expect(fc[0]).toMatchObject({
@@ -306,7 +306,16 @@ describe("projectNodeToFileChanges", () => {
       agentName: "agent-1",
       nodeId: "n1",
       timestamp: "2026-07-17T00:00:00Z",
+      projectId: "proj-001",
+      agentId: "agent-001",
     });
+  });
+
+  it("keeps an explicit empty scope for legacy projections", () => {
+    const [change] = projectNodeToFileChanges(
+      fcNode([{ ability_name: "write_file", outcome: "success", data: {} }]),
+    );
+    expect(change).toMatchObject({ projectId: "", agentId: "" });
   });
 
   it("edit_file change", () => {
