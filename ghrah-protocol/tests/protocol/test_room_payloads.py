@@ -29,6 +29,7 @@ from ghrah.protocol.types import (
     RoomInfoPayload,
     RoomJoinPayload,
     RoomLeavePayload,
+    RoomLifecyclePayload,
     RoomListPayload,
     RoomListResultPayload,
     RoomLogEntryPayload,
@@ -62,6 +63,7 @@ ROOM_INFO = {
     "version": 5,
     "created_at": "2026-08-25T00:00:00Z",
     "updated_at": "2026-08-25T01:00:00Z",
+    "archived_at": None,
 }
 
 ROOM_LOG_ENTRY = {
@@ -82,7 +84,8 @@ class TestRoomEnums:
     def test_room_commands_complete(self):
         assert ROOM_COMMANDS == frozenset({
             "room_create", "room_list", "room_get", "room_update",
-            "room_delete", "room_join", "room_leave", "room_get_members",
+            "room_archive", "room_restore", "room_delete", "room_join",
+            "room_leave", "room_get_members",
             "room_get_log", "room_send",
         })
 
@@ -90,13 +93,15 @@ class TestRoomEnums:
         for cmd in ROOM_COMMANDS:
             assert cmd in CommandType._value2member_map_
 
-    def test_room_events_six(self):
+    def test_room_events_eight(self):
         expected = {
             "room_created", "room_updated", "room_deleted",
+            "room_archived", "room_restored",
             "room_member_joined", "room_member_left", "room_log_appended",
         }
         values = {
             EventType.ROOM_CREATED.value, EventType.ROOM_UPDATED.value,
+            EventType.ROOM_ARCHIVED.value, EventType.ROOM_RESTORED.value,
             EventType.ROOM_DELETED.value, EventType.ROOM_MEMBER_JOINED.value,
             EventType.ROOM_MEMBER_LEFT.value, EventType.ROOM_LOG_APPENDED.value,
         }
@@ -121,7 +126,8 @@ class TestRoomPayloadRoundTrip:
             "room_id": "room-001", "name": "architecture-v2",
             "expected_version": 5,
         }),
-        (RoomDeletePayload, {"room_id": "room-001", "force": False}),
+        (RoomLifecyclePayload, {"room_id": "room-001", "expected_version": 5}),
+        (RoomDeletePayload, {"room_id": "room-001", "expected_version": 5}),
         (RoomJoinPayload, {
             "room_id": "room-001", "subject": "frontend-dev",
             "subject_type": "agent", "subject_name": "",
@@ -168,6 +174,7 @@ class TestRoomPayloadRoundTrip:
         assert dumped["members"] == []
         assert dumped["seq_watermark"] == 0
         assert dumped["version"] == 1
+        assert dumped["archived_at"] is None
 
         entry = RoomLogEntryPayload(
             id="e", room_id="r", seq=1, author="a",
@@ -207,6 +214,7 @@ class TestRoomEnvelopeIntegration:
     def test_all_room_events_have_payload_registration(self):
         for event_type in (
             EventType.ROOM_CREATED, EventType.ROOM_UPDATED,
+            EventType.ROOM_ARCHIVED, EventType.ROOM_RESTORED,
             EventType.ROOM_DELETED, EventType.ROOM_MEMBER_JOINED,
             EventType.ROOM_MEMBER_LEFT, EventType.ROOM_LOG_APPENDED,
         ):
@@ -216,6 +224,10 @@ class TestRoomEnvelopeIntegration:
         assert (
             COMMAND_PAYLOAD_MAP[CommandType.ROOM_GET_MEMBERS] is RoomIdPayload
         )
+
+    def test_room_lifecycle_commands_use_versioned_payload(self):
+        assert COMMAND_PAYLOAD_MAP[CommandType.ROOM_ARCHIVE] is RoomLifecyclePayload
+        assert COMMAND_PAYLOAD_MAP[CommandType.ROOM_RESTORE] is RoomLifecyclePayload
 
     def test_room_payload_validation_error_propagates(self):
         """已知 room 命令 + 缺必填字段 → ValidationError（对齐 envelope 收窄语义）。"""

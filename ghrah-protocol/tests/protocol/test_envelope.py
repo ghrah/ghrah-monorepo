@@ -93,7 +93,10 @@ class TestWireFormatCompat:
     def test_known_type_payload_serializes_to_dict(self):
         """已知 type：经 envelope_from_dict 收窄后，model_dump 的 payload 仍是 dict。"""
         env = envelope_from_dict(
-            {"type": "spawn_agent", "payload": {"config": {"name": "x"}}}
+            {
+                "type": "spawn_agent",
+                "payload": {"project_id": "p1", "config": {"name": "x"}},
+            }
         )
         dumped = env.model_dump()
         assert isinstance(dumped["payload"], dict)
@@ -182,7 +185,10 @@ class TestExpectPayload:
     def test_narrow_from_model_instance(self):
         """payload 已是目标类型时直接返回。"""
         env = envelope_from_dict(
-            {"type": "spawn_agent", "payload": {"config": {"name": "x"}}}
+            {
+                "type": "spawn_agent",
+                "payload": {"project_id": "p1", "config": {"name": "x"}},
+            }
         )
         assert isinstance(env.payload, SpawnAgentPayload)
         payload = expect_payload(env, SpawnAgentPayload)
@@ -192,7 +198,7 @@ class TestExpectPayload:
         """payload 是 dict（未登记 MAP）时 model_validate 收窄。"""
         env = Envelope(
             type="spawn_agent",
-            payload={"config": {"name": "x"}},
+            payload={"project_id": "p1", "config": {"name": "x"}},
         )
         payload = expect_payload(env, SpawnAgentPayload)
         assert isinstance(payload, SpawnAgentPayload)
@@ -236,7 +242,9 @@ class TestTypePayloadMismatch:
         """
         env = Envelope(
             type="agent_spawned",
-            payload=SpawnAgentPayload.model_validate({"config": {"name": "x"}}),
+            payload=SpawnAgentPayload.model_validate(
+                {"project_id": "p1", "config": {"name": "x"}}
+            ),
         )
         assert env.type == "agent_spawned"
         assert isinstance(env.payload, SpawnAgentPayload)

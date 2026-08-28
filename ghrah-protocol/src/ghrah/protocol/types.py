@@ -149,11 +149,13 @@ class CommandType(StrEnum):
     TASK_GET = "task_get"
     TASK_DELETE = "task_delete"
 
-    # ─── Project 管理类（Observer → Subject，13 个）───
+    # ─── Project 管理类（Observer → Subject，15 个）───
     PROJECT_CREATE = "project_create"
     PROJECT_UPDATE = "project_update"
     PROJECT_LIST = "project_list"
     PROJECT_GET = "project_get"
+    PROJECT_ARCHIVE = "project_archive"
+    PROJECT_RESTORE = "project_restore"
     PROJECT_DELETE = "project_delete"
     PROJECT_ADD_AGENT = "project_add_agent"
     PROJECT_REMOVE_AGENT = "project_remove_agent"
@@ -164,11 +166,13 @@ class CommandType(StrEnum):
     PROJECT_RESUME = "project_resume"
     PROJECT_STOP = "project_stop"
 
-    # ─── Room 管理类（Observer/Core → Subject，10 个）───
+    # ─── Room 管理类（Observer/Core → Subject，12 个）───
     ROOM_CREATE = "room_create"
     ROOM_LIST = "room_list"
     ROOM_GET = "room_get"
     ROOM_UPDATE = "room_update"
+    ROOM_ARCHIVE = "room_archive"
+    ROOM_RESTORE = "room_restore"
     ROOM_DELETE = "room_delete"
     ROOM_JOIN = "room_join"
     ROOM_LEAVE = "room_leave"
@@ -229,9 +233,11 @@ class EventType(StrEnum):
     TASK_BLOCKED = "task_blocked"
     TASK_DELETED = "task_deleted"
 
-    # ─── Project 事件（Subject → Observer，9 个）───
+    # ─── Project 事件（Subject → Observer，11 个）───
     PROJECT_CREATED = "project_created"
     PROJECT_UPDATED = "project_updated"
+    PROJECT_ARCHIVED = "project_archived"
+    PROJECT_RESTORED = "project_restored"
     PROJECT_DELETED = "project_deleted"
     PROJECT_PAUSED = "project_paused"
     PROJECT_RESUMED = "project_resumed"
@@ -240,9 +246,11 @@ class EventType(StrEnum):
     PROJECT_AGENT_REMOVED = "project_agent_removed"
     PROJECT_RECOVERY_SET = "project_recovery_set"
 
-    # ─── Room 事件（Subject → Observer/Core，6 个）───
+    # ─── Room 事件（Subject → Observer/Core，8 个）───
     ROOM_CREATED = "room_created"
     ROOM_UPDATED = "room_updated"
+    ROOM_ARCHIVED = "room_archived"
+    ROOM_RESTORED = "room_restored"
     ROOM_DELETED = "room_deleted"
     ROOM_MEMBER_JOINED = "room_member_joined"
     ROOM_MEMBER_LEFT = "room_member_left"
@@ -378,6 +386,8 @@ PROJECT_COMMANDS: frozenset[str] = frozenset({
     CommandType.PROJECT_UPDATE.value,
     CommandType.PROJECT_LIST.value,
     CommandType.PROJECT_GET.value,
+    CommandType.PROJECT_ARCHIVE.value,
+    CommandType.PROJECT_RESTORE.value,
     CommandType.PROJECT_DELETE.value,
     CommandType.PROJECT_ADD_AGENT.value,
     CommandType.PROJECT_REMOVE_AGENT.value,
@@ -394,6 +404,8 @@ ROOM_COMMANDS: frozenset[str] = frozenset({
     CommandType.ROOM_LIST.value,
     CommandType.ROOM_GET.value,
     CommandType.ROOM_UPDATE.value,
+    CommandType.ROOM_ARCHIVE.value,
+    CommandType.ROOM_RESTORE.value,
     CommandType.ROOM_DELETE.value,
     CommandType.ROOM_JOIN.value,
     CommandType.ROOM_LEAVE.value,
@@ -466,6 +478,8 @@ class AgentConfigPayload(BaseModel):
 class SpawnAgentPayload(BaseModel):
     """spawn_agent 命令载荷。"""
 
+    project_id: str
+    cluster_id: str = ""
     config: AgentConfigPayload
     abilities: list[AbilityDefinitionPayload] | None = None
     manifest_ref: str | None = None
@@ -474,12 +488,16 @@ class SpawnAgentPayload(BaseModel):
 class TerminateAgentPayload(BaseModel):
     """terminate_agent 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     name: str
 
 
 class SendMessagePayload(BaseModel):
     """send_message 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     target: str
     content: str
     sender: str = "user"
@@ -495,6 +513,7 @@ class SendMessagePayload(BaseModel):
 class BroadcastMessagePayload(BaseModel):
     """broadcast_message 命令载荷。"""
 
+    project_id: str
     content: str
     sender: str = "user"
 
@@ -513,14 +532,16 @@ class AbilityDefinitionPayload(BaseModel):
 class RegisterAbilityPayload(BaseModel):
     """register_ability 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
     ability: AbilityDefinitionPayload
 
 
 class ListAgentsPayload(BaseModel):
-    """list_agents 命令载荷（空载荷）。"""
+    """list_agents 命令载荷（Project-scoped）。"""
 
-    pass
+    project_id: str
 
 
 class HealthCheckPayload(BaseModel):
@@ -532,6 +553,9 @@ class HealthCheckPayload(BaseModel):
 class DelegatePayload(BaseModel):
     """delegate 命令载荷。"""
 
+    project_id: str
+    from_agent_id: str
+    to_agent_id: str
     from_agent: str
     to_agent: str
     content: str
@@ -611,6 +635,8 @@ class PersistListPayload(BaseModel):
 class AgentSpawnedPayload(BaseModel):
     """agent_spawned 事件载荷。"""
 
+    project_id: str = ""
+    cluster_id: str = ""
     name: str
     agent_id: str = ""
     incarnation_id: str = ""
@@ -620,6 +646,8 @@ class AgentSpawnedPayload(BaseModel):
 class AgentTerminatedPayload(BaseModel):
     """agent_terminated 事件载荷。"""
 
+    project_id: str = ""
+    cluster_id: str = ""
     name: str
     agent_id: str = ""
     incarnation_id: str = ""
@@ -628,6 +656,9 @@ class AgentTerminatedPayload(BaseModel):
 class AgentResponsePayload(BaseModel):
     """agent_response 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     sender: str
     recipient: str
     content: str
@@ -639,6 +670,9 @@ class AgentResponsePayload(BaseModel):
 class ActionChainUpdatedPayload(BaseModel):
     """action_chain_updated 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
     node: dict[str, Any] = Field(default_factory=dict)
 
@@ -646,6 +680,9 @@ class ActionChainUpdatedPayload(BaseModel):
 class AgentErrorPayload(BaseModel):
     """agent_error 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
     error: str
 
@@ -663,6 +700,9 @@ class AbilityResultPayload(BaseModel):
     执行结果来源于 Subject 返回的 execute_ability command_result。
     """
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     request_id: str
     agent_name: str
     ability_name: str
@@ -678,6 +718,9 @@ class HITLRequestPayload(BaseModel):
     当 AbilityRunner 判断某操作需要人工审批时，创建 Promise 并广播此事件。
     """
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     promise_id: str
     agent_name: str
     ability_name: str
@@ -713,6 +756,8 @@ class HITLResponsePayload(BaseModel):
 class UnregisterAbilityPayload(BaseModel):
     """unregister_ability 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
     ability_name: str
 
@@ -720,6 +765,8 @@ class UnregisterAbilityPayload(BaseModel):
 class GetAgentInfoPayload(BaseModel):
     """get_agent_info 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     name: str
 
 
@@ -770,18 +817,24 @@ class ListClustersResultPayload(BaseModel):
 class CreateWorkspacePayload(BaseModel):
     """create_workspace 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
 
 
 class DestroyWorkspacePayload(BaseModel):
     """destroy_workspace 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
 
 
 class WorkspaceSnapshotPayload(BaseModel):
     """workspace_snapshot 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
     message: str = ""
 
@@ -789,6 +842,8 @@ class WorkspaceSnapshotPayload(BaseModel):
 class WorkspaceRollbackPayload(BaseModel):
     """workspace_rollback 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
     snapshot_id: str
 
@@ -796,6 +851,8 @@ class WorkspaceRollbackPayload(BaseModel):
 class WorkspaceDiffPayload(BaseModel):
     """workspace_diff 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
     snapshot_id: str | None = None
 
@@ -803,6 +860,8 @@ class WorkspaceDiffPayload(BaseModel):
 class WorkspaceStatusPayload(BaseModel):
     """workspace_status 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
 
 
@@ -836,6 +895,9 @@ class WorkspaceListPayload(BaseModel):
 class WorkspaceCreatedPayload(BaseModel):
     """workspace_created 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
     path: str
 
@@ -843,12 +905,18 @@ class WorkspaceCreatedPayload(BaseModel):
 class WorkspaceDestroyedPayload(BaseModel):
     """workspace_destroyed 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
 
 
 class WorkspaceSnapshotCreatedPayload(BaseModel):
     """workspace_snapshot_created 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
     snapshot_id: str
     message: str = ""
@@ -857,6 +925,9 @@ class WorkspaceSnapshotCreatedPayload(BaseModel):
 class WorkspaceRolledBackPayload(BaseModel):
     """workspace_rolled_back 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
     snapshot_id: str
 
@@ -953,6 +1024,8 @@ class ManifestResolveAgentResponsePayload(BaseModel):
 class SessionCreatePayload(BaseModel):
     """session_create 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
     session_name: str | None = None
     from_node_id: str | None = None
@@ -962,6 +1035,8 @@ class SessionCreatePayload(BaseModel):
 class SessionSwitchPayload(BaseModel):
     """session_switch 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
     session_id: str
 
@@ -969,12 +1044,16 @@ class SessionSwitchPayload(BaseModel):
 class SessionListPayload(BaseModel):
     """session_list 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
 
 
 class SessionArchivePayload(BaseModel):
     """session_archive 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
     session_id: str
 
@@ -982,6 +1061,8 @@ class SessionArchivePayload(BaseModel):
 class SessionDeletePayload(BaseModel):
     """session_delete 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
     session_id: str
 
@@ -989,8 +1070,9 @@ class SessionDeletePayload(BaseModel):
 class GetChainHistoryPayload(BaseModel):
     """get_chain_history 命令载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
-    project_id: str | None = None
     branch_name: str = "main"
     limit: int = -1
 
@@ -998,6 +1080,8 @@ class GetChainHistoryPayload(BaseModel):
 class ChainHistoryResultPayload(BaseModel):
     """get_chain_history 命令的响应载荷。"""
 
+    project_id: str
+    agent_id: str
     agent_name: str
     branch_name: str = "main"
     nodes: list[dict[str, Any]] = Field(default_factory=list)
@@ -1178,7 +1262,7 @@ class ProjectInfoPayload(BaseModel):
     """Project 信息基类载荷。
 
     对齐 ghrah-subject project/models.ProjectRecord，用于 project_get/project_list
-    结果项及 PROJECT_* 事件回执。version/deleted_at/cluster_ids/workspaces/
+    结果项及 PROJECT_* 事件回执。version/archived_at/deleted_at/cluster_ids/workspaces/
     project_root_locator 为 Subject 独占内部状态 Root；workspaces 为 Agent 工作资源。
     Project 内部存储位置统一由 ``project_root_locator`` 派生。
     """
@@ -1197,6 +1281,8 @@ class ProjectInfoPayload(BaseModel):
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
+    archived_at: str | None = None
+    # 仅用于 A7 旧软删数据迁移；新生命周期不再写入该字段。
     deleted_at: str | None = None
 
 
@@ -1226,23 +1312,29 @@ class ProjectUpdatePayload(BaseModel):
 
 
 class ProjectIdPayload(BaseModel):
-    """project_get / project_delete / project_pause / project_resume /
-    project_stop 命令载荷（project_id 键控）。"""
+    """project_get / project_pause / project_resume / project_stop 命令载荷。"""
 
     project_id: str
 
 
-class ProjectDeletePayload(ProjectIdPayload):
+class ProjectLifecyclePayload(ProjectIdPayload):
+    """project_archive / project_restore 命令载荷（乐观锁）。"""
+
+    expected_version: int
+
+
+class ProjectDeletePayload(ProjectLifecyclePayload):
     """project_delete 命令载荷。"""
 
-    force: bool = False
-    purge_storage: bool = False
+    cascade_rooms: bool = False
 
 
 class ProjectListPayload(BaseModel):
-    """project_list 命令载荷（可选 status 过滤；MVP 不分页）。"""
+    """project_list 命令载荷（运行状态与归档状态分轴过滤）。"""
 
     status: ProjectStatus | None = None
+    archived: bool | None = False
+    # A7 兼容读取旧 deleted_at 记录；迁移完成后删除。
     include_deleted: bool = False
 
 
@@ -1259,7 +1351,7 @@ class ProjectRemoveAgentPayload(BaseModel):
 
     project_id: str
     agent_name: str
-    agent_id: str = ""
+    agent_id: str
     expected_version: int | None = None
 
 
@@ -1373,6 +1465,7 @@ class RoomInfoPayload(BaseModel):
     version: int = 1
     created_at: str = ""
     updated_at: str = ""
+    archived_at: str | None = None
 
 
 class RoomLogEntryPayload(BaseModel):
@@ -1416,10 +1509,14 @@ class RoomUpdatePayload(BaseModel):
     expected_version: int | None = None
 
 
-class RoomDeletePayload(RoomIdPayload):
-    """room_delete 命令载荷。"""
+class RoomLifecyclePayload(RoomIdPayload):
+    """room_archive / room_restore 命令载荷（乐观锁）。"""
 
-    force: bool = False
+    expected_version: int
+
+
+class RoomDeletePayload(RoomLifecyclePayload):
+    """room_delete 命令载荷。"""
 
 
 class RoomJoinPayload(BaseModel):
@@ -1509,6 +1606,9 @@ class RoomLogEventPayload(BaseModel):
 class SessionInfoPayload(BaseModel):
     """Session 信息载荷，用于 session 事件和查询结果。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     session_id: str
     agent_name: str
     branch_name: str
@@ -1526,6 +1626,9 @@ class SessionInfoPayload(BaseModel):
 class SessionCreatedPayload(BaseModel):
     """session_created 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
     session: SessionInfoPayload
 
@@ -1533,6 +1636,9 @@ class SessionCreatedPayload(BaseModel):
 class SessionSwitchedPayload(BaseModel):
     """session_switched 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
     session: SessionInfoPayload
 
@@ -1540,6 +1646,9 @@ class SessionSwitchedPayload(BaseModel):
 class SessionArchivedPayload(BaseModel):
     """session_archived 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
     session_id: str
 
@@ -1547,6 +1656,9 @@ class SessionArchivedPayload(BaseModel):
 class SessionDeletedPayload(BaseModel):
     """session_deleted 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
     session_id: str
 
@@ -1554,6 +1666,9 @@ class SessionDeletedPayload(BaseModel):
 class SessionListResultPayload(BaseModel):
     """session_list_result 事件载荷。"""
 
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
     agent_name: str
     sessions: list[SessionInfoPayload]
 
@@ -1691,8 +1806,17 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     CommandType.LIST_CLUSTERS: ListClustersPayload,
     CommandType.HITL_RESPONSE: HITLResponsePayload,
     # persist_*: payload 为裸 dict（Stage 2 补齐真实 payload 模型）
-    # workspace_* / manifest_* / get_chain_history: payload 模型存在但消费侧
-    #   仍以 dict 委托 SubjectService，本阶段不登记以保持现状（Stage 2 评估）
+    # Agent-scoped workspace 命令；资源级 register/get/list 仍以 workspace_id 路由。
+    CommandType.CREATE_WORKSPACE: CreateWorkspacePayload,
+    CommandType.DESTROY_WORKSPACE: DestroyWorkspacePayload,
+    CommandType.WORKSPACE_SNAPSHOT: WorkspaceSnapshotPayload,
+    CommandType.WORKSPACE_ROLLBACK: WorkspaceRollbackPayload,
+    CommandType.WORKSPACE_DIFF: WorkspaceDiffPayload,
+    CommandType.WORKSPACE_STATUS: WorkspaceStatusPayload,
+    CommandType.WORKSPACE_REGISTER: WorkspaceRegisterPayload,
+    CommandType.WORKSPACE_GET: WorkspaceGetPayload,
+    CommandType.WORKSPACE_LIST: WorkspaceListPayload,
+    CommandType.GET_CHAIN_HISTORY: GetChainHistoryPayload,
     # Task 管理（11 个）
     CommandType.TASK_CREATE: TaskCreatePayload,
     CommandType.TASK_UPDATE: TaskUpdatePayload,
@@ -1711,11 +1835,13 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     CommandType.SESSION_LIST: SessionListPayload,
     CommandType.SESSION_ARCHIVE: SessionArchivePayload,
     CommandType.SESSION_DELETE: SessionDeletePayload,
-    # Project 管理（13 个）
+    # Project 管理（15 个）
     CommandType.PROJECT_CREATE: ProjectCreatePayload,
     CommandType.PROJECT_UPDATE: ProjectUpdatePayload,
     CommandType.PROJECT_LIST: ProjectListPayload,
     CommandType.PROJECT_GET: ProjectIdPayload,
+    CommandType.PROJECT_ARCHIVE: ProjectLifecyclePayload,
+    CommandType.PROJECT_RESTORE: ProjectLifecyclePayload,
     CommandType.PROJECT_DELETE: ProjectDeletePayload,
     CommandType.PROJECT_ADD_AGENT: ProjectAddAgentPayload,
     CommandType.PROJECT_REMOVE_AGENT: ProjectRemoveAgentPayload,
@@ -1725,11 +1851,13 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     CommandType.PROJECT_PAUSE: ProjectIdPayload,
     CommandType.PROJECT_RESUME: ProjectIdPayload,
     CommandType.PROJECT_STOP: ProjectIdPayload,
-    # Room 管理（10 个）
+    # Room 管理（12 个）
     CommandType.ROOM_CREATE: RoomCreatePayload,
     CommandType.ROOM_LIST: RoomListPayload,
     CommandType.ROOM_GET: RoomIdPayload,
     CommandType.ROOM_UPDATE: RoomUpdatePayload,
+    CommandType.ROOM_ARCHIVE: RoomLifecyclePayload,
+    CommandType.ROOM_RESTORE: RoomLifecyclePayload,
     CommandType.ROOM_DELETE: RoomDeletePayload,
     CommandType.ROOM_JOIN: RoomJoinPayload,
     CommandType.ROOM_LEAVE: RoomLeavePayload,
@@ -1776,9 +1904,11 @@ EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
     EventType.MANIFEST_AGENT_CREATED: ManifestAgentEventPayload,
     EventType.MANIFEST_AGENT_UPDATED: ManifestAgentEventPayload,
     EventType.MANIFEST_AGENT_DELETED: ManifestAgentEventPayload,
-    # Project 事件（9 个）
+    # Project 事件（11 个）
     EventType.PROJECT_CREATED: ProjectEventPayload,
     EventType.PROJECT_UPDATED: ProjectEventPayload,
+    EventType.PROJECT_ARCHIVED: ProjectEventPayload,
+    EventType.PROJECT_RESTORED: ProjectEventPayload,
     EventType.PROJECT_DELETED: ProjectEventPayload,
     EventType.PROJECT_PAUSED: ProjectEventPayload,
     EventType.PROJECT_RESUMED: ProjectEventPayload,
@@ -1786,9 +1916,11 @@ EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
     EventType.PROJECT_AGENT_ADDED: ProjectAgentEventPayload,
     EventType.PROJECT_AGENT_REMOVED: ProjectAgentEventPayload,
     EventType.PROJECT_RECOVERY_SET: ProjectEventPayload,
-    # Room 事件（6 个）
+    # Room 事件（8 个）
     EventType.ROOM_CREATED: RoomEventPayload,
     EventType.ROOM_UPDATED: RoomEventPayload,
+    EventType.ROOM_ARCHIVED: RoomEventPayload,
+    EventType.ROOM_RESTORED: RoomEventPayload,
     EventType.ROOM_DELETED: RoomDeletedEventPayload,
     EventType.ROOM_MEMBER_JOINED: RoomMemberEventPayload,
     EventType.ROOM_MEMBER_LEFT: RoomMemberEventPayload,
@@ -1872,6 +2004,12 @@ def payload_agent_name(payload: Any) -> str | None:
         val = payload.get("agent_name")
         return val if isinstance(val, str) and val else None
     return None
+
+
+def make_agent_key(project_id: str, agent_id: str) -> str:
+    """Return the stable Observer/Subject key for one Project-owned Agent."""
+
+    return f"{project_id}:{agent_id}"
 
 
 # ─── 工厂函数（payload 存模型实例，序列化由 model_dump 统一处理）───
