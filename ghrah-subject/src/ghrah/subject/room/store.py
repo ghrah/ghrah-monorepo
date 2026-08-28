@@ -23,12 +23,13 @@ import aiosqlite
 from ghrah.subject.room.models import (
     RoomLogRecord,
     RoomRecord,
+    RoomStatus,
     now_iso,
 )
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ConcurrentModificationError", "RoomStore"]
+__all__ = ["ConcurrentModificationError", "RoomArchivedError", "RoomStore"]
 
 RoomRecordList = list[RoomRecord]
 RoomLogList = list[RoomLogRecord]
@@ -36,6 +37,10 @@ RoomLogList = list[RoomLogRecord]
 
 class ConcurrentModificationError(Exception):
     """乐观锁：expected_version 与当前 version 不匹配。"""
+
+
+class RoomArchivedError(Exception):
+    """A write attempted to cross the archived Room boundary."""
 
 
 _DDL = """
@@ -48,7 +53,8 @@ CREATE TABLE IF NOT EXISTS subject_rooms (
     seq_watermark INTEGER NOT NULL DEFAULT 0,
     version       INTEGER NOT NULL DEFAULT 1,
     created_at    TEXT NOT NULL DEFAULT '',
-    updated_at    TEXT NOT NULL DEFAULT ''
+    updated_at    TEXT NOT NULL DEFAULT '',
+    archived_at   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_subject_rooms_project ON subject_rooms(project_id);
 CREATE TABLE IF NOT EXISTS subject_room_logs (
@@ -73,7 +79,17 @@ _ROOM_COLUMNS = (
     "version",
     "created_at",
     "updated_at",
+    "archived_at",
 )
+
+
+async def _ensure_compat_columns(db: aiosqlite.Connection) -> None:
+    """Idempotently migrate Room tables created before archived_at existed."""
+
+    cursor = await db.execute("PRAGMA table_info(subject_rooms)")
+    columns = {str(row["name"]) for row in await cursor.fetchall()}
+    if "archived_at" not in columns:
+        await db.execute("ALTER TABLE subject_rooms ADD COLUMN archived_at TEXT")
 
 
 def _room_to_row(record: RoomRecord) -> dict[str, Any]:
@@ -111,6 +127,7 @@ class RoomStore:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(_DDL)
+            await _ensure_compat_columns(db)
             self._db = db
         logger.debug("RoomStore started (db=%s)", self._db_path)
 
@@ -206,17 +223,39 @@ class RoomStore:
             rows = await cursor.fetchall()
             return [_row_to_room(r) for r in rows]
 
-    async def delete(self, room_id: str) -> bool:
-        """硬删 room 元数据 + 其分区全部日志（force 语义由 manager 守卫）。"""
+    async def delete(
+        self, room_id: str, *, expected_version: int | None = None
+    ) -> bool:
+        """Atomically hard-delete Room metadata, membership and all log entries."""
+
         async with self._lock:
             db = self._require_db()
-            cursor = await db.execute(
-                "DELETE FROM subject_rooms WHERE room_id = ?", (room_id,)
-            )
-            await db.execute(
-                "DELETE FROM subject_room_logs WHERE room_id = ?", (room_id,)
-            )
-            return cursor.rowcount > 0
+            await db.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = await db.execute(
+                    "SELECT version FROM subject_rooms WHERE room_id = ?", (room_id,)
+                )
+                row = await cursor.fetchone()
+                if row is None:
+                    await db.rollback()
+                    return False
+                current_version = int(row["version"])
+                if expected_version is not None and current_version != expected_version:
+                    raise ConcurrentModificationError(
+                        f"Room {room_id} modified: expected version {expected_version}, "
+                        f"got {current_version}"
+                    )
+                await db.execute(
+                    "DELETE FROM subject_room_logs WHERE room_id = ?", (room_id,)
+                )
+                await db.execute(
+                    "DELETE FROM subject_rooms WHERE room_id = ?", (room_id,)
+                )
+                await db.commit()
+                return True
+            except Exception:
+                await db.rollback()
+                raise
 
     async def count_logs(self, room_id: str) -> int:
         async with self._lock:
@@ -250,6 +289,8 @@ class RoomStore:
             if row is None:
                 return None
             room = _row_to_room(row)
+            if room.status == RoomStatus.ARCHIVED:
+                raise RoomArchivedError(room_id)
             seq = room.seq_watermark + 1
             record = record_factory(seq)
             await db.execute(

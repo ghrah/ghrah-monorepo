@@ -74,11 +74,13 @@ class RoomUnit(SubjectUnit):
             self._config.persistence.db_path, project_roots
         )
 
-        async def project_exists(project_id: str) -> bool:
+        async def project_get(project_id: str) -> dict[str, Any] | None:
             result = await project_manager.handle_command(
                 "project_get", {"project_id": project_id}
             )
-            return bool(result.get("success"))
+            if not result.get("success"):
+                return None
+            return (result.get("data") or {}).get("project")
 
         async def deliver(
             target: str, sender: str, content: str, room_id: str
@@ -143,6 +145,8 @@ class RoomUnit(SubjectUnit):
             agent, handle = resolved[0]
             return await handle.send_message(
                 SendMessagePayload(
+                    project_id=room.project_id,
+                    agent_id=str(agent.get("agent_id") or target),
                     target=str(agent["name"]),
                     content=content,
                     sender=sender,
@@ -157,7 +161,7 @@ class RoomUnit(SubjectUnit):
         self._manager = RoomManager(
             self._store,
             on_event=self._emit_event,
-            project_exists=project_exists,
+            project_get=project_get,
             deliver=deliver,
         )
         ctx.provide(ROOM_MANAGER.name, self._manager)

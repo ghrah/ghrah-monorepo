@@ -486,7 +486,9 @@ class ProjectManager:
             )
         # active 且 cluster 缺该 agent 则 spawn
         if updated.status == ProjectStatus.ACTIVE and migration_error is None:
-            await self._ensure_agent_spawned(agent, updated.project_root_locator)
+            await self._ensure_agent_spawned(
+                agent, updated.project_id, updated.project_root_locator
+            )
         await self._emit_agent("project_agent_added", updated, agent)
         return _ok(
             {
@@ -498,7 +500,9 @@ class ProjectManager:
             }
         )
 
-    async def _ensure_agent_spawned(self, agent: AgentSpec, project_root_locator: str) -> None:
+    async def _ensure_agent_spawned(
+        self, agent: AgentSpec, project_id: str, project_root_locator: str
+    ) -> None:
         """若 cluster 缺该 agent 则 spawn（MVP：不预检 list，直接 spawn，幂等由 Core 保证）。"""
         try:
             handle = await self._cluster_transport.ensure_cluster(
@@ -508,6 +512,8 @@ class ProjectManager:
             logger.warning("add_agent: ensure_cluster %s failed: %s", agent.cluster_id, exc)
             return
         spawn_payload = SpawnAgentPayload(
+            project_id=project_id,
+            cluster_id=agent.cluster_id,
             config=AgentConfigPayload(
                 name=agent.name,
                 agent_id=agent.agent_id,

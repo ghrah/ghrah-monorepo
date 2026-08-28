@@ -212,9 +212,9 @@ class ProjectScopedRoomStore:
         records.sort(key=lambda r: r.created_at)
         return records
 
-    async def delete(self, room_id: str) -> bool:
+    async def delete(self, room_id: str, **kwargs: Any) -> bool:
         store = await self._locate(room_id)
-        return False if store is None else await store.delete(room_id)
+        return False if store is None else await store.delete(room_id, **kwargs)
 
     async def count_logs(self, room_id: str) -> int:
         store = await self._locate(room_id)

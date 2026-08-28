@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""RoomManager 单测：10 命令 + 写时校验 + 事件面 + send 收敛点。
+"""RoomManager 单测：12 命令 + 生命周期守卫 + 事件面 + send 收敛点。
 
 契约基准 = mock-server ``state.ts``（同 payload schema / 同事件名 /
 同 seq 分配语义 / 同 result 形状）。
@@ -17,6 +17,7 @@ from ghrah.subject.room.manager import RoomManager
 from ghrah.subject.room.store import RoomStore
 
 PROJECT_IDS = {"proj-1"}
+PROJECT_AGENTS = {"architect", "frontend-dev", "tester", "bad"}
 
 
 async def _manager(
@@ -29,10 +30,19 @@ async def _manager(
         if events is not None:
             events.append((event_type, payload))
 
-    async def project_exists(project_id: str) -> bool:
-        return project_id in PROJECT_IDS
+    async def project_get(project_id: str) -> dict[str, Any] | None:
+        if project_id not in PROJECT_IDS:
+            return None
+        return {
+            "project_id": project_id,
+            "archived_at": None,
+            "agents": [
+                {"agent_id": name, "name": name, "cluster_id": "default"}
+                for name in sorted(PROJECT_AGENTS)
+            ],
+        }
 
-    return RoomManager(store, on_event=on_event, project_exists=project_exists)
+    return RoomManager(store, on_event=on_event, project_get=project_get)
 
 
 def _data(result: dict) -> dict:
@@ -120,11 +130,222 @@ async def test_update_optimistic_lock_and_event(tmp_path: Path) -> None:
         await m.store.stop()
 
 
-async def test_delete_force_guard(tmp_path: Path) -> None:
+async def test_archive_restore_guards_and_preserves_room_aggregate(tmp_path: Path) -> None:
     events: list[tuple[str, dict[str, Any]]] = []
     m = await _manager(tmp_path, events)
     try:
         room = await _make_room(m)
+        joined = _data(
+            await m.handle_command(
+                "room_join",
+                {
+                    "room_id": room["room_id"],
+                    "subject": "architect",
+                    "subject_type": "agent",
+                },
+            )
+        )["room"]
+        await m.handle_command(
+            "room_send",
+            {
+                "room_id": room["room_id"],
+                "author": "human:yuki",
+                "author_type": "human",
+                "data": {"message": "preserved"},
+            },
+        )
+
+        archived = _data(
+            await m.handle_command(
+                "room_archive",
+                {
+                    "room_id": room["room_id"],
+                    "expected_version": joined["version"],
+                },
+            )
+        )["room"]
+        assert archived["status"] == "archived"
+        assert archived["archived_at"] is not None
+        assert archived["members"] == joined["members"]
+        assert await m.store.count_logs(room["room_id"]) == 1
+        assert events[-1] == ("room_archived", {"room": archived})
+
+        event_count = len(events)
+        repeated = _data(
+            await m.handle_command(
+                "room_archive",
+                {"room_id": room["room_id"], "expected_version": joined["version"]},
+            )
+        )["room"]
+        assert repeated == archived
+        assert len(events) == event_count
+
+        guarded_commands = [
+            ("room_update", {"name": "blocked", "expected_version": archived["version"]}),
+            ("room_join", {"subject": "human:other", "subject_type": "human"}),
+            ("room_leave", {"subject": "architect"}),
+            ("room_get_members", {}),
+            ("room_get_log", {}),
+            (
+                "room_send",
+                {
+                    "author": "human:yuki",
+                    "author_type": "human",
+                    "data": {"message": "blocked"},
+                },
+            ),
+        ]
+        for command, extra in guarded_commands:
+            result = await m.handle_command(
+                command, {"room_id": room["room_id"], **extra}
+            )
+            assert result["error"] == "resource_archived", command
+        direct = await m.append_log(
+            room["room_id"], author="architect", author_type="agent"
+        )
+        assert direct["error"] == "resource_archived"
+        recipients = await m.resolve_recipients([room["room_id"]])
+        assert recipients["error"] == "resource_archived"
+
+        # System-level discovery remains available for restore/delete UI.
+        got = _data(await m.handle_command("room_get", {"room_id": room["room_id"]}))
+        assert got["room"] == archived
+        listed = _data(
+            await m.handle_command(
+                "room_list", {"project_id": "proj-1", "status": "archived"}
+            )
+        )
+        assert [item["room_id"] for item in listed["rooms"]] == [room["room_id"]]
+
+        conflict = await m.handle_command(
+            "room_restore",
+            {"room_id": room["room_id"], "expected_version": joined["version"]},
+        )
+        assert "version conflict" in conflict["error"]
+        restored = _data(
+            await m.handle_command(
+                "room_restore",
+                {
+                    "room_id": room["room_id"],
+                    "expected_version": archived["version"],
+                },
+            )
+        )["room"]
+        assert restored["status"] == "active"
+        assert restored["archived_at"] is None
+        assert restored["members"] == joined["members"]
+        assert await m.store.count_logs(room["room_id"]) == 1
+        assert events[-1] == ("room_restored", {"room": restored})
+    finally:
+        await m.store.stop()
+
+
+async def test_parent_project_archive_blocks_all_room_access(tmp_path: Path) -> None:
+    store = RoomStore(tmp_path / "rooms.db")
+    await store.start()
+    project = {"project_id": "proj-1", "archived_at": None, "agents": []}
+
+    async def project_get(project_id: str) -> dict[str, Any] | None:
+        return project if project_id == "proj-1" else None
+
+    m = RoomManager(store, project_get=project_get)
+    try:
+        room = await _make_room(m)
+        project["archived_at"] = "2026-08-28T00:00:00Z"
+        for command, payload in (
+            ("room_create", {"project_id": "proj-1", "name": "blocked"}),
+            ("room_get", {"room_id": room["room_id"]}),
+            ("room_list", {"project_id": "proj-1"}),
+            (
+                "room_update",
+                {
+                    "room_id": room["room_id"],
+                    "name": "blocked",
+                    "expected_version": room["version"],
+                },
+            ),
+            (
+                "room_archive",
+                {"room_id": room["room_id"], "expected_version": room["version"]},
+            ),
+            (
+                "room_restore",
+                {"room_id": room["room_id"], "expected_version": room["version"]},
+            ),
+            (
+                "room_delete",
+                {"room_id": room["room_id"], "expected_version": room["version"]},
+            ),
+            (
+                "room_join",
+                {
+                    "room_id": room["room_id"],
+                    "subject": "human:blocked",
+                    "subject_type": "human",
+                },
+            ),
+            (
+                "room_leave",
+                {"room_id": room["room_id"], "subject": "human:blocked"},
+            ),
+            ("room_get_members", {"room_id": room["room_id"]}),
+            ("room_get_log", {"room_id": room["room_id"]}),
+            (
+                "room_send",
+                {
+                    "room_id": room["room_id"],
+                    "author": "human:blocked",
+                    "author_type": "human",
+                    "data": {"message": "blocked"},
+                },
+            ),
+        ):
+            result = await m.handle_command(command, payload)
+            assert result["error"] == "project_archived", command
+        direct = await m.append_log(
+            room["room_id"], author="architect", author_type="agent"
+        )
+        assert direct["error"] == "project_archived"
+        recipients = await m.resolve_recipients([room["room_id"]])
+        assert recipients["error"] == "project_archived"
+        assert await store.get(room["room_id"]) is not None
+    finally:
+        await store.stop()
+
+
+async def test_join_rejects_agent_from_another_project(tmp_path: Path) -> None:
+    m = await _manager(tmp_path)
+    try:
+        room = await _make_room(m)
+        result = await m.handle_command(
+            "room_join",
+            {
+                "room_id": room["room_id"],
+                "subject": "foreign-agent-id",
+                "subject_type": "agent",
+            },
+        )
+        assert result["error"] == "agent_project_mismatch"
+        assert (await m.store.get(room["room_id"])).members == []  # type: ignore[union-attr]
+    finally:
+        await m.store.stop()
+
+
+async def test_delete_permanently_removes_logs_without_force(tmp_path: Path) -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+    m = await _manager(tmp_path, events)
+    try:
+        room = await _make_room(m)
+        joined = _data(
+            await m.handle_command(
+                "room_join",
+                {
+                    "room_id": room["room_id"],
+                    "subject": "architect",
+                    "subject_type": "agent",
+                },
+            )
+        )["room"]
         await m.handle_command(
             "room_send",
             {
@@ -134,21 +355,29 @@ async def test_delete_force_guard(tmp_path: Path) -> None:
                 "data": {"message": "hi"},
             },
         )
-        guarded = await m.handle_command(
-            "room_delete", {"room_id": room["room_id"]}
+        conflict = await m.handle_command(
+            "room_delete",
+            {"room_id": room["room_id"], "expected_version": room["version"]},
         )
-        assert not guarded["success"]
-        assert "force=true" in guarded["error"]
+        assert "version conflict" in conflict["error"]
+        assert await m.store.count_logs(room["room_id"]) == 1
 
-        forced = _data(
+        agents_before = set(PROJECT_AGENTS)
+        deleted = _data(
             await m.handle_command(
-                "room_delete", {"room_id": room["room_id"], "force": True}
+                "room_delete",
+                {
+                    "room_id": room["room_id"],
+                    "expected_version": joined["version"],
+                },
             )
         )
-        assert forced == {
+        assert deleted == {
             "room_id": room["room_id"],
             "project_id": "proj-1",
         }
+        assert await m.store.count_logs(room["room_id"]) == 0
+        assert PROJECT_AGENTS == agents_before
         assert events[-1][0] == "room_deleted"
     finally:
         await m.store.stop()
@@ -421,8 +650,17 @@ async def _delivery_manager(
         if events is not None:
             events.append((event_type, payload))
 
-    async def project_exists(project_id: str) -> bool:
-        return project_id in PROJECT_IDS
+    async def project_get(project_id: str) -> dict[str, Any] | None:
+        if project_id not in PROJECT_IDS:
+            return None
+        return {
+            "project_id": project_id,
+            "archived_at": None,
+            "agents": [
+                {"agent_id": name, "name": name, "cluster_id": "default"}
+                for name in sorted(PROJECT_AGENTS)
+            ],
+        }
 
     async def deliver(
         target: str, sender: str, content: str, room_id: str
@@ -431,7 +669,7 @@ async def _delivery_manager(
         return {"success": True, "data": {"content": "ok"}, "error": None}
 
     return RoomManager(
-        store, on_event=on_event, project_exists=project_exists, deliver=deliver
+        store, on_event=on_event, project_get=project_get, deliver=deliver
     )
 
 

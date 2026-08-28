@@ -42,6 +42,21 @@ async def _make_project(ctx: Context) -> str:
     return _data(result)["project"]["project_id"]
 
 
+async def _add_project_agent(ctx: Context, project_id: str, name: str) -> str:
+    project = _data(
+        await _dispatch(ctx, "project_get", {"project_id": project_id})
+    )["project"]
+    result = await _dispatch(
+        ctx,
+        "project_add_agent",
+        {
+            "project_id": project_id,
+            "agent": {"name": name, "cluster_id": project["cluster_ids"][0]},
+        },
+    )
+    return _data(result)["agent_id"]
+
+
 async def test_room_unit_service_and_mount_order(tmp_path: Path) -> None:
     async with Context() as ctx:
         fibers = await mount_builtin_units(ctx, _config(tmp_path), profile="full")
@@ -67,6 +82,7 @@ async def test_room_commands_via_serial_and_events(tmp_path: Path) -> None:
 
         await mount_builtin_units(ctx, _config(tmp_path), profile="full")
         project_id = await _make_project(ctx)
+        await _add_project_agent(ctx, project_id, "architect")
 
         room = _data(
             await _dispatch(
@@ -118,6 +134,7 @@ async def test_send_ability_serial_path_converges(tmp_path: Path) -> None:
     async with Context() as ctx:
         await mount_builtin_units(ctx, _config(tmp_path), profile="full")
         project_id = await _make_project(ctx)
+        agent_id = await _add_project_agent(ctx, project_id, "architect")
         room = _data(
             await _dispatch(
                 ctx, "room_create", {"project_id": project_id, "name": "r"}
@@ -157,7 +174,7 @@ async def test_send_ability_serial_path_converges(tmp_path: Path) -> None:
             },
         )
         entry = _data(ok_result)["entry"]
-        assert entry["author"] == "architect"
+        assert entry["author"] == agent_id
 
 
 async def test_room_log_persistence_across_restart(tmp_path: Path) -> None:

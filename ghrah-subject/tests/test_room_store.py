@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -43,6 +44,7 @@ async def test_room_crud_roundtrip(tmp_path: Path) -> None:
         assert loaded.members == []
         assert loaded.seq_watermark == 0
         assert loaded.version == 1
+        assert loaded.archived_at is None
 
         assert await store.list(project_id="proj-1") == [record]
         assert await store.list(project_id="proj-other") == []
@@ -160,9 +162,53 @@ async def test_delete_cascades_logs_and_guards(tmp_path: Path) -> None:
         assert result is not None
         assert await store.count_logs(room.room_id) == 1
 
-        assert await store.delete(room.room_id) is True
+        with pytest.raises(ConcurrentModificationError):
+            await store.delete(room.room_id, expected_version=99)
+        assert await store.count_logs(room.room_id) == 1
+
+        assert await store.delete(room.room_id, expected_version=room.version) is True
         assert await store.delete(room.room_id) is False
         assert await store.count_logs(room.room_id) == 0
         assert await store.get(room.room_id) is None
     finally:
         await store.stop()
+
+
+async def test_start_migrates_pre_archive_room_schema(tmp_path: Path) -> None:
+    db_path = tmp_path / "legacy-rooms.db"
+    db = sqlite3.connect(db_path)
+    db.execute(
+        """
+        CREATE TABLE subject_rooms (
+            room_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            members TEXT NOT NULL DEFAULT '[]',
+            seq_watermark INTEGER NOT NULL DEFAULT 0,
+            version INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    db.commit()
+    db.close()
+
+    store = RoomStore(db_path)
+    await store.start()
+    try:
+        room = make_room_record(project_id="legacy-project", name="legacy")
+        await store.upsert(room)
+        loaded = await store.get(room.room_id)
+        assert loaded is not None
+        assert loaded.archived_at is None
+    finally:
+        await store.stop()
+
+    db = sqlite3.connect(db_path)
+    try:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(subject_rooms)")}
+        assert "archived_at" in columns
+    finally:
+        db.close()
