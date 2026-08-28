@@ -101,6 +101,7 @@ class ProjectUnit(SubjectUnit):
             bootstrap_workspace_locator=self._config.project.bootstrap_workspace_locator,
             default_root_locator_template=self._config.project.default_root_locator_template,
         )
+        self._manager.register_scoped_resource(self._task_store)
         ctx.provide(PROJECT_MANAGER.name, self._manager)
 
     async def start(self) -> None:
@@ -109,6 +110,12 @@ class ProjectUnit(SubjectUnit):
         if self._manager is not None:
             await self._manager.migrate_legacy_project_roots()
         if self._task_store is not None and self._store is not None:
+            archived_projects = await self._store.list(archived=True)
+            for project in archived_projects:
+                self._task_store.register_project_root(
+                    project.project_id, project.project_root_locator
+                )
+                await self._task_store.close_project(project.project_id)
             projects = await self._store.list()
             if projects:
                 await backup_legacy_database(self._config.persistence.db_path)

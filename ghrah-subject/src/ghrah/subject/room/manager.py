@@ -40,6 +40,7 @@ from ghrah.protocol.types import (
     RoomSubjectType,
     RoomUpdatePayload,
 )
+from ghrah.subject.project.errors import ProjectArchivedError
 from ghrah.subject.room.models import (
     RoomLogRecord,
     RoomRecord,
@@ -114,6 +115,8 @@ class RoomManager:
             return _err(f"invalid payload: {e}")
         except RoomArchivedError:
             return _err("resource_archived")
+        except ProjectArchivedError:
+            return _err("project_archived")
 
     # ─── helpers ───
 

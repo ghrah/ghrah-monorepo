@@ -42,6 +42,7 @@ def _make(
     workspaces: list[WorkspaceMount] | None = None,
     agents: list[AgentSpec] | None = None,
     version: int = 1,
+    archived: bool = False,
     deleted: bool = False,
 ) -> ProjectRecord:
     now = datetime.now(UTC)
@@ -54,6 +55,7 @@ def _make(
         created_at=now,
         updated_at=now,
         version=version,
+        archived_at=now if archived else None,
         deleted_at=now if deleted else None,
     )
 
@@ -104,8 +106,8 @@ class TestCrudAndRoundtrip:
                 version = db.execute(
                     "SELECT version FROM subject_schema_versions WHERE component = 'project_store'"
                 ).fetchone()
-            assert {"description", "project_root_locator"} <= columns
-            assert version == (2,)
+            assert {"description", "project_root_locator", "archived_at"} <= columns
+            assert version == (3,)
         finally:
             await migrated.stop()
 
@@ -218,6 +220,64 @@ class TestSoftDelete:
         await store.upsert(record)
         with pytest.raises(ConcurrentModificationError):
             await store.soft_delete(record.project_id, 999)
+
+
+class TestArchiveRestoreHardDelete:
+    async def test_archive_restore_and_filters(self, store: ProjectStore) -> None:
+        record = make_project_record(name="P1")
+        await store.upsert(record)
+
+        archived = await store.archive(record.project_id, record.version)
+        assert archived.archived_at is not None
+        assert archived.status is ProjectStatus.STOPPED
+        assert await store.get(record.project_id) is None
+        assert await store.get(record.project_id, include_archived=True) == archived
+        assert await store.list() == []
+        assert await store.list(archived=True) == [archived]
+        assert await store.list(archived=None) == [archived]
+
+        restored = await store.restore(record.project_id, archived.version)
+        assert restored.archived_at is None
+        assert restored.status is ProjectStatus.STOPPED
+        assert await store.list() == [restored]
+
+    async def test_hard_delete_uses_version_lock(self, store: ProjectStore) -> None:
+        record = make_project_record(name="P1")
+        await store.upsert(record)
+        with pytest.raises(ConcurrentModificationError):
+            await store.hard_delete(record.project_id, 99)
+        assert await store.get(record.project_id) is not None
+        assert await store.hard_delete(record.project_id, record.version) is True
+        assert await store.get(record.project_id, include_archived=True) is None
+
+    async def test_start_migrates_legacy_deleted_row_to_archived(
+        self, tmp_path: Path
+    ) -> None:
+        db_path = tmp_path / "legacy-deleted.db"
+        record = _make(deleted=True)
+        legacy = ProjectStore(db_path)
+        await legacy.start()
+        await legacy.upsert(record)
+        await legacy.stop()
+
+        # Simulate a pre-C1 schema version so startup executes the data migration.
+        with sqlite3.connect(db_path) as db:
+            db.execute(
+                "UPDATE subject_schema_versions SET version = 2 "
+                "WHERE component = 'project_store'"
+            )
+
+        migrated = ProjectStore(db_path)
+        await migrated.start()
+        try:
+            archived = await migrated.get(record.project_id, include_archived=True)
+            assert archived is not None
+            assert archived.archived_at == record.deleted_at
+            assert archived.deleted_at is None
+            assert archived.status is ProjectStatus.STOPPED
+            assert await migrated.list(archived=True) == [archived]
+        finally:
+            await migrated.stop()
 
 
 # ─── D. list / exists ───

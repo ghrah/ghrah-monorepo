@@ -11,7 +11,7 @@ from typing import Any
 
 from ouroboros import Context  # type: ignore[import-untyped]
 
-from ghrah.subject.config import SubjectConfig
+from ghrah.subject.config import ProjectConfig, SubjectConfig
 from ghrah.subject.runtime.ouroboros_bridge import bridge_command
 from ghrah.subject.task.manager import TaskManager
 from ghrah.subject.units import mount_builtin_units
@@ -22,6 +22,9 @@ def _config(tmp_path: Path) -> SubjectConfig:
         workspace_root=str(tmp_path / "workspace"),
         db_path=str(tmp_path / "subject.db"),
         manifest_root=str(tmp_path / "manifests"),
+        project_slice=ProjectConfig(
+            default_root_locator_template=str(tmp_path / "projects/{project_id}")
+        ),
     )
 
 
@@ -143,3 +146,57 @@ async def test_end_to_end_lifecycle_protected_delete(tmp_path: Path) -> None:
         listing = _data(await _dispatch(ctx, "task_list", {"include_terminal": True, "limit": 100}))
         ids = {t["task_id"] for t in listing["tasks"]}
         assert b["task_id"] not in ids
+
+
+async def test_archived_project_freezes_task_root_until_restore(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    async with Context() as ctx:
+        await mount_builtin_units(ctx, config, profile="full")
+        project = _data(
+            await _dispatch(
+                ctx,
+                "project_create",
+                {"name": "frozen", "writable_workspaces": []},
+            )
+        )["project"]
+        task = _data(
+            await _dispatch(
+                ctx,
+                "task_create",
+                {"title": "inside root", "project_id": project["project_id"]},
+            )
+        )["task"]
+
+        archived = _data(
+            await _dispatch(
+                ctx,
+                "project_archive",
+                {
+                    "project_id": project["project_id"],
+                    "expected_version": project["version"],
+                },
+            )
+        )["project"]
+        blocked_create = await _dispatch(
+            ctx,
+            "task_create",
+            {"title": "blocked", "project_id": project["project_id"]},
+        )
+        assert blocked_create["error"] == "resource_archived"
+        blocked_get = await _dispatch(ctx, "task_get", {"task_id": task["task_id"]})
+        assert blocked_get["error"] == "resource_archived"
+
+        restored = _data(
+            await _dispatch(
+                ctx,
+                "project_restore",
+                {
+                    "project_id": project["project_id"],
+                    "expected_version": archived["version"],
+                },
+            )
+        )["project"]
+        assert restored["status"] == "stopped"
+        assert _data(
+            await _dispatch(ctx, "task_get", {"task_id": task["task_id"]})
+        )["task"]["task_id"] == task["task_id"]

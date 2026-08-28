@@ -10,7 +10,7 @@
 复数资源（cluster_ids/workspaces/agents/task_ids/isolation）；``recovery`` 存
 单值字符串（``RecoveryAction.value``，利于 SQL 过滤）。
 
-模式镜像 ``ghrah.subject.task.store.TaskStore``：乐观锁 + 软删 + 幂等 DDL。
+模式镜像 ``ghrah.subject.task.store.TaskStore``：乐观锁 + 显式归档 + 幂等 DDL。
 """
 
 from __future__ import annotations
@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS subject_projects (
     created_at            TEXT NOT NULL,
     updated_at            TEXT NOT NULL,
     version               INTEGER NOT NULL DEFAULT 1,
+    archived_at           TEXT,
     deleted_at            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_subject_projects_status  ON subject_projects(status);
@@ -92,16 +93,18 @@ _COLUMNS = (
     "created_at",
     "updated_at",
     "version",
+    "archived_at",
     "deleted_at",
 )
 # JSON 列：复数资源与结构化字段经 json.dumps/json.loads 往返。
 # recovery 不在此列（单值字符串列）。
 _JSON_COLUMNS = ("cluster_ids", "workspaces", "agents", "task_ids", "isolation")
 _SCHEMA_COMPONENT = "project_store"
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 _MIGRATION_COLUMNS: dict[int, tuple[str, str]] = {
     1: ("description", "TEXT NOT NULL DEFAULT ''"),
     2: ("project_root_locator", "TEXT NOT NULL DEFAULT ''"),
+    3: ("archived_at", "TEXT"),
 }
 
 
@@ -115,7 +118,7 @@ def _record_to_row(record: ProjectRecord) -> dict[str, Any]:
     for col in _JSON_COLUMNS:
         d[col] = json.dumps(d[col])
     # 时间戳经 field_serializer 已为 ISO str（model_dump(mode="json")）；
-    # created_at/updated_at/deleted_at 为 str | None，直接存。
+    # 时间字段为 str | None，直接存。
     return d
 
 
@@ -188,6 +191,17 @@ class ProjectStore:
                 "ON CONFLICT(component) DO UPDATE SET version = excluded.version",
                 (_SCHEMA_COMPONENT, version),
             )
+        # A7/C1：旧 soft-delete 即归档。迁移后新代码只写 archived_at；清空
+        # deleted_at，避免同一记录同时落入“旧删除”和“新归档”两套过滤轴。
+        await db.execute(
+            "UPDATE subject_projects SET archived_at = deleted_at, deleted_at = NULL, "
+            "status = 'stopped' "
+            "WHERE deleted_at IS NOT NULL AND archived_at IS NULL"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subject_projects_archived "
+            "ON subject_projects(archived_at)"
+        )
 
     async def stop(self) -> None:
         async with self._lock:
@@ -268,7 +282,7 @@ class ProjectStore:
             return updated
 
     async def soft_delete(self, project_id: str, expected_version: int) -> None:
-        """设 deleted_at = now，version 自增（乐观锁）。
+        """旧调用兼容：写 deleted_at；仅供迁移测试，不用于新生命周期。
 
         Raises:
             ProjectNotFoundError / ConcurrentModificationError: 同 update。
@@ -278,6 +292,54 @@ class ProjectStore:
             return record.model_copy(update={"deleted_at": datetime.now(UTC)})
 
         await self.update(project_id, expected_version, _mark)
+
+    async def archive(self, project_id: str, expected_version: int) -> ProjectRecord:
+        """设置 archived_at 并固定运行状态为 stopped。"""
+
+        def _archive(record: ProjectRecord) -> ProjectRecord:
+            return record.model_copy(
+                update={
+                    "archived_at": datetime.now(UTC),
+                    "status": ProjectStatus.STOPPED,
+                    "deleted_at": None,
+                }
+            )
+
+        return await self.update(project_id, expected_version, _archive)
+
+    async def restore(self, project_id: str, expected_version: int) -> ProjectRecord:
+        """清除 archived_at；恢复后保持 stopped，不自动启动运行资源。"""
+
+        def _restore(record: ProjectRecord) -> ProjectRecord:
+            return record.model_copy(
+                update={"archived_at": None, "status": ProjectStatus.STOPPED}
+            )
+
+        return await self.update(project_id, expected_version, _restore)
+
+    async def hard_delete(self, project_id: str, expected_version: int) -> bool:
+        """按版本锁永久删除 catalog 记录；Project Root 由 manager 先行 purge。"""
+
+        async with self._lock:
+            db = self._require_db()
+            cursor = await db.execute(
+                "SELECT version FROM subject_projects WHERE project_id = ?",
+                (project_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return False
+            current_version = int(row["version"])
+            if current_version != expected_version:
+                raise ConcurrentModificationError(
+                    f"Project {project_id} modified: expected version "
+                    f"{expected_version}, got {current_version}"
+                )
+            cursor = await db.execute(
+                "DELETE FROM subject_projects WHERE project_id = ? AND version = ?",
+                (project_id, expected_version),
+            )
+            return cursor.rowcount == 1
 
     async def delete_uncommitted(self, project_id: str) -> None:
         """创建事务补偿：硬删除尚未对外提交的 ProjectRecord。"""
@@ -290,13 +352,19 @@ class ProjectStore:
     # ─── 读取 ───
 
     async def get(
-        self, project_id: str, *, include_deleted: bool = False
+        self,
+        project_id: str,
+        *,
+        include_archived: bool = False,
+        include_deleted: bool = False,
     ) -> ProjectRecord | None:
-        """按 project_id 取记录；默认排除软删。"""
+        """按 project_id 取记录；普通业务默认排除 archived/旧 deleted。"""
         async with self._lock:
             db = self._require_db()
             query = "SELECT * FROM subject_projects WHERE project_id = ?"
             params: list[Any] = [project_id]
+            if not include_archived:
+                query += " AND archived_at IS NULL"
             if not include_deleted:
                 query += " AND deleted_at IS NULL"
             cursor = await db.execute(query, tuple(params))
@@ -307,15 +375,20 @@ class ProjectStore:
         self,
         *,
         status: ProjectStatus | None = None,
+        archived: bool | None = False,
         include_deleted: bool = False,
     ) -> ProjectRecordList:
-        """列出 project 记录；可选 status 过滤，默认排除软删，按 created_at 升序。"""
+        """列出 Project；archived=False/True/None 对应 active/archived/all。"""
         async with self._lock:
             db = self._require_db()
             clauses: list[str] = []
             params: list[Any] = []
             if not include_deleted:
                 clauses.append("deleted_at IS NULL")
+            if archived is False:
+                clauses.append("archived_at IS NULL")
+            elif archived is True:
+                clauses.append("archived_at IS NOT NULL")
             if status is not None:
                 clauses.append("status = ?")
                 params.append(status.value)
@@ -333,7 +406,7 @@ class ProjectStore:
             db = self._require_db()
             cursor = await db.execute(
                 "SELECT 1 FROM subject_projects WHERE project_id = ? "
-                "AND deleted_at IS NULL",
+                "AND archived_at IS NULL AND deleted_at IS NULL",
                 (project_id,),
             )
             return await cursor.fetchone() is not None

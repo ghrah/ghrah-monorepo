@@ -15,6 +15,8 @@ from ghrah.subject.project.models import (
 )
 from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.project.store import ProjectStore
+from ghrah.subject.room.models import make_room_record
+from ghrah.subject.room.store import RoomStore
 from ghrah.subject.workspace.models import WorkspaceRecord
 from ghrah.subject.workspace.providers.git import path_to_locator
 
@@ -73,6 +75,7 @@ class _FakeClusterTransport:
         self.shutdowns: list[str] = []
         self._handle = _FakeHandle()
         self.fail_ensure = False
+        self.fail_shutdown = False
 
     async def ensure_cluster(
         self, cluster_id: str, *, project_root_locator: str = ""
@@ -89,6 +92,8 @@ class _FakeClusterTransport:
         return True
 
     async def shutdown_cluster(self, cluster_id: str) -> None:
+        if self.fail_shutdown:
+            raise RuntimeError("shutdown unavailable")
         self.shutdowns.append(cluster_id)
 
     async def stop(self) -> None:
@@ -124,6 +129,34 @@ class _FakeManifestStore:
     pass
 
 
+class _FakeScopedResource:
+    def __init__(self) -> None:
+        self.closed: list[str] = []
+        self.restored: list[str] = []
+        self.evicted: list[str] = []
+        self.fail_close = False
+
+    async def close_project(self, project_id: str) -> None:
+        if self.fail_close:
+            raise RuntimeError("close unavailable")
+        self.closed.append(project_id)
+
+    async def restore_project(self, project_id: str) -> None:
+        self.restored.append(project_id)
+
+    async def evict_project(self, project_id: str) -> None:
+        self.evicted.append(project_id)
+
+
+class _FakeRoomStore(_FakeScopedResource):
+    def __init__(self, room_count: int = 0) -> None:
+        super().__init__()
+        self.room_count = room_count
+
+    async def count_project_records(self, project_id: str) -> int:
+        return self.room_count
+
+
 def _default_locator(tmp_path: Path) -> str:
     return path_to_locator(str(tmp_path / "default"))
 
@@ -157,21 +190,29 @@ def _make_manager(
     events: list[tuple[str, dict[str, Any]]] | None = None,
     default_locator: str = "file:///workspaces/default",
     task_mgr: _FakeTaskMgr | None = None,
+    cluster_transport: _FakeClusterTransport | None = None,
+    scoped_resource: _FakeScopedResource | None = None,
+    room_store: _FakeRoomStore | None = None,
 ) -> ProjectManager:
     async def on_event(event_type: str, payload: dict[str, Any]) -> None:
         if events is not None:
             events.append((event_type, payload))
 
-    return ProjectManager(
+    manager = ProjectManager(
         store,
         _FakeWorkspaceManager(),
         task_mgr or _FakeTaskMgr(),
-        _FakeClusterTransport(),
+        cluster_transport or _FakeClusterTransport(),
         _FakeManifestStore(),
         on_event=on_event if events is not None else None,
         bootstrap_workspace_locator=default_locator,
         default_root_locator_template=str(store._db_path.parent / "roots/{project_id}"),
     )
+    if scoped_resource is not None:
+        manager.register_scoped_resource(scoped_resource)
+    if room_store is not None:
+        manager.register_scoped_resource(room_store, room_store=True)
+    return manager
 
 
 class TestProjectCreate:
@@ -446,7 +487,7 @@ class TestProjectAddRemoveAgent:
         created = await self._create(mgr, tmp_path)
         project = created["data"]["project"]
         cluster_id = project["cluster_ids"][0]
-        await mgr.handle_command(
+        added = await mgr.handle_command(
             "project_add_agent",
             {
                 "project_id": project["project_id"],
@@ -455,7 +496,11 @@ class TestProjectAddRemoveAgent:
         )
         result = await mgr.handle_command(
             "project_remove_agent",
-            {"project_id": project["project_id"], "agent_name": "a1"},
+            {
+                "project_id": project["project_id"],
+                "agent_id": added["data"]["agent_id"],
+                "agent_name": "a1",
+            },
         )
         assert result["success"], result.get("error")
         assert result["data"]["project"]["agents"] == []
@@ -506,7 +551,7 @@ class TestProjectStatusTransitions:
         assert "transition" in (bad["error"] or "")
 
 
-class TestProjectSetRecoveryAndDelete:
+class TestProjectLifecycleAndDelete:
     async def _create(self, mgr: ProjectManager, tmp_path: Path) -> dict[str, Any]:
         return await mgr.handle_command(
             "project_create",
@@ -524,32 +569,231 @@ class TestProjectSetRecoveryAndDelete:
         assert result["success"]
         assert result["data"]["project"]["recovery"] == RecoveryAction.PAUSE.value
 
-    async def test_delete(self, store: ProjectStore, tmp_path: Path) -> None:
-        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
-        created = await self._create(mgr, tmp_path)
-        pid = created["data"]["project"]["project_id"]
-        result = await mgr.handle_command("project_delete", {"project_id": pid})
-        assert result["success"]
-        assert result["data"]["deleted"] is True
-        # 软删后 get 返回 None
-        assert await store.get(pid) is None
-
-    async def test_delete_with_explicit_storage_purge(
+    async def test_archive_restore_freezes_root_and_keeps_workspace(
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
-        mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
+        events: list[tuple[str, dict[str, Any]]] = []
+        cluster = _FakeClusterTransport()
+        resource = _FakeScopedResource()
+        mgr = _make_manager(
+            store,
+            events=events,
+            default_locator=_default_locator(tmp_path),
+            cluster_transport=cluster,
+            scoped_resource=resource,
+        )
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        pid = project["project_id"]
+        paths = ProjectPaths.from_locator(project["project_root_locator"])
+        workspace_file = tmp_path / "default" / "external.txt"
+        workspace_file.parent.mkdir(parents=True, exist_ok=True)
+        workspace_file.write_text("external", encoding="utf-8")
+
+        archived_result = await mgr.handle_command(
+            "project_archive",
+            {"project_id": pid, "expected_version": project["version"]},
+        )
+        assert archived_result["success"], archived_result.get("error")
+        archived = archived_result["data"]["project"]
+        assert archived["archived_at"] is not None
+        assert archived["status"] == ProjectStatus.STOPPED.value
+        assert paths.root.exists()
+        assert workspace_file.read_text(encoding="utf-8") == "external"
+        assert cluster.shutdowns == project["cluster_ids"]
+        assert resource.closed == [pid]
+        assert events[-1] == ("project_archived", {"project": archived})
+        assert await store.get(pid) is None
+        assert (await store.get(pid, include_archived=True)) is not None
+
+        event_count = len(events)
+        repeated = await mgr.handle_command(
+            "project_archive",
+            {"project_id": pid, "expected_version": project["version"]},
+        )
+        assert repeated["success"]
+        assert len(events) == event_count
+        assert len(cluster.shutdowns) == 1
+
+        for command, payload in (
+            (
+                "project_update",
+                {"project_id": pid, "name": "blocked", "expected_version": archived["version"]},
+            ),
+            (
+                "project_add_agent",
+                {
+                    "project_id": pid,
+                    "agent": {
+                        "agent_id": "a" * 32,
+                        "name": "blocked",
+                        "cluster_id": project["cluster_ids"][0],
+                    },
+                },
+            ),
+            (
+                "project_remove_agent",
+                {"project_id": pid, "agent_id": "a" * 32, "agent_name": "blocked"},
+            ),
+            ("project_link_task", {"project_id": pid, "task_id": "blocked"}),
+            ("project_unlink_task", {"project_id": pid, "task_id": "blocked"}),
+            ("project_pause", {"project_id": pid}),
+            ("project_resume", {"project_id": pid}),
+            ("project_stop", {"project_id": pid}),
+            (
+                "project_set_recovery",
+                {"project_id": pid, "recovery": RecoveryAction.PAUSE},
+            ),
+        ):
+            result = await mgr.handle_command(command, payload)
+            assert result["error"] == "resource_archived", command
+
+        stale = await mgr.handle_command(
+            "project_restore",
+            {"project_id": pid, "expected_version": project["version"]},
+        )
+        assert "expected version" in stale["error"]
+        restored_result = await mgr.handle_command(
+            "project_restore",
+            {"project_id": pid, "expected_version": archived["version"]},
+        )
+        assert restored_result["success"], restored_result.get("error")
+        restored = restored_result["data"]["project"]
+        assert restored["archived_at"] is None
+        assert restored["status"] == ProjectStatus.STOPPED.value
+        assert resource.restored == [pid]
+        assert events[-1] == ("project_restored", {"project": restored})
+
+    async def test_delete_hard_purges_root_but_not_workspace(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        events: list[tuple[str, dict[str, Any]]] = []
+        resource = _FakeScopedResource()
+        room_store = _FakeRoomStore(room_count=2)
+        mgr = _make_manager(
+            store,
+            events=events,
+            default_locator=_default_locator(tmp_path),
+            scoped_resource=resource,
+            room_store=room_store,
+        )
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        root = ProjectPaths.from_locator(project["project_root_locator"]).root
+        workspace_file = tmp_path / "default" / "keep.txt"
+        workspace_file.parent.mkdir(parents=True, exist_ok=True)
+        workspace_file.write_text("keep", encoding="utf-8")
+
+        result = await mgr.handle_command(
+            "project_delete",
+            {
+                "project_id": project["project_id"],
+                "expected_version": project["version"],
+                "cascade_rooms": True,
+            },
+        )
+
+        assert result["success"], result.get("error")
+        assert result["data"]["storage_purged"] is True
+        assert result["data"]["rooms_deleted"] == 2
+        assert not root.exists()
+        assert workspace_file.read_text(encoding="utf-8") == "keep"
+        assert await store.get(project["project_id"], include_archived=True) is None
+        assert resource.closed == [project["project_id"]]
+        assert resource.evicted == [project["project_id"]]
+        assert events[-1][0] == "project_deleted"
+
+    async def test_archive_shutdown_failure_does_not_freeze_or_mark_catalog(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        cluster = _FakeClusterTransport()
+        cluster.fail_shutdown = True
+        resource = _FakeScopedResource()
+        mgr = _make_manager(
+            store,
+            default_locator=_default_locator(tmp_path),
+            cluster_transport=cluster,
+            scoped_resource=resource,
+        )
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+
+        result = await mgr.handle_command(
+            "project_archive",
+            {
+                "project_id": project["project_id"],
+                "expected_version": project["version"],
+            },
+        )
+
+        assert "project_shutdown_failed" in result["error"]
+        current = await store.get(project["project_id"])
+        assert current is not None
+        assert current.archived_at is None
+        assert resource.closed == []
+
+    async def test_delete_requires_explicit_room_cascade_with_zero_side_effects(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        cluster = _FakeClusterTransport()
+        room_store = _FakeRoomStore(room_count=2)
+        mgr = _make_manager(
+            store,
+            default_locator=_default_locator(tmp_path),
+            cluster_transport=cluster,
+            room_store=room_store,
+        )
         created = await self._create(mgr, tmp_path)
         project = created["data"]["project"]
         root = ProjectPaths.from_locator(project["project_root_locator"]).root
 
         result = await mgr.handle_command(
             "project_delete",
-            {"project_id": project["project_id"], "purge_storage": True},
+            {
+                "project_id": project["project_id"],
+                "expected_version": project["version"],
+                "cascade_rooms": False,
+            },
         )
 
-        assert result["success"]
-        assert result["data"]["storage_purged"] is True
-        assert not root.exists()
+        assert result["error"] == "project_has_rooms"
+        assert root.exists()
+        assert await store.get(project["project_id"]) is not None
+        assert cluster.shutdowns == []
+        assert room_store.closed == []
+
+    async def test_delete_cascade_guard_reads_root_without_room_unit(
+        self, store: ProjectStore, tmp_path: Path
+    ) -> None:
+        cluster = _FakeClusterTransport()
+        mgr = _make_manager(
+            store,
+            default_locator=_default_locator(tmp_path),
+            cluster_transport=cluster,
+        )
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+        paths = ProjectPaths.from_locator(project["project_root_locator"])
+        rooms = RoomStore(paths.room_db_path)
+        await rooms.start()
+        await rooms.upsert(
+            make_room_record(project_id=project["project_id"], name="room")
+        )
+        await rooms.stop()
+
+        result = await mgr.handle_command(
+            "project_delete",
+            {
+                "project_id": project["project_id"],
+                "expected_version": project["version"],
+                "cascade_rooms": False,
+            },
+        )
+
+        assert result["error"] == "project_has_rooms"
+        assert paths.root.exists()
+        assert await store.get(project["project_id"]) is not None
+        assert cluster.shutdowns == []
 
     async def test_purge_rejects_marker_owner_mismatch(
         self, store: ProjectStore, tmp_path: Path
@@ -562,16 +806,55 @@ class TestProjectSetRecoveryAndDelete:
 
         result = await mgr.handle_command(
             "project_delete",
-            {"project_id": project["project_id"], "purge_storage": True},
+            {
+                "project_id": project["project_id"],
+                "expected_version": project["version"],
+                "cascade_rooms": True,
+            },
         )
 
         assert not result["success"]
         assert paths.root.exists()
         assert await store.get(project["project_id"]) is not None
 
+    async def test_root_purge_failure_keeps_catalog_and_unfreezes_resources(
+        self,
+        store: ProjectStore,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        resource = _FakeScopedResource()
+        mgr = _make_manager(
+            store,
+            default_locator=_default_locator(tmp_path),
+            scoped_resource=resource,
+        )
+        created = await self._create(mgr, tmp_path)
+        project = created["data"]["project"]
+
+        def fail_purge(self: ProjectPaths, project_id: str) -> None:
+            raise OSError("disk refused purge")
+
+        monkeypatch.setattr(ProjectPaths, "purge", fail_purge)
+        result = await mgr.handle_command(
+            "project_delete",
+            {
+                "project_id": project["project_id"],
+                "expected_version": project["version"],
+                "cascade_rooms": True,
+            },
+        )
+
+        assert "project_root_purge_failed" in result["error"]
+        assert await store.get(project["project_id"]) is not None
+        assert resource.closed == [project["project_id"]]
+        assert resource.restored == [project["project_id"]]
+
     async def test_delete_missing(self, store: ProjectStore) -> None:
         mgr = _make_manager(store)
-        result = await mgr.handle_command("project_delete", {"project_id": "nope"})
+        result = await mgr.handle_command(
+            "project_delete", {"project_id": "nope", "expected_version": 1}
+        )
         assert not result["success"]
 
 

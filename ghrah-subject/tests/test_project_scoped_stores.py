@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from ghrah.subject.project.errors import ProjectArchivedError
 from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.project.scoped_stores import (
     ProjectScopedRoomStore,
@@ -92,3 +95,52 @@ async def test_room_and_logs_migrate_to_project_root(tmp_path: Path) -> None:
         assert await old.get(room.room_id) is None
     finally:
         await old.stop()
+
+
+async def test_scoped_stores_freeze_restore_and_evict_project_handles(
+    tmp_path: Path,
+) -> None:
+    project_id = "project-a"
+    paths = ProjectPaths.from_locator(path_to_locator(str(tmp_path / "root-a")))
+    paths.initialize(project_id)
+    roots_map = {project_id: paths.root_locator}
+
+    async def roots() -> dict[str, str]:
+        return dict(roots_map)
+
+    tasks = ProjectScopedTaskStore(str(tmp_path / "subject.db"), roots)
+    rooms = ProjectScopedRoomStore(str(tmp_path / "subject.db"), roots)
+    await tasks.start()
+    await rooms.start()
+    try:
+        task = make_task_record(title="task", project_id=project_id)
+        room = make_room_record(project_id=project_id, name="room")
+        await tasks.upsert(task)
+        await rooms.upsert(room)
+        assert project_id in tasks._stores
+        assert project_id in rooms._stores
+
+        await tasks.close_project(project_id)
+        await rooms.close_project(project_id)
+        assert project_id not in tasks._stores
+        assert project_id not in rooms._stores
+        with pytest.raises(ProjectArchivedError):
+            await tasks.list(project_id=project_id)
+        with pytest.raises(ProjectArchivedError):
+            await rooms.list(project_id=project_id)
+
+        await tasks.restore_project(project_id)
+        await rooms.restore_project(project_id)
+        assert await tasks.get(task.task_id) == task
+        assert await rooms.get(room.room_id) == room
+
+        roots_map.clear()
+        await tasks.evict_project(project_id)
+        await rooms.evict_project(project_id)
+        assert project_id not in tasks._known_roots
+        assert project_id not in rooms._known_roots
+        assert task.task_id not in tasks._task_projects
+        assert room.room_id not in rooms._room_projects
+    finally:
+        await rooms.stop()
+        await tasks.stop()

@@ -62,7 +62,9 @@ class RoomUnit(SubjectUnit):
         cluster_registry = ctx.get(CORE_CLUSTER_REGISTRY.name)
 
         async def project_roots() -> dict[str, str]:
-            result = await project_manager.handle_command("project_list", {})
+            result = await project_manager.handle_command(
+                "project_list", {"archived": None}
+            )
             projects = (result.get("data") or {}).get("projects", [])
             return {
                 p["project_id"]: p["project_root_locator"]
@@ -73,6 +75,11 @@ class RoomUnit(SubjectUnit):
         self._store = ProjectScopedRoomStore(
             self._config.persistence.db_path, project_roots
         )
+        register_resource = getattr(
+            project_manager, "register_scoped_resource", None
+        )
+        if register_resource is not None:
+            register_resource(self._store, room_store=True)
 
         async def project_get(project_id: str) -> dict[str, Any] | None:
             result = await project_manager.handle_command(
@@ -170,6 +177,17 @@ class RoomUnit(SubjectUnit):
     async def start(self) -> None:
         if self._store is not None:
             await self._store.start()
+            if self._project_manager is not None:
+                result = await self._project_manager.handle_command(
+                    "project_list", {"archived": True}
+                )
+                for project in (result.get("data") or {}).get("projects", []):
+                    if project.get("archived_at") or project.get("deleted_at"):
+                        self._store.register_project_root(
+                            str(project["project_id"]),
+                            str(project.get("project_root_locator") or ""),
+                        )
+                        await self._store.close_project(str(project["project_id"]))
             await self._store.migrate_all()
 
     async def stop(self) -> None:

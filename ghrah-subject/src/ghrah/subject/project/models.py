@@ -7,7 +7,8 @@
 对齐 ``ghrah.protocol.types`` 的 ``ProjectInfoPayload`` schema：
 ``ProjectStatus`` / ``RecoveryAction`` 直接复用 protocol 枚举（单一真相源），
 避免双定义漂移。``ProjectRecord`` 内部用 ``datetime``，序列化为 ISO str 以
-匹配 wire payload；扩展 ``version``（乐观锁）与 ``deleted_at``（软删）。
+匹配 wire payload；扩展 ``version``（乐观锁）、``archived_at``，并仅兼容
+读取旧 ``deleted_at``。
 """
 
 from __future__ import annotations
@@ -202,7 +203,7 @@ class ProjectRecord(BaseModel):
     - ``project_root_locator`` 是 Subject 独占内部状态 Root，不属于 workspaces；
     - 时间戳内部用 ``datetime(UTC)``，序列化为 ISO str。
     - ``recovery`` 内部用 ``RecoverySpec``，序列化为 ``RecoveryAction.value``。
-    - ``version``（乐观锁）与 ``deleted_at``（软删）为 wire payload 全量字段。
+    - ``archived_at`` 是资源可用性轴；``deleted_at`` 仅保留旧数据兼容读取。
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -223,13 +224,16 @@ class ProjectRecord(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     version: int = 1
+    archived_at: datetime | None = None
     deleted_at: datetime | None = None
 
-    @field_serializer("created_at", "updated_at", "deleted_at")
+    @field_serializer("created_at", "updated_at", "archived_at", "deleted_at")
     def _ser_dt(self, value: datetime | None) -> str | None:
         return value.isoformat() if value is not None else None
 
-    @field_validator("created_at", "updated_at", "deleted_at", mode="before")
+    @field_validator(
+        "created_at", "updated_at", "archived_at", "deleted_at", mode="before"
+    )
     @classmethod
     def _coerce_dt(cls, value: Any) -> Any:
         if value is None or isinstance(value, datetime):
@@ -257,7 +261,7 @@ class ProjectRecord(BaseModel):
         """输出 ``ProjectInfoPayload`` 形态 dict。
 
         recovery 为 ``RecoveryAction.value`` 字符串，时间戳 ISO str，含
-        version/deleted_at/cluster_ids/workspaces/agents/task_ids。
+        version/archived_at/deleted_at/cluster_ids/workspaces/agents/task_ids。
         本 dict 为 ``ProjectInfoPayload`` 的**超集**：额外含 ``isolation`` 字段
         （protocol payload schema 不含该键）。Core/Observer 反序列化时 Pydantic
         默认 ``extra='ignore'`` 忽略该键，故安全；subject 侧内部使用 isolation。

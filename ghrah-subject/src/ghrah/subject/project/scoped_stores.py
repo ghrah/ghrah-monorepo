@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from ghrah.subject.project.errors import ProjectArchivedError
 from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.room.models import RoomLogRecord, RoomRecord
 from ghrah.subject.room.store import RoomStore
@@ -23,6 +24,7 @@ class ProjectScopedTaskStore:
         self._stores: dict[str, TaskStore] = {}
         self._task_projects: dict[str, str] = {}
         self._known_roots: dict[str, str] = {}
+        self._frozen_projects: set[str] = set()
 
     def register_project_root(self, project_id: str, locator: str) -> None:
         """Seed a root while ProjectUnit itself is still starting."""
@@ -43,6 +45,8 @@ class ProjectScopedTaskStore:
         await self._legacy.stop()
 
     async def _project_store(self, project_id: str) -> TaskStore:
+        if project_id in self._frozen_projects:
+            raise ProjectArchivedError(project_id)
         roots = await self._resolved_roots()
         locator = roots.get(project_id)
         if not locator:
@@ -56,8 +60,52 @@ class ProjectScopedTaskStore:
 
     async def _all_stores(self) -> list[TaskStore]:
         for project_id in await self._resolved_roots():
+            if project_id in self._frozen_projects:
+                continue
             await self._project_store(project_id)
         return [self._legacy, *self._stores.values()]
+
+    async def close_project(self, project_id: str) -> None:
+        """Freeze a Project Root and close its open TaskStore handle."""
+
+        if project_id in self._frozen_projects:
+            return
+        store = self._stores.get(project_id)
+        temporary = False
+        if store is None:
+            locator = (await self._resolved_roots()).get(project_id)
+            if locator:
+                store = TaskStore(ProjectPaths.from_locator(locator).task_db_path)
+                await store.start()
+                temporary = True
+        if store is not None:
+            try:
+                for task in await store.list_for_migration(project_id):
+                    self._task_projects[task.task_id] = project_id
+            finally:
+                if temporary:
+                    await store.stop()
+        self._frozen_projects.add(project_id)
+        opened = self._stores.pop(project_id, None)
+        if opened is not None:
+            await opened.stop()
+
+    async def restore_project(self, project_id: str) -> None:
+        """Unfreeze a Root; the TaskStore is reopened lazily on next access."""
+
+        self._frozen_projects.discard(project_id)
+
+    async def evict_project(self, project_id: str) -> None:
+        """Drop all cached routing state after permanent Project deletion."""
+
+        await self.close_project(project_id)
+        self._known_roots.pop(project_id, None)
+        self._frozen_projects.discard(project_id)
+        self._task_projects = {
+            task_id: owner
+            for task_id, owner in self._task_projects.items()
+            if owner != project_id
+        }
 
     async def _locate(self, task_id: str) -> TaskStore | None:
         project_id = self._task_projects.get(task_id)
@@ -131,7 +179,11 @@ class ProjectScopedTaskStore:
 
     async def migrate_all(self) -> int:
         return sum(
-            [await self.migrate_project(pid) for pid in await self._resolved_roots()]
+            [
+                await self.migrate_project(pid)
+                for pid in await self._resolved_roots()
+                if pid not in self._frozen_projects
+            ]
         )
 
 
@@ -144,6 +196,7 @@ class ProjectScopedRoomStore:
         self._stores: dict[str, RoomStore] = {}
         self._room_projects: dict[str, str] = {}
         self._known_roots: dict[str, str] = {}
+        self._frozen_projects: set[str] = set()
 
     def register_project_root(self, project_id: str, locator: str) -> None:
         if locator:
@@ -163,6 +216,8 @@ class ProjectScopedRoomStore:
         await self._legacy.stop()
 
     async def _project_store(self, project_id: str) -> RoomStore:
+        if project_id in self._frozen_projects:
+            raise ProjectArchivedError(project_id)
         roots = await self._resolved_roots()
         locator = roots.get(project_id)
         if not locator:
@@ -176,8 +231,65 @@ class ProjectScopedRoomStore:
 
     async def _all_stores(self) -> list[RoomStore]:
         for project_id in await self._resolved_roots():
+            if project_id in self._frozen_projects:
+                continue
             await self._project_store(project_id)
         return [self._legacy, *self._stores.values()]
+
+    async def close_project(self, project_id: str) -> None:
+        """Freeze a Project Root and close its open RoomStore handle."""
+
+        if project_id in self._frozen_projects:
+            return
+        store = self._stores.get(project_id)
+        temporary = False
+        if store is None:
+            locator = (await self._resolved_roots()).get(project_id)
+            if locator:
+                store = RoomStore(ProjectPaths.from_locator(locator).room_db_path)
+                await store.start()
+                temporary = True
+        if store is not None:
+            try:
+                for room in await store.list(project_id=project_id):
+                    self._room_projects[room.room_id] = project_id
+            finally:
+                if temporary:
+                    await store.stop()
+        self._frozen_projects.add(project_id)
+        opened = self._stores.pop(project_id, None)
+        if opened is not None:
+            await opened.stop()
+
+    async def restore_project(self, project_id: str) -> None:
+        self._frozen_projects.discard(project_id)
+
+    async def evict_project(self, project_id: str) -> None:
+        await self.close_project(project_id)
+        self._known_roots.pop(project_id, None)
+        self._frozen_projects.discard(project_id)
+        self._room_projects = {
+            room_id: owner
+            for room_id, owner in self._room_projects.items()
+            if owner != project_id
+        }
+
+    async def count_project_records(self, project_id: str) -> int:
+        """Lifecycle-only Room count, including a frozen archived Project Root."""
+
+        roots = await self._resolved_roots()
+        locator = roots.get(project_id)
+        if not locator:
+            return len(await self._legacy.list(project_id=project_id))
+        existing = self._stores.get(project_id)
+        if existing is not None:
+            return len(await existing.list(project_id=project_id))
+        store = RoomStore(ProjectPaths.from_locator(locator).room_db_path)
+        await store.start()
+        try:
+            return len(await store.list(project_id=project_id))
+        finally:
+            await store.stop()
 
     async def _locate(self, room_id: str) -> RoomStore | None:
         project_id = self._room_projects.get(room_id)
@@ -246,5 +358,9 @@ class ProjectScopedRoomStore:
 
     async def migrate_all(self) -> int:
         return sum(
-            [await self.migrate_project(pid) for pid in await self._resolved_roots()]
+            [
+                await self.migrate_project(pid)
+                for pid in await self._resolved_roots()
+                if pid not in self._frozen_projects
+            ]
         )

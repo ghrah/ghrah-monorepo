@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ghrah.subject.config import SubjectConfig
+from ghrah.subject.project.errors import ProjectArchivedError
 from ghrah.subject.project.scoped_stores import ProjectScopedTaskStore
 from ghrah.subject.runtime.service_keys import PROJECT_MANAGER, TASK_MANAGER, TASK_STORE
 from ghrah.subject.task import TaskManager
@@ -57,7 +58,9 @@ class TaskUnit(SubjectUnit):
                 return {}
             if manager is None:
                 return {}
-            result = await manager.handle_command("project_list", {})
+            result = await manager.handle_command(
+                "project_list", {"archived": None}
+            )
             projects = (result.get("data") or {}).get("projects", [])
             return {
                 p["project_id"]: p["project_root_locator"]
@@ -86,10 +89,51 @@ class TaskUnit(SubjectUnit):
         payload: dict[str, Any],
         cmd_ctx: CommandContext,
     ) -> dict[str, Any]:
-        normalized = await self._normalize_agent_identity(command, payload)
-        if normalized.get("success") is False:
-            return normalized
-        return await self.service.handle_command(command, normalized)
+        try:
+            error = await self._guard_project_access(payload)
+            if error is not None:
+                return error
+            normalized = await self._normalize_agent_identity(command, payload)
+            if normalized.get("success") is False:
+                return normalized
+            return await self.service.handle_command(command, normalized)
+        except ProjectArchivedError:
+            return {"success": False, "data": None, "error": "resource_archived"}
+
+    async def _guard_project_access(
+        self, payload: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Reject Task commands before a frozen Project Root is read or written."""
+
+        ctx = self._ctx
+        store = self._store
+        if ctx is None or store is None:
+            return None
+        try:
+            manager = ctx.get(PROJECT_MANAGER.name)
+        except Exception:  # noqa: BLE001 — coexistence profile has no ProjectUnit
+            return None
+        if manager is None:
+            return None
+        project_id = str(payload.get("project_id") or "")
+        if not project_id and payload.get("task_id"):
+            task = await store.get(str(payload["task_id"]), include_deleted=True)
+            project_id = task.project_id if task is not None else ""
+        if not project_id:
+            return None
+        result = await manager.handle_command(
+            "project_get", {"project_id": project_id}
+        )
+        if not result.get("success"):
+            return {
+                "success": False,
+                "data": None,
+                "error": result.get("error") or f"project not found: {project_id}",
+            }
+        project = (result.get("data") or {}).get("project") or {}
+        if project.get("archived_at") or project.get("deleted_at"):
+            return {"success": False, "data": None, "error": "resource_archived"}
+        return None
 
     async def _normalize_agent_identity(
         self, command: str, payload: dict[str, Any]

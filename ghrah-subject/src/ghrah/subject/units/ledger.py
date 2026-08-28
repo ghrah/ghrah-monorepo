@@ -34,6 +34,7 @@ class LedgerUnit(SubjectUnit):
         self._config = config
         self._ledger: ActionChainLedger | None = None
         self._project_ledgers: dict[str, ActionChainLedger] = {}
+        self._frozen_projects: set[str] = set()
         self._ctx: Any | None = None
         self._meta = UnitMeta(
             name="ledger",
@@ -71,23 +72,46 @@ class LedgerUnit(SubjectUnit):
     async def _ledger_for_project(self, project_id: str | None) -> ActionChainLedger:
         if not project_id or self._ctx is None:
             return self.service
+        if project_id in self._frozen_projects:
+            raise ValueError("resource_archived")
         existing = self._project_ledgers.get(project_id)
         if existing is not None:
             return existing
         try:
             manager = self._ctx.get(PROJECT_MANAGER.name)
+            register = getattr(manager, "register_scoped_resource", None)
+            if register is not None:
+                register(self)
             result = await manager.handle_command("project_get", {"project_id": project_id})
             project = (result.get("data") or {}).get("project")
         except Exception:  # noqa: BLE001
             project = None
         if not project or not project.get("project_root_locator"):
             return self.service
+        if project.get("archived_at") or project.get("deleted_at"):
+            self._frozen_projects.add(project_id)
+            raise ValueError("resource_archived")
         ledger = ActionChainLedger(
             ProjectPaths.from_locator(project["project_root_locator"]).action_chain_db_path
         )
         await ledger.start()
         self._project_ledgers[project_id] = ledger
         return ledger
+
+    async def close_project(self, project_id: str) -> None:
+        """Freeze a Project and close its cached ActionChain read handle."""
+
+        self._frozen_projects.add(project_id)
+        ledger = self._project_ledgers.pop(project_id, None)
+        if ledger is not None:
+            await ledger.stop()
+
+    async def restore_project(self, project_id: str) -> None:
+        self._frozen_projects.discard(project_id)
+
+    async def evict_project(self, project_id: str) -> None:
+        await self.close_project(project_id)
+        self._frozen_projects.discard(project_id)
 
     async def _project_ids(self) -> list[str]:
         if self._ctx is None:

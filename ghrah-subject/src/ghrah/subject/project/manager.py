@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""ProjectManager：13 project 命令编排 + 校验 + bootstrap 高层方法。
+"""ProjectManager：Project 命令编排、生命周期锁与 Root 所有权边界。
 
-- 透传 13 个 ``project_*`` 命令（乐观锁 + 状态流转 + workspace 挂载禁嵌套 +
+- 透传 15 个 ``project_*`` 命令（乐观锁 + 状态流转 + workspace 挂载禁嵌套 +
   path_grants 不重叠 + 实例 manifest 协调）。
 - ``bootstrap_default_project`` / ``adopt_existing_agents``：S4.6 reconcile
   首启 bootstrap 专用（决策 2），经 CoreClusterRegistry + WorkspaceManager
@@ -31,6 +31,7 @@ from ghrah.protocol.types import (
     ProjectCreatePayload,
     ProjectDeletePayload,
     ProjectIdPayload,
+    ProjectLifecyclePayload,
     ProjectLinkTaskPayload,
     ProjectListPayload,
     ProjectRemoveAgentPayload,
@@ -83,6 +84,19 @@ logger = logging.getLogger(__name__)
 # 会把 request_id/session_id 信封字段注入 payload 副本；ProjectCreatePayload /
 # ProjectUpdatePayload 为 extra="forbid" strict 模型，验证前需剥离。
 _ENVELOPE_KEYS = frozenset({"request_id", "session_id"})
+_LOCKED_PROJECT_MUTATIONS = frozenset(
+    {
+        "project_update",
+        "project_add_agent",
+        "project_remove_agent",
+        "project_link_task",
+        "project_unlink_task",
+        "project_set_recovery",
+        "project_pause",
+        "project_resume",
+        "project_stop",
+    }
+)
 
 
 def _strip_envelope(payload: dict[str, Any]) -> dict[str, Any]:
@@ -111,7 +125,7 @@ def _normalize_locator(locator: str) -> str:
 
 
 class ProjectManager:
-    """13 project 命令编排层 + bootstrap 高层方法。
+    """Project 命令编排层 + per-project lifecycle lock + bootstrap 方法。
 
     Args:
         store: ProjectStore（持久化 + 乐观锁）。
@@ -147,12 +161,19 @@ class ProjectManager:
         self._bootstrap_workspace_locator = bootstrap_workspace_locator
         self._default_root_locator_template = default_root_locator_template
         self._create_lock = asyncio.Lock()
+        self._lifecycle_locks: dict[str, asyncio.Lock] = {}
+        self._scoped_resources: list[Any] = []
+        self._room_store: Any | None = None
 
     async def handle_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         handler = _HANDLERS.get(command)
         if handler is None:
             return _err(f"unknown command: {command}")
         try:
+            project_id = str(payload.get("project_id") or "")
+            if command in _LOCKED_PROJECT_MUTATIONS and project_id:
+                async with self._lifecycle_lock(project_id):
+                    return await handler(self, payload)
             return await handler(self, payload)
         except ValidationError as e:
             missing = [err["loc"][0] for err in e.errors() if err["type"] == "missing"]
@@ -184,6 +205,106 @@ class ProjectManager:
                 "agent_id": agent.agent_id,
             },
         )
+
+    def register_scoped_resource(self, resource: Any, *, room_store: bool = False) -> None:
+        """Register a lazily mounted per-Project store/cache lifecycle participant."""
+
+        if resource not in self._scoped_resources:
+            self._scoped_resources.append(resource)
+        if room_store:
+            self._room_store = resource
+
+    def _lifecycle_lock(self, project_id: str) -> asyncio.Lock:
+        lock = self._lifecycle_locks.get(project_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._lifecycle_locks[project_id] = lock
+        return lock
+
+    async def _get_active_project(
+        self, project_id: str
+    ) -> tuple[ProjectRecord | None, dict[str, Any] | None]:
+        record = await self._store.get(project_id, include_archived=True)
+        if record is None:
+            return None, _err(f"project not found: {project_id}")
+        if record.archived_at is not None:
+            return record, _err("resource_archived")
+        return record, None
+
+    @staticmethod
+    def _check_expected_version(
+        record: ProjectRecord, expected_version: int
+    ) -> dict[str, Any] | None:
+        if record.version == expected_version:
+            return None
+        return _err(
+            f"Project {record.project_id} modified: expected version "
+            f"{expected_version}, got {record.version}"
+        )
+
+    async def _shutdown_project_clusters(self, record: ProjectRecord) -> str | None:
+        failures: list[str] = []
+        for cluster_id in record.cluster_ids:
+            try:
+                if self._cluster_transport.has_cluster(cluster_id):
+                    await self._cluster_transport.shutdown_cluster(cluster_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Project lifecycle: shutdown failed project=%s cluster=%s",
+                    record.project_id,
+                    cluster_id,
+                )
+                failures.append(f"{cluster_id}: {exc}")
+        return "; ".join(failures) or None
+
+    async def _close_project_resources(self, project_id: str) -> str | None:
+        failures: list[str] = []
+        for resource in self._scoped_resources:
+            close = getattr(resource, "close_project", None)
+            if close is None:
+                continue
+            try:
+                await close(project_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Project lifecycle: resource close failed project=%s resource=%r",
+                    project_id,
+                    resource,
+                )
+                failures.append(f"{type(resource).__name__}: {exc}")
+        return "; ".join(failures) or None
+
+    async def _restore_project_resources(self, project_id: str) -> None:
+        for resource in self._scoped_resources:
+            restore = getattr(resource, "restore_project", None)
+            if restore is not None:
+                await restore(project_id)
+
+    async def _evict_project_resources(self, project_id: str) -> None:
+        for resource in self._scoped_resources:
+            evict = getattr(resource, "evict_project", None)
+            if evict is not None:
+                await evict(project_id)
+
+    async def _count_project_rooms(self, record: ProjectRecord) -> int:
+        if self._room_store is None:
+            # ProjectUnit can run without RoomUnit in reduced profiles. The
+            # cascade guard must still inspect the authoritative Root DB.
+            from ghrah.subject.room.store import RoomStore
+
+            store = RoomStore(
+                ProjectPaths.from_locator(record.project_root_locator).room_db_path
+            )
+            await store.start()
+            try:
+                return len(await store.list(project_id=record.project_id))
+            finally:
+                await store.stop()
+        count = getattr(self._room_store, "count_project_records", None)
+        if count is None:
+            records = await self._room_store.list(project_id=record.project_id)
+            return len(records)
+        return int(await count(record.project_id))
 
     def _root_locator_for(self, project_id: str, requested: str = "") -> str:
         value = requested or self._default_root_locator_template.format(project_id=project_id)
@@ -309,7 +430,7 @@ class ProjectManager:
     async def _check_create_paths(
         self, root_locator: str, workspace_locators: list[str]
     ) -> None:
-        records = await self._store.list()
+        records = await self._store.list(archived=None)
         existing_roots = [r.project_root_locator for r in records if r.project_root_locator]
         existing_workspaces: list[str] = []
         for project in records:
@@ -327,7 +448,7 @@ class ProjectManager:
     async def migrate_legacy_project_roots(self) -> int:
         """为尚无 Root 的旧 Project 幂等建立内部目录并更新元数据。"""
         async with self._create_lock:
-            records = await self._store.list(include_deleted=True)
+            records = await self._store.list(archived=None, include_deleted=True)
             migrated = 0
             existing_roots = [r.project_root_locator for r in records if r.project_root_locator]
             workspace_locators: list[str] = []
@@ -364,9 +485,10 @@ class ProjectManager:
 
     async def _handle_update(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectUpdatePayload.model_validate(_strip_envelope(payload))
-        existing = await self._store.get(p.project_id)
-        if existing is None:
-            return _err(f"project not found: {p.project_id}")
+        existing, error = await self._get_active_project(p.project_id)
+        if error is not None:
+            return error
+        assert existing is not None
         expected = p.expected_version if p.expected_version is not None else existing.version
 
         def mutator(r: ProjectRecord) -> ProjectRecord:
@@ -385,14 +507,20 @@ class ProjectManager:
 
     async def _handle_get(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectIdPayload.model_validate(payload)
-        record = await self._store.get(p.project_id)
+        # Explicit Project get is the system/settings discovery path and must
+        # resolve archived records; business commands use _get_active_project.
+        record = await self._store.get(p.project_id, include_archived=True)
         if record is None:
             return _err(f"project not found: {p.project_id}")
         return _ok({"project": record.to_wire()})
 
     async def _handle_list(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectListPayload.model_validate(payload)
-        records = await self._store.list(status=p.status, include_deleted=p.include_deleted)
+        records = await self._store.list(
+            status=p.status,
+            archived=p.archived,
+            include_deleted=p.include_deleted,
+        )
         return _ok(
             {
                 "projects": [r.to_wire() for r in records],
@@ -400,42 +528,136 @@ class ProjectManager:
             }
         )
 
+    async def _handle_archive(self, payload: dict[str, Any]) -> dict[str, Any]:
+        p = ProjectLifecyclePayload.model_validate(payload)
+        async with self._lifecycle_lock(p.project_id):
+            existing = await self._store.get(p.project_id, include_archived=True)
+            if existing is None:
+                return _err(f"project not found: {p.project_id}")
+            if existing.archived_at is not None:
+                return _ok({"project": existing.to_wire()})
+            conflict = self._check_expected_version(existing, p.expected_version)
+            if conflict is not None:
+                return conflict
+            shutdown_error = await self._shutdown_project_clusters(existing)
+            if shutdown_error is not None:
+                return _err(f"project_shutdown_failed: {shutdown_error}")
+            close_error = await self._close_project_resources(existing.project_id)
+            if close_error is not None:
+                await self._restore_project_resources(existing.project_id)
+                return _err(f"project_resource_close_failed: {close_error}")
+            try:
+                updated = await self._store.archive(
+                    existing.project_id, p.expected_version
+                )
+            except Exception:
+                await self._restore_project_resources(existing.project_id)
+                raise
+            try:
+                await self._emit("project_archived", updated)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "project_archived event delivery failed for %s", updated.project_id
+                )
+            return _ok({"project": updated.to_wire()})
+
+    async def _handle_restore(self, payload: dict[str, Any]) -> dict[str, Any]:
+        p = ProjectLifecyclePayload.model_validate(payload)
+        async with self._lifecycle_lock(p.project_id):
+            existing = await self._store.get(p.project_id, include_archived=True)
+            if existing is None:
+                return _err(f"project not found: {p.project_id}")
+            if existing.archived_at is None:
+                return _ok({"project": existing.to_wire()})
+            conflict = self._check_expected_version(existing, p.expected_version)
+            if conflict is not None:
+                return conflict
+            try:
+                ProjectPaths.from_locator(
+                    existing.project_root_locator
+                ).validate_owner(existing.project_id)
+            except (OSError, ValueError) as exc:
+                return _err(str(exc))
+            updated = await self._store.restore(existing.project_id, p.expected_version)
+            try:
+                await self._restore_project_resources(existing.project_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "restore: scoped resource unfreeze failed project=%s",
+                    existing.project_id,
+                )
+                return _err(f"project_resource_restore_failed: {exc}")
+            try:
+                await self._emit("project_restored", updated)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "project_restored event delivery failed for %s", updated.project_id
+                )
+            return _ok({"project": updated.to_wire()})
+
     async def _handle_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectDeletePayload.model_validate(payload)
-        existing = await self._store.get(p.project_id, include_deleted=True)
-        if existing is None:
-            return _err(f"project not found: {p.project_id}")
-        paths: ProjectPaths | None = None
-        if p.purge_storage:
+        async with self._lifecycle_lock(p.project_id):
+            existing = await self._store.get(
+                p.project_id, include_archived=True, include_deleted=True
+            )
+            if existing is None:
+                return _err(f"project not found: {p.project_id}")
+            conflict = self._check_expected_version(existing, p.expected_version)
+            if conflict is not None:
+                return conflict
             try:
                 paths = ProjectPaths.from_locator(existing.project_root_locator)
                 paths.validate_owner(existing.project_id)
             except (OSError, ValueError) as exc:
                 return _err(str(exc))
-        # shutdown 全部 cluster + 关 transport
-        for cluster_id in existing.cluster_ids:
             try:
-                if self._cluster_transport.has_cluster(cluster_id):
-                    await self._cluster_transport.shutdown_cluster(cluster_id)
+                room_count = await self._count_project_rooms(existing)
+            except Exception as exc:  # noqa: BLE001
+                return _err(f"project_room_count_failed: {exc}")
+            if room_count and not p.cascade_rooms:
+                return _err("project_has_rooms")
+            shutdown_error = await self._shutdown_project_clusters(existing)
+            if shutdown_error is not None:
+                return _err(f"project_shutdown_failed: {shutdown_error}")
+            close_error = await self._close_project_resources(existing.project_id)
+            if close_error is not None:
+                if existing.archived_at is None:
+                    await self._restore_project_resources(existing.project_id)
+                return _err(f"project_resource_close_failed: {close_error}")
+            try:
+                paths.purge(existing.project_id)
+            except Exception as exc:  # noqa: BLE001
+                if existing.archived_at is None:
+                    await self._restore_project_resources(existing.project_id)
+                return _err(f"project_root_purge_failed: {exc}")
+            deleted = await self._store.hard_delete(
+                existing.project_id, p.expected_version
+            )
+            if not deleted:
+                return _err(f"project not found: {existing.project_id}")
+            await self._evict_project_resources(existing.project_id)
+            try:
+                await self._emit("project_deleted", existing)
             except Exception:  # noqa: BLE001
-                logger.warning("delete: shutdown cluster %s failed", cluster_id)
-        await self._store.soft_delete(existing.project_id, existing.version)
-        if paths is not None:
-            paths.purge(existing.project_id)
-        await self._emit("project_deleted", existing)
-        return _ok(
-            {
-                "project_id": p.project_id,
-                "deleted": True,
-                "storage_purged": paths is not None,
-            }
-        )
+                logger.exception(
+                    "project_deleted event delivery failed for %s", existing.project_id
+                )
+            return _ok(
+                {
+                    "project_id": existing.project_id,
+                    "deleted": True,
+                    "storage_purged": True,
+                    "rooms_deleted": room_count,
+                }
+            )
 
     async def _handle_add_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectAddAgentPayload.model_validate(payload)
-        existing = await self._store.get(p.project_id)
-        if existing is None:
-            return _err(f"project not found: {p.project_id}")
+        existing, error = await self._get_active_project(p.project_id)
+        if error is not None:
+            return error
+        assert existing is not None
         expected = p.expected_version if p.expected_version is not None else existing.version
         agent = AgentSpec(
             name=p.agent.name,
@@ -531,9 +753,10 @@ class ProjectManager:
 
     async def _handle_remove_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectRemoveAgentPayload.model_validate(payload)
-        existing = await self._store.get(p.project_id)
-        if existing is None:
-            return _err(f"project not found: {p.project_id}")
+        existing, error = await self._get_active_project(p.project_id)
+        if error is not None:
+            return error
+        assert existing is not None
         expected = p.expected_version if p.expected_version is not None else existing.version
         target = next(
             (
@@ -594,9 +817,10 @@ class ProjectManager:
         project_id = payload["project_id"]
         task_id = payload["task_id"]
         expected_version = payload.get("expected_version")
-        existing = await self._store.get(project_id)
-        if existing is None:
-            return _err(f"project not found: {project_id}")
+        existing, error = await self._get_active_project(project_id)
+        if error is not None:
+            return error
+        assert existing is not None
         exp = expected_version if expected_version is not None else existing.version
         # 校验 task 存在（经 task_get 命令）
         task_result = await self._task_mgr.handle_command("task_get", {"task_id": task_id})
@@ -617,9 +841,10 @@ class ProjectManager:
 
     async def _handle_set_recovery(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = ProjectSetRecoveryPayload.model_validate(payload)
-        existing = await self._store.get(p.project_id)
-        if existing is None:
-            return _err(f"project not found: {p.project_id}")
+        existing, error = await self._get_active_project(p.project_id)
+        if error is not None:
+            return error
+        assert existing is not None
         expected = p.expected_version if p.expected_version is not None else existing.version
 
         def mutator(r: ProjectRecord) -> ProjectRecord:
@@ -657,9 +882,10 @@ class ProjectManager:
         reinit_clusters: bool = False,
     ) -> dict[str, Any]:
         p = ProjectIdPayload.model_validate(payload)
-        existing = await self._store.get(p.project_id)
-        if existing is None:
-            return _err(f"project not found: {p.project_id}")
+        existing, error = await self._get_active_project(p.project_id)
+        if error is not None:
+            return error
+        assert existing is not None
         if not can_transition(existing.status, target):
             return _err(f"illegal transition: {existing.status.value} -> {target.value}")
         updated = await self._store.update(
@@ -756,9 +982,10 @@ class ProjectManager:
 
     async def adopt_existing_agents(self, project_id: str, cluster_id: str) -> list[AgentSpec]:
         """经 ClusterHandle.list_agents 从 Core 取现有 agent，构造 AgentSpec 并加入 project。"""
-        existing = await self._store.get(project_id)
-        if existing is None:
-            raise ProjectNotFoundError(f"project not found: {project_id}")
+        existing, error = await self._get_active_project(project_id)
+        if error is not None:
+            raise ValueError(str(error["error"]))
+        assert existing is not None
         handle = await self._cluster_transport.ensure_cluster(
             cluster_id, project_root_locator=existing.project_root_locator
         )
@@ -803,6 +1030,8 @@ _HANDLERS: dict[str, Callable[[ProjectManager, dict[str, Any]], Awaitable[dict[s
     "project_update": ProjectManager._handle_update,
     "project_get": ProjectManager._handle_get,
     "project_list": ProjectManager._handle_list,
+    "project_archive": ProjectManager._handle_archive,
+    "project_restore": ProjectManager._handle_restore,
     "project_delete": ProjectManager._handle_delete,
     "project_add_agent": ProjectManager._handle_add_agent,
     "project_remove_agent": ProjectManager._handle_remove_agent,
