@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from ghrah.protocol.types import (
+    AGENT_SCOPED_EVENT_TYPES,
     CHAIN_HISTORY_COMMANDS,
     COMMAND_PAYLOAD_MAP,
     CORE_COMMANDS,
@@ -159,6 +160,7 @@ from ghrah.protocol.types import (
 )
 
 __all__ = [
+    "AGENT_SCOPED_EVENT_TYPES",
     "AbilityDefinitionPayload",
     "AbilityResultPayload",
     "ActionChainUpdatedPayload",

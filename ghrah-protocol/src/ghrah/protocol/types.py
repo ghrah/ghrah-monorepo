@@ -261,6 +261,26 @@ class EventType(StrEnum):
     RECONCILE_FAILED = "reconcile_failed"
 
 
+# 必须携带非空 project_id + agent_id 的事件类型（Agent 作用域事件归属契约）。
+# 生产侧缺失归属时跳过发布，转发侧（Subject EventBus）缺失归属时丢弃并计数。
+AGENT_SCOPED_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        EventType.AGENT_SPAWNED.value,
+        EventType.AGENT_TERMINATED.value,
+        EventType.AGENT_RESPONSE.value,
+        EventType.AGENT_ERROR.value,
+        EventType.ACTION_CHAIN_UPDATED.value,
+        EventType.ABILITY_RESULT.value,
+        EventType.HITL_REQUEST.value,
+        EventType.SESSION_CREATED.value,
+        EventType.SESSION_SWITCHED.value,
+        EventType.SESSION_ARCHIVED.value,
+        EventType.SESSION_DELETED.value,
+        EventType.SESSION_LIST_RESULT.value,
+    }
+)
+
+
 class TaskStatus(StrEnum):
     """Task lifecycle state."""
 
