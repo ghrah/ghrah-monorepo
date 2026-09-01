@@ -112,13 +112,13 @@ def __getattr__(name: str) -> type:
     }:
         import importlib
 
-        _DOMAIN_MAP = {
+        _domain_map = {
             "AbilityError": "ghrah.abilities.errors",
             "AbilityNotFoundError": "ghrah.abilities.errors",
             "AgentNotFoundError": "ghrah.communication.errors",
             "LLMError": "ghrah.llm.errors",
             "RegistryError": "ghrah.communication.errors",
         }
-        module = importlib.import_module(_DOMAIN_MAP[name])
+        module = importlib.import_module(_domain_map[name])
         return getattr(module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

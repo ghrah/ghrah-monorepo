@@ -146,7 +146,9 @@ def make_coder_abilities(checker: FSPermissionChecker) -> list:
     ]
 
 
-def make_reviewer_abilities(read_checker: FSPermissionChecker, write_checker: FSPermissionChecker) -> list:
+def make_reviewer_abilities(
+    read_checker: FSPermissionChecker, write_checker: FSPermissionChecker
+) -> list:
     """创建 reviewer 的 Ability 组合：对话 + 结束 + 读文件（多路径） + 写文件 + 列目录。"""
     return [
         ConversationAbility(),
@@ -360,8 +362,9 @@ async def main() -> None:
 
     all_code = "\n\n".join(code_contents)
 
+    report_path = workspace / 'reviewer' / 'review_report.md'
     reviewer_prompt = (
-        f"请审查以下 Python 代码，并将审查报告写入 {workspace / 'reviewer' / 'review_report.md'}。\n\n"
+        f"请审查以下 Python 代码，并将审查报告写入 {report_path}。\n\n"
         f"代码内容:\n{all_code}\n\n"
         f"审查要点：\n"
         f"1. 代码质量和可读性评分（1-10）\n"

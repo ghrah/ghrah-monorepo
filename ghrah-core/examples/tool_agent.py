@@ -55,9 +55,10 @@ async def demo_manual_registration() -> None:
         system_prompt="你是一个文件助手。用户可以让你读取文件内容。",
     )
 
+    read_file = ReadFileAbility()
     agent = AgentBuilder.from_config(
         config,
-        abilities=[ReadFileAbility(), ConversationAbility(), EndTaskAbility()],
+        abilities=[read_file, ConversationAbility(), EndTaskAbility()],
     )
 
     # 查看注册结果

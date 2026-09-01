@@ -29,7 +29,9 @@ class TruncationStrategy(WindowStrategy):
     适用场景：最终兜底策略，确保消息不超过预算。
     """
 
-    async def apply(self, messages: list[WindowableMessage], token_budget: int) -> list[WindowableMessage]:
+    async def apply(
+        self, messages: list[WindowableMessage], token_budget: int
+    ) -> list[WindowableMessage]:
         """应用截断策略。
 
         Args:

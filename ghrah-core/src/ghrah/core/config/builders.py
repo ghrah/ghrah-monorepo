@@ -61,9 +61,21 @@ def build_window_from_overrides(overrides: Any) -> WindowConfig:
     """从 WindowOverrides (manifest dataclass) 构建 WindowConfig。"""
     return WindowConfig(
         max_tokens=overrides.max_tokens if overrides.max_tokens is not None else 4096,
-        strategies=overrides.strategies if overrides.strategies is not None else ["tool_call_fold", "truncation"],
-        tool_call_max_length=overrides.tool_call_max_length if overrides.tool_call_max_length is not None else 500,
-        sliding_window_size=overrides.sliding_window_size if overrides.sliding_window_size is not None else 20,
+        strategies=(
+            overrides.strategies
+            if overrides.strategies is not None
+            else ["tool_call_fold", "truncation"]
+        ),
+        tool_call_max_length=(
+            overrides.tool_call_max_length
+            if overrides.tool_call_max_length is not None
+            else 500
+        ),
+        sliding_window_size=(
+            overrides.sliding_window_size
+            if overrides.sliding_window_size is not None
+            else 20
+        ),
     )
 
 
@@ -73,7 +85,9 @@ def build_context_from_overrides(overrides: Any) -> ContextConfig:
         persistence_type=overrides.type,
         persistence_compress=overrides.compress if overrides.compress is not None else True,
         auto_persist=overrides.auto_persist if overrides.auto_persist is not None else False,
-        snapshot_interval=overrides.snapshot_interval if overrides.snapshot_interval is not None else 5,
+        snapshot_interval=(
+            overrides.snapshot_interval if overrides.snapshot_interval is not None else 5
+        ),
     )
 
 

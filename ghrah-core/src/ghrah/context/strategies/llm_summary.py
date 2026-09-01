@@ -76,7 +76,9 @@ class LLMSummaryStrategy(WindowStrategy):
         """摘要提示词。"""
         return self._summary_prompt
 
-    async def apply(self, messages: list[WindowableMessage], token_budget: int) -> list[WindowableMessage]:
+    async def apply(
+        self, messages: list[WindowableMessage], token_budget: int
+    ) -> list[WindowableMessage]:
         """应用 LLM 摘要策略。
 
         Args:
@@ -147,7 +149,9 @@ class LLMSummaryStrategy(WindowStrategy):
 
         return split_index
 
-    async def _generate_summary(self, old_messages: list[WindowableMessage]) -> WindowableMessage | None:
+    async def _generate_summary(
+        self, old_messages: list[WindowableMessage]
+    ) -> WindowableMessage | None:
         """调用 LLM 生成旧消息的摘要。
 
         Args:

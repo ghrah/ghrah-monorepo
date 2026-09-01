@@ -319,7 +319,9 @@ class TestCheckAccess:
         """白名单内的写入路径自动批准。"""
         with tempfile.TemporaryDirectory() as tmpdir:
             checker = FSPermissionChecker(allowed_paths=[tmpdir], require_approval=True)
-            allowed, status = checker.check_access(str(Path(tmpdir) / "file.txt"), operation="write")
+            allowed, status = checker.check_access(
+                str(Path(tmpdir) / "file.txt"), operation="write"
+            )
             assert allowed is True
             assert status is None
 

@@ -705,7 +705,7 @@ class TestContextManagerIntegration:
         cm.commit_iteration(ability_names=["ability_1"])
 
         cm.begin_iteration()
-        rollback_node = cm.rollback_iteration(RuntimeError("fail"))
+        cm.rollback_iteration(RuntimeError("fail"))
 
         # 回滚后，活跃分支是 rollback 分支
         # rollback 分支的历史是：root -> rollback_node（回滚到 root 的状态）

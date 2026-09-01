@@ -44,7 +44,7 @@ async def main() -> None:
     """运行 Worker 池示例。"""
 
     # Worker 池大小
-    NUM_WORKERS = 3
+    num_workers = 3
 
     print("=" * 60)
     print("Worker 池示例 — agent_config_name 演示")
@@ -84,7 +84,7 @@ async def main() -> None:
             ),
             max_iterations=8,
         )
-        for i in range(NUM_WORKERS)
+        for i in range(num_workers)
     ]
 
     # 4. 注册所有 Agent
@@ -139,7 +139,7 @@ async def main() -> None:
         return response
 
     # 并行执行所有 worker 任务
-    worker_names = [f"solve_worker_{i}" for i in range(NUM_WORKERS)]
+    worker_names = [f"solve_worker_{i}" for i in range(num_workers)]
     results = await asyncio.gather(
         *[
             dispatch_task(name, task)

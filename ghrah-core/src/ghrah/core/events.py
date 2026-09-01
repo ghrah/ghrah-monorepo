@@ -32,7 +32,7 @@ __all__ = [
 ]
 
 
-class CoreEventType(str, Enum):
+class CoreEventType(str, Enum):  # noqa: UP042
     """Core 产生的事件类型。
 
     与 ghrah-protocol 的 EventType 对齐：

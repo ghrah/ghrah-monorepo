@@ -1,0 +1,71 @@
+name: publish
+
+on:
+  push:
+    tags:
+      - "py/ghrah-core@*"
+      - "py/ghrah-protocol@*"
+      - "py/ghrah-subject@*"
+      - "npm/ghrah-protocol@*"
+      - "npm/ghrah-observer-core@*"
+
+permissions:
+  id-token: write   # PyPI / npm trusted publishing (OIDC)
+  contents: read
+
+jobs:
+  pypi:
+    if: startsWith(github.ref_name, 'py/')
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: 路由 tag → 包
+        id: route
+        run: |
+          pkg=$(echo "${{ github.ref_name }}" | sed 's|py/\(.*\)@.*|\1|')
+          echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
+      - run: uv build --package ${{ steps.route.outputs.pkg }} --out-dir dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  npm:
+    if: startsWith(github.ref_name, 'npm/')
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - name: 路由 tag → 包
+        id: route
+        run: |
+          pkg=$(echo "${{ github.ref_name }}" | sed 's|npm/ghrah-\(.*\)@.*|\1|')
+          echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
+      # 依赖序：protocol 先发布，observer-core 消费其 dist
+      - run: pnpm --filter @ghrah/protocol build
+      - run: pnpm --filter @ghrah/observer-core build
+        if: steps.route.outputs.pkg == 'observer-core'
+      - run: pnpm --filter @ghrah/${{ steps.route.outputs.pkg }} publish --no-git-checks --access public
+
+  vscode:
+    if: startsWith(github.ref_name, 'py/ghrah-subject@')
+    runs-on: ubuntu-latest
+    environment: vscode-marketplace
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm --filter @ghrah/protocol build
+      - name: 发布 VS Code 扩展
+        run: pnpm --dir ghrah-observer-webui/vscode-extension exec vsce publish
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}

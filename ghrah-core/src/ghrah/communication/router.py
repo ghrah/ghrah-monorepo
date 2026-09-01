@@ -103,7 +103,9 @@ class MessageRouter:
                 f"Failed to route message from {message.sender} to {target}: {e}"
             ) from e
 
-    async def broadcast(self, message: AgentMessage, exclude: str | None = None) -> list[AgentMessage]:
+    async def broadcast(
+        self, message: AgentMessage, exclude: str | None = None
+    ) -> list[AgentMessage]:
         """广播消息到所有已注册 Agent。
 
         并行发送到所有 Agent，收集所有响应。

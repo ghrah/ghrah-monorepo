@@ -38,7 +38,7 @@ __all__ = [
 ]
 
 
-class HookPoint(str, Enum):
+class HookPoint(str, Enum):  # noqa: UP042
     """Hook 触发点 — 三层架构。
 
     drive_loop 级（_drive_loop 中触发）:

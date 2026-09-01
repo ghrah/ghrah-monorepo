@@ -334,7 +334,7 @@ class TestActionChain:
     def test_fork_creates_branch(self) -> None:
         """fork 创建新分支，分支 head 正确。"""
         chain = ActionChain(agent_name="agent")
-        root = chain.init_chain(agent_state={"v": 0})
+        chain.init_chain(agent_state={"v": 0})
         chain.commit_node(ability_names=["s1"], agent_state={"v": 1}, messages_delta=["d1"])
 
         fork_node = chain.fork("sub_agent")
@@ -360,7 +360,7 @@ class TestActionChain:
     def test_fork_from_specific_parent(self) -> None:
         """fork 从指定 parent_id 创建分支。"""
         chain = ActionChain(agent_name="agent")
-        root = chain.init_chain(agent_state={"v": 0})
+        chain.init_chain(agent_state={"v": 0})
         node1 = chain.commit_node(ability_names=["s1"], agent_state={"v": 1}, messages_delta=["d1"])
         chain.commit_node(ability_names=["s2"], agent_state={"v": 2}, messages_delta=["d2"])
 

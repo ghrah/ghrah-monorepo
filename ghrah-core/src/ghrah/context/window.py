@@ -112,7 +112,9 @@ class WindowStrategy(ABC):
     """
 
     @abstractmethod
-    async def apply(self, messages: list[WindowableMessage], token_budget: int) -> list[WindowableMessage]:
+    async def apply(
+        self, messages: list[WindowableMessage], token_budget: int
+    ) -> list[WindowableMessage]:
         """应用压缩策略。
 
         Args:

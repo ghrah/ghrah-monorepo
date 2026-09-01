@@ -67,6 +67,7 @@ __all__ = [
     "StreamingBlock",
     "block_from_dict",
     "block_to_dict",
+    "blocks_from_dicts",
     # Message
     "ChatMessage",
     # Factory

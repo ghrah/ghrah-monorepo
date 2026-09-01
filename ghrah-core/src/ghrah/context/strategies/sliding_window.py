@@ -42,7 +42,9 @@ class SlidingWindowStrategy(WindowStrategy):
         """窗口大小。"""
         return self._window_size
 
-    async def apply(self, messages: list[WindowableMessage], token_budget: int) -> list[WindowableMessage]:
+    async def apply(
+        self, messages: list[WindowableMessage], token_budget: int
+    ) -> list[WindowableMessage]:
         """应用滑动窗口策略。
 
         Args:

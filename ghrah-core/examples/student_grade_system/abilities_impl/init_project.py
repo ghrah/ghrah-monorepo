@@ -101,7 +101,9 @@ class InitProjectAbility(Ability):
         if project_type not in ("backend", "frontend"):
             return ActionResult(
                 outcome=ActionOutcome.FAILURE,
-                data={"error": f"project_type must be 'backend' or 'frontend', got '{project_type}'"},
+                data={
+                    "error": f"project_type must be 'backend' or 'frontend', got '{project_type}'"
+                },
             )
 
         if self._checker is not None:
@@ -129,7 +131,10 @@ class InitProjectAbility(Ability):
             cli_name = "pnpm" if project_type == "frontend" else "uv"
             return ActionResult(
                 outcome=ActionOutcome.FAILURE,
-                data={"error": f"{cli_name} CLI not found. Please install {cli_name} first.", "detail": str(exc)},
+                data={
+                    "error": f"{cli_name} CLI not found. Please install {cli_name} first.",
+                    "detail": str(exc),
+                },
             )
 
     async def _init_frontend(self, target_path: str) -> ActionResult:

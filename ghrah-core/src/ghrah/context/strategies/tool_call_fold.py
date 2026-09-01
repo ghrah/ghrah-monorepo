@@ -63,7 +63,9 @@ class ToolCallFoldStrategy(WindowStrategy):
         """最大 content 长度。"""
         return self._max_content_length
 
-    async def apply(self, messages: list[WindowableMessage], token_budget: int) -> list[WindowableMessage]:
+    async def apply(
+        self, messages: list[WindowableMessage], token_budget: int
+    ) -> list[WindowableMessage]:
         """应用 ToolCall 折叠策略。
 
         Args:
@@ -95,7 +97,10 @@ class ToolCallFoldStrategy(WindowStrategy):
         """
         needs_fold = False
         for block in msg.content_blocks:
-            if getattr(block, "type", None) == "tool_result" and len(getattr(block, "content", "")) > self._max_content_length:
+            if (
+                getattr(block, "type", None) == "tool_result"
+                and len(getattr(block, "content", "")) > self._max_content_length
+            ):
                 needs_fold = True
                 break
 

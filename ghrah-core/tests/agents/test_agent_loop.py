@@ -129,7 +129,9 @@ def _create_agent(
     """创建一个 ActorAgent 实例（通过 AgentBuilder）。"""
     from ghrah.agents.builder import AgentBuilder
 
-    agent = AgentBuilder.from_config(config or AgentConfig(name="test-agent"), supervisor=supervisor)
+    agent = AgentBuilder.from_config(
+        config or AgentConfig(name="test-agent"), supervisor=supervisor
+    )
     return agent
 
 
@@ -1315,7 +1317,6 @@ class TestMessageQueue:
         agent.register_ability(MockAbility(name="conversation"))
 
         injected_msg = ChatMessage.user("mid-loop injection", source="human")
-        iteration_count = 0
 
         class InjectAfterFirstAction(Hook):
             """第一次 AFTER_ACTION 时注入消息并继续循环。"""

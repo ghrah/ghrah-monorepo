@@ -1,0 +1,74 @@
+name: release-precheck
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（如 0.2.0 / 0.2.0b1）"
+        required: true
+
+env:
+  V: ${{ inputs.version }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 版本一致性（pyproject / package.json == 输入版本）
+        run: |
+          for p in ghrah-core ghrah-protocol ghrah-subject; do
+            v=$(grep -m1 '^version' $p/pyproject.toml | cut -d'"' -f2)
+            [ "$v" = "$V" ] || { echo "::error::$p pyproject version=$v != $V"; exit 1; }
+          done
+          for p in ghrah-observer-webui/packages/protocol ghrah-observer-webui/packages/observer-core ghrah-observer-webui/vscode-extension; do
+            v=$(node -p "require('./$p/package.json').version")
+            [ "$v" = "$V" ] || { echo "::error::$p package.json version=$v != $V"; exit 1; }
+          done
+
+      - name: 依赖下限一致性（ghrah-* 互依 >= 当前版本）
+        run: |
+          grep -q "ghrah-protocol>=$V" ghrah-core/pyproject.toml || { echo "::error::core 依赖下限未随版本更新"; exit 1; }
+          grep -q "ghrah-core>=$V" ghrah-subject/pyproject.toml || { echo "::error::subject 依赖下限未随版本更新"; exit 1; }
+          grep -q "ghrah-protocol>=$V" ghrah-subject/pyproject.toml || { echo "::error::subject 依赖下限未随版本更新"; exit 1; }
+
+      - name: 全量测试 + 类型检查
+        run: |
+          uv sync --all-packages
+          uv run ruff check
+          cd ghrah-protocol && MYPYPATH=src uv run mypy --explicit-package-bases -p ghrah.protocol && cd ..
+          uv run pytest ghrah-protocol ghrah-core ghrah-subject shuoxi
+          pnpm install
+          pnpm --filter @ghrah/protocol build && pnpm --filter @ghrah/observer-core build
+          pnpm -r test
+          pnpm type-check
+
+      - name: 三包构建 + 内容审查（无 plans/.kilo/缓存夹带）
+        run: |
+          uv build --package ghrah-core --out-dir /tmp/dist-core
+          uv build --package ghrah-protocol --out-dir /tmp/dist-protocol
+          uv build --package ghrah-subject --out-dir /tmp/dist-subject
+          for f in /tmp/dist-*/*.tar.gz; do
+            tar tzf "$f" | grep -E "\.kilo|plans/|__pycache__|\.mypy_cache" && { echo "::error::$f 夹带本地产物"; exit 1; } || true
+          done
+
+      - name: 打六个发布 tag 并推送
+        run: |
+          for t in "v$V" "py/ghrah-core@$V" "py/ghrah-protocol@$V" "py/ghrah-subject@$V" "npm/ghrah-protocol@$V" "npm/ghrah-observer-core@$V"; do
+            git tag "$t"
+          done
+          git push origin --tags
+
+      - name: 创建 GitHub Release（更新日志人工维护）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "v$V" --generate-notes

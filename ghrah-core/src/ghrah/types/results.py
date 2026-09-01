@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any
 
 
-class ActionOutcome(str, Enum):
+class ActionOutcome(str, Enum):  # noqa: UP042
     """Action 执行结果类型。"""
 
     SUCCESS = "success"

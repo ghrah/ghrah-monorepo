@@ -271,7 +271,9 @@ class TestToolCallFoldStrategy:
     async def test_short_tool_message_not_folded(self) -> None:
         """短 ToolMessage 不被折叠。"""
         msgs = [_tool("short result")]
-        strategy = ToolCallFoldStrategy(max_content_length=500, message_factory=ChatMessageFactory())
+        strategy = ToolCallFoldStrategy(
+            max_content_length=500, message_factory=ChatMessageFactory()
+        )
         result = await strategy.apply(msgs, token_budget=10000)
         assert len(result) == 1
         assert result[0].tool_results[0].content == "short result"
@@ -281,7 +283,9 @@ class TestToolCallFoldStrategy:
         """长 ToolMessage 被截断并添加标记。"""
         long_content = _long_content(1000)
         msgs = [_tool(long_content)]
-        strategy = ToolCallFoldStrategy(max_content_length=100, message_factory=ChatMessageFactory())
+        strategy = ToolCallFoldStrategy(
+            max_content_length=100, message_factory=ChatMessageFactory()
+        )
         result = await strategy.apply(msgs, token_budget=10000)
         assert len(result) == 1
         assert len(result[0].tool_results[0].content) < len(long_content)
@@ -292,7 +296,9 @@ class TestToolCallFoldStrategy:
     async def test_fold_preserves_tool_call_id(self) -> None:
         """折叠后 tool_call_id 保持不变。"""
         msgs = [_tool(_long_content(1000), tool_call_id="call_abc123")]
-        strategy = ToolCallFoldStrategy(max_content_length=100, message_factory=ChatMessageFactory())
+        strategy = ToolCallFoldStrategy(
+            max_content_length=100, message_factory=ChatMessageFactory()
+        )
         result = await strategy.apply(msgs, token_budget=10000)
         assert result[0].tool_results[0].tool_call_id == "call_abc123"
 
@@ -300,7 +306,9 @@ class TestToolCallFoldStrategy:
     async def test_fold_preserves_name(self) -> None:
         """折叠后 name 保持不变。"""
         msgs = [_tool(_long_content(1000), tool_call_id="tc1", name="read_file")]
-        strategy = ToolCallFoldStrategy(max_content_length=100, message_factory=ChatMessageFactory())
+        strategy = ToolCallFoldStrategy(
+            max_content_length=100, message_factory=ChatMessageFactory()
+        )
         result = await strategy.apply(msgs, token_budget=10000)
         assert result[0].tool_results[0].name == "read_file"
 
@@ -314,7 +322,9 @@ class TestToolCallFoldStrategy:
         )
         tool_msg = _tool(_long_content(1000), tool_call_id="tc1")
         msgs = [ai_msg, tool_msg]
-        strategy = ToolCallFoldStrategy(max_content_length=100, message_factory=ChatMessageFactory())
+        strategy = ToolCallFoldStrategy(
+            max_content_length=100, message_factory=ChatMessageFactory()
+        )
         result = await strategy.apply(msgs, token_budget=10000)
         assert result[0].tool_calls == ai_msg.tool_calls
         assert "truncated" in result[1].tool_results[0].content
@@ -329,7 +339,9 @@ class TestToolCallFoldStrategy:
             _ai("calling another"),
             _tool(_long_content(1000)),
         ]
-        strategy = ToolCallFoldStrategy(max_content_length=100, message_factory=ChatMessageFactory())
+        strategy = ToolCallFoldStrategy(
+            max_content_length=100, message_factory=ChatMessageFactory()
+        )
         result = await strategy.apply(msgs, token_budget=10000)
         assert len(result) == 5
         assert result[2].tool_results[0].content == "short"
@@ -340,7 +352,9 @@ class TestToolCallFoldStrategy:
         """不修改原始消息列表。"""
         msgs = [_tool(_long_content(1000))]
         original_content = msgs[0].tool_results[0].content
-        strategy = ToolCallFoldStrategy(max_content_length=100, message_factory=ChatMessageFactory())
+        strategy = ToolCallFoldStrategy(
+            max_content_length=100, message_factory=ChatMessageFactory()
+        )
         await strategy.apply(msgs, token_budget=10000)
         assert msgs[0].tool_results[0].content == original_content
 
@@ -485,7 +499,9 @@ class TestLLMSummaryStrategy:
     def test_custom_summary_prompt(self) -> None:
         """自定义摘要提示词。"""
         llm = MagicMock(spec=ChatFormat)
-        strategy = LLMSummaryStrategy(llm=llm, summary_prompt="自定义摘要提示", message_factory=ChatMessageFactory())
+        strategy = LLMSummaryStrategy(
+            llm=llm, summary_prompt="自定义摘要提示", message_factory=ChatMessageFactory()
+        )
         assert strategy.summary_prompt == "自定义摘要提示"
 
     @pytest.mark.asyncio

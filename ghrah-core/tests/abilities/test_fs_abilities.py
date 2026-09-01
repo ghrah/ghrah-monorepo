@@ -2,7 +2,8 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""文件系统内置 Ability 测试：ListDirectoryAbility, WriteFileAbility, EditFileAbility, MoveFileAbility, DeleteFileAbility。"""
+"""文件系统内置 Ability 测试：ListDirectoryAbility, WriteFileAbility, EditFileAbility,
+MoveFileAbility, DeleteFileAbility。"""
 
 from __future__ import annotations
 

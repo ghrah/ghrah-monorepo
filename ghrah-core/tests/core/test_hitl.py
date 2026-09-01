@@ -80,7 +80,7 @@ class TestHITLFutureStore:
     @pytest.mark.asyncio
     async def test_resolve_already_resolved_future(self) -> None:
         """测试解析已完成的 Future。"""
-        future = self.store.create_future("agent-1", "write_file", "call-123")
+        self.store.create_future("agent-1", "write_file", "call-123")
 
         result = HITLResult(approved=True)
         self.store.resolve_future("agent-1", "write_file", "call-123", result)

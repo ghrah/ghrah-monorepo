@@ -338,7 +338,7 @@ class TestSavepoint:
         sm = StateManager({"base": 0})
         sm.begin_transaction()
         sm.apply_changes({"l1": 1})
-        sp0 = sm.savepoint()
+        sm.savepoint()
         sm.apply_changes({"l2": 2})
         sp1 = sm.savepoint()
         sm.apply_changes({"l3": 3})

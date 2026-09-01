@@ -41,7 +41,9 @@ def _create_agent(
     """创建一个 ActorAgent 实例。"""
     from ghrah.agents.builder import AgentBuilder
 
-    agent = AgentBuilder.from_config(config or AgentConfig(name="test-agent"), supervisor=supervisor)
+    agent = AgentBuilder.from_config(
+        config or AgentConfig(name="test-agent"), supervisor=supervisor
+    )
     return agent
 
 

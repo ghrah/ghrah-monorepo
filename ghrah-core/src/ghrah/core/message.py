@@ -14,7 +14,7 @@ from typing import Any
 __all__ = ["AgentMessage", "MessageType", "classify_source"]
 
 
-class MessageType(str, Enum):
+class MessageType(str, Enum):  # noqa: UP042
     """消息类型枚举"""
 
     CHAT = "chat"  # 普通对话消息

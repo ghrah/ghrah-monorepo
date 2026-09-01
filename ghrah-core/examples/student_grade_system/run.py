@@ -64,7 +64,10 @@ def create_workspace() -> Path:
     return temp_root
 
 
-def read_directory_files(directory: Path, suffixes: tuple[str, ...] = (".py", ".js", ".vue", ".html", ".json", ".yaml", ".yml", ".md")) -> str:
+def read_directory_files(
+    directory: Path,
+    suffixes: tuple[str, ...] = (".py", ".js", ".vue", ".html", ".json", ".yaml", ".yml", ".md"),
+) -> str:
     parts: list[str] = []
     if not directory.exists():
         return f"(Directory not found: {directory})"
@@ -288,7 +291,9 @@ async def main() -> None:
             f"你只需要修复属于后端范围内的问题\n"
         )
 
-        backend_improve_response = await supervisor.send("backend_coder", improvement_backend_prompt)
+        backend_improve_response = await supervisor.send(
+            "backend_coder", improvement_backend_prompt
+        )
         print(f"  Backend improve response (first 500 chars):\n{backend_improve_response[:500]}...")
         print()
 
@@ -307,8 +312,12 @@ async def main() -> None:
             f"你只需要修复属于前端范围内的问题\n"
         )
 
-        frontend_improve_response = await supervisor.send("frontend_coder", improvement_frontend_prompt)
-        print(f"  Frontend improve response (first 500 chars):\n{frontend_improve_response[:500]}...")
+        frontend_improve_response = await supervisor.send(
+            "frontend_coder", improvement_frontend_prompt
+        )
+        print(
+            f"  Frontend improve response (first 500 chars):\n{frontend_improve_response[:500]}..."
+        )
         print()
 
         # ====================================================================

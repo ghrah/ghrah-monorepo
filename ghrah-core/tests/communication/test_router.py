@@ -260,7 +260,9 @@ class TestMessageRouter:
         assert response.content == "Delayed response"
 
     @pytest.mark.asyncio
-    async def test_send_and_wait_infinite_wait(self, router: MessageRouter, registry_with_agents: tuple) -> None:
+    async def test_send_and_wait_infinite_wait(
+        self, router: MessageRouter, registry_with_agents: tuple
+    ) -> None:
         """send_and_wait 支持 timeout=-1 无限等待。"""
         registry, handles = registry_with_agents
 
