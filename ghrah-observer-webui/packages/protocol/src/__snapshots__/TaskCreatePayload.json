@@ -1,0 +1,10 @@
+{
+  "title": "Write unit tests",
+  "project_id": "proj-001",
+  "description": "Cover login flow",
+  "agent_name": null,
+  "priority": "normal",
+  "parent_id": null,
+  "dependencies": [],
+  "metadata": {}
+}

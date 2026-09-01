@@ -1,0 +1,7 @@
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Invalid payload",
+  "details": {
+    "field": "name"
+  }
+}

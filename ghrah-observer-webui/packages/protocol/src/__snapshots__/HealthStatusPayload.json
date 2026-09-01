@@ -1,0 +1,6 @@
+{
+  "status": {
+    "agent_1": true,
+    "agent_2": false
+  }
+}

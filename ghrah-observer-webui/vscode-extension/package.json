@@ -1,0 +1,105 @@
+{
+  "name": "ghrah-vscode-extension",
+  "displayName": "Ghrah - Actor-Agent Platform",
+  "description": "AI Agent orchestration with Human-in-the-Loop",
+  "version": "0.1.0",
+  "publisher": "ghrah",
+  "type": "module",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:ghrah.openDashboard"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ghrah.openDashboard",
+        "title": "Ghrah: Open Dashboard"
+      },
+      {
+        "command": "ghrah.openConfig",
+        "title": "Ghrah: Open Config"
+      },
+      {
+        "command": "ghrah.startCluster",
+        "title": "Ghrah: Start Cluster"
+      },
+      {
+        "command": "ghrah.stopCluster",
+        "title": "Ghrah: Stop Cluster"
+      }
+    ],
+    "configuration": {
+      "title": "Ghrah",
+      "properties": {
+        "ghrah.core.url": {
+          "type": "string",
+          "default": "ws://localhost:4111/ws",
+          "description": "Core WebSocket URL (for health check)"
+        },
+        "ghrah.core.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start Core process on extension activation"
+        },
+        "ghrah.core.launchMethod": {
+          "type": "string",
+          "enum": [
+            "uv",
+            "binary"
+          ],
+          "default": "uv",
+          "description": "Method to launch Core (uv run or pre-built binary)"
+        },
+        "ghrah.core.binaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to pre-built Core binary (when launchMethod is 'binary')"
+        },
+        "ghrah.observer.url": {
+          "type": "string",
+          "default": "ws://localhost:4112/ws",
+          "description": "Observer Server WebSocket URL"
+        },
+        "ghrah.observer.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect to Observer Server on extension activation"
+        },
+        "ghrah.subject.autoStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start Subject process on extension activation"
+        },
+        "ghrah.workspace.root": {
+          "type": "string",
+          "default": "",
+          "description": "Workspace root directory for Subject"
+        },
+        "ghrah.manifest.root": {
+          "type": "string",
+          "default": "~/.ghrah/manifests",
+          "description": "Manifest YAML files root directory"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=esm --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=esm --platform=node --watch",
+    "package": "vsce package",
+    "type-check": "tsc --noEmit",
+    "lint": "biome check src/"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/vscode": "^1.95.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  }
+}

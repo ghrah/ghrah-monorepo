@@ -1,0 +1,16 @@
+{
+  "entries": [
+    {
+      "id": "entry-001",
+      "room_id": "room-001",
+      "seq": 42,
+      "author": "architect",
+      "author_type": "agent",
+      "timestamp": 1787600000.5,
+      "data": {
+        "message": "架构评审结论见 docs/adr-001.md"
+      }
+    }
+  ],
+  "count": 1
+}

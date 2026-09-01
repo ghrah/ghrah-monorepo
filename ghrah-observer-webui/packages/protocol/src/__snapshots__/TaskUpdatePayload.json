@@ -1,0 +1,17 @@
+{
+  "task_id": "task-001",
+  "title": null,
+  "description": null,
+  "agent_name": "backend-dev",
+  "status": "blocked",
+  "priority": null,
+  "parent_id": null,
+  "dependencies": null,
+  "result": null,
+  "error": null,
+  "metadata": null,
+  "metadata_patch": {
+    "labels": ["auth", "blocked"]
+  },
+  "expected_version": 3
+}

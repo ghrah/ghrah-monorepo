@@ -1,0 +1,8 @@
+{
+  "project_id": "proj-001",
+  "from_agent_id": "agent-001",
+  "to_agent_id": "agent-002",
+  "from_agent": "a1",
+  "to_agent": "a2",
+  "content": "delegate msg"
+}

@@ -1,0 +1,23 @@
+{
+  "room_id": "room-001",
+  "project_id": "proj-001",
+  "name": "architecture",
+  "status": "active",
+  "members": [
+    {
+      "subject": "architect",
+      "subject_type": "agent",
+      "joined_at": "2026-08-25T00:00:00Z"
+    },
+    {
+      "subject": "human:yuki",
+      "subject_type": "human",
+      "joined_at": "2026-08-25T00:05:00Z"
+    }
+  ],
+  "seq_watermark": 42,
+  "version": 5,
+  "created_at": "2026-08-25T00:00:00Z",
+  "updated_at": "2026-08-25T01:00:00Z",
+  "archived_at": null
+}

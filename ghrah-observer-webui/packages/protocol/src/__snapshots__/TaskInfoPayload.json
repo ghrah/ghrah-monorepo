@@ -1,0 +1,20 @@
+{
+  "task_id": "task-001",
+  "project_id": "proj-001",
+  "title": "Implement login flow",
+  "description": "Add OAuth login flow",
+  "agent_name": "backend-dev",
+  "status": "in_progress",
+  "priority": "high",
+  "parent_id": null,
+  "dependencies": ["task-000"],
+  "result": null,
+  "error": null,
+  "created_at": "2026-08-25T00:00:00Z",
+  "updated_at": "2026-08-25T01:00:00Z",
+  "started_at": "2026-08-25T00:30:00Z",
+  "completed_at": null,
+  "metadata": {
+    "labels": ["auth"]
+  }
+}

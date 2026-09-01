@@ -1,0 +1,7 @@
+{
+  "project_id": "proj-001",
+  "agent_id": "agent-001",
+  "target": "agent-1",
+  "content": "hello",
+  "sender": "user"
+}

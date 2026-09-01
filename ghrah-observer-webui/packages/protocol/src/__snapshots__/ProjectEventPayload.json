@@ -1,0 +1,40 @@
+{
+  "project": {
+    "project_id": "proj-001",
+    "name": "ghrah-demo",
+    "description": "Collaborative demo project",
+    "project_root_locator": "file:///srv/ghrah/projects/proj-001",
+    "manifest_ref": "ghrah/demo",
+    "cluster_ids": ["cluster-1"],
+    "workspaces": [
+      {
+        "workspace_id": "ws-001",
+        "role": "primary",
+        "default_for_agents": true
+      }
+    ],
+    "agents": [
+      {
+        "name": "architect",
+        "cluster_id": "cluster-1",
+        "manifest_ref": "ghrah/architect",
+        "instance_manifest_path": ".ghrah/agents/architect.yaml",
+        "system_prompt": "You are the architect.",
+        "abilities": ["conversation", "write_file"],
+        "path_grants": [
+          {
+            "workspace_id": "ws-001",
+            "subpath": "docs"
+          }
+        ]
+      }
+    ],
+    "task_ids": ["task-001"],
+    "status": "paused",
+    "recovery": "resume",
+    "version": 4,
+    "created_at": "2026-08-25T00:00:00Z",
+    "updated_at": "2026-08-25T02:00:00Z",
+    "deleted_at": null
+  }
+}

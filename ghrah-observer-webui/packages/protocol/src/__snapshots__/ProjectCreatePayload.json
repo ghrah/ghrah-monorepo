@@ -1,0 +1,15 @@
+{
+  "name": "ghrah-demo",
+  "description": "Collaborative demo project",
+  "project_root_locator": "/srv/ghrah/projects/proj-001",
+  "writable_workspaces": [
+    {
+      "locator": "/srv/workspaces/demo",
+      "name": "demo",
+      "role": "default",
+      "default_for_agents": true
+    }
+  ],
+  "manifest_ref": "ghrah/demo",
+  "recovery": "resume"
+}

@@ -1,0 +1,8 @@
+{
+  "type": "ping",
+  "payload": {},
+  "request_id": null,
+  "timestamp": null,
+  "client_type": null,
+  "seq_id": null
+}

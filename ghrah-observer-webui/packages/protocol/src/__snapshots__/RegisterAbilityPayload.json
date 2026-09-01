@@ -1,0 +1,9 @@
+{
+  "project_id": "proj-001",
+  "agent_id": "agent-001",
+  "agent_name": "agent-1",
+  "ability": {
+    "ability_type": "bash",
+    "params": {}
+  }
+}
