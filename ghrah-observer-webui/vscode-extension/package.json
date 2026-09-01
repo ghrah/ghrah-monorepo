@@ -2,7 +2,7 @@
   "name": "ghrah-vscode-extension",
   "displayName": "Ghrah - Actor-Agent Platform",
   "description": "AI Agent orchestration with Human-in-the-Loop",
-  "version": "0.1.0",
+  "version": "0.2.0-alpha.0",
   "publisher": "ghrah",
   "type": "module",
   "engines": {

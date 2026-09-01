@@ -1,73 +1,46 @@
 # ghrah-observer-webui
 
-This template should help get you started developing with Vue 3 in Vite.
+ghrah 观察端 WebUI 与 VS Code 扩展（Vue 3 + Vite + pnpm workspace）。
 
-## Recommended IDE Setup
+## 包结构
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+- `packages/protocol` — `@ghrah/protocol`，TS 协议类型/校验（zod schema + snapshot 测试）
+- `packages/observer-core` — `@ghrah/observer-core`，WS 客户端 + Pinia stores + 投影逻辑
+- `packages/observer-web` — `@ghrah/observer-web`，Vue 3 Web 前端（私有，不发布）
+- `packages/mock-server` — `@ghrah/mock-server`，协议层 mock 服务器（开发/测试用）
+- `vscode-extension` — VS Code 扩展（Marketplace 发布）
 
-## Recommended Browser Setup
+## 环境要求
 
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
+- Node.js `^20.19.0 || >=22.12.0`
+- pnpm `>=9.0.0`
 
-## Type Support for `.vue` Imports in TS
-
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
+## 构建与测试（在 monorepo 根目录执行）
 
 ```sh
-pnpm install
+pnpm install        # 安装整个 workspace（单一 pnpm-lock.yaml 在仓库根）
+
+# 构建发布面（observer-web / observer-core 依赖 protocol 的 dist，须先构建）
+pnpm --filter @ghrah/protocol build
+pnpm --filter @ghrah/observer-core build
+
+# 测试
+pnpm --filter @ghrah/protocol test
+pnpm --filter @ghrah/observer-core test
+pnpm -r test        # 全部包（含 mock-server、observer-web）
+
+# 类型检查（递归所有包）
+pnpm type-check
 ```
 
-### Compile and Hot-Reload for Development
+## 本目录下的 scripts
 
 ```sh
-pnpm dev
+pnpm dev            # ./scripts/dev.sh — 起 observer-web vite dev server
+pnpm build          # ./scripts/build.sh
+pnpm lint           # i18n / ui-tokens 检查 + biome
 ```
 
-### Type-Check, Compile and Minify for Production
+## IDE
 
-```sh
-pnpm build
-```
-
-### Run Unit Tests with [Vitest](https://vitest.dev/)
-
-```sh
-pnpm test:unit
-```
-
-### Run End-to-End Tests with [Playwright](https://playwright.dev)
-
-```sh
-# Install browsers for the first run
-npx playwright install
-
-# When testing on CI, must build the project first
-pnpm build
-
-# Runs the end-to-end tests
-pnpm test:e2e
-# Runs the tests only on Chromium
-pnpm test:e2e --project=chromium
-# Runs the tests of a specific file
-pnpm test:e2e tests/example.spec.ts
-# Runs the tests in debug mode
-pnpm test:e2e --debug
-```
-
-### Lint with [ESLint](https://eslint.org/)
-
-```sh
-pnpm lint
-```
+VS Code + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) 扩展。`.vue` 的类型检查由 `vue-tsc` 承担（`pnpm type-check`）。

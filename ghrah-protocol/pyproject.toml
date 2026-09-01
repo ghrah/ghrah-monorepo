@@ -1,6 +1,6 @@
 [project]
 name = "ghrah-protocol"
-version = "0.1.1"
+version = "0.2.0a0"
 description = "Shared protocol types for ghrah"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,3 +26,5 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
+[tool.hatch.build.targets.sdist]
+exclude = [".kilo", "plans"]

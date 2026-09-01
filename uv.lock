@@ -462,7 +462,7 @@ wheels = [
 
 [[package]]
 name = "ghrah-core"
-version = "0.1.1"
+version = "0.2.0a0"
 source = { editable = "ghrah-core" }
 dependencies = [
     { name = "agentconf" },
@@ -537,7 +537,7 @@ dev = [
 
 [[package]]
 name = "ghrah-protocol"
-version = "0.1.1"
+version = "0.2.0a0"
 source = { editable = "ghrah-protocol" }
 dependencies = [
     { name = "pydantic" },
@@ -548,7 +548,7 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.0" }]
 
 [[package]]
 name = "ghrah-subject"
-version = "0.1.0"
+version = "0.2.0a0"
 source = { editable = "ghrah-subject" }
 dependencies = [
     { name = "agentconf" },

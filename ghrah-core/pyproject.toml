@@ -1,6 +1,6 @@
 [project]
 name = "ghrah-core"
-version = "0.1.1"
+version = "0.2.0a0"
 description = " General Distributed Agent Cluster Framework"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -10,7 +10,7 @@ dependencies = [
     "agentconf>=0.1.0",
     "aiosqlite>=0.20",
     "pyyaml>=6.0",
-    "ghrah-protocol>=0.1.0",
+    "ghrah-protocol>=0.2.0a0",
     "pydantic>=2.0",
 ]
 authors = [
@@ -50,3 +50,6 @@ testpaths = ["tests"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[tool.hatch.build.targets.sdist]
+exclude = [".kilo", "plans"]
