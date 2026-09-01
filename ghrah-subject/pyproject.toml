@@ -1,0 +1,55 @@
+[project]
+name = "ghrah-subject"
+version = "0.1.0"
+description = "ghrah 控制面/执行层 - 持有工作区、执行沙箱命令、持久化 ActionChain、裁决 HITL"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "ghrah-core",
+    "ghrah-protocol",
+    "cordis-ouroboros>=0.1.0",
+    "aiosqlite>=0.20",
+    "agentconf",
+    "websockets>=12.0",
+    "fastapi>=0.136.1",
+    "uvicorn[standard]>=0.34.0",
+]
+
+[project.scripts]
+ghrah-subject = "ghrah.subject.app:main"
+
+[project.entry-points."ghrah.subject.units"]
+# ⚠️ 内置 Unit 用 register_builtin_units() 显式注册（调试友好），此处留空。
+# 第三方 Unit 通过此 group 注册为**候选**：engine.discover() 发现，
+# 但需 config.enabled_third_party_units allowlist 显式启用才会加载。
+# 发现≠启用，Subject 是高权限 effect host，第三方默认不启用。
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ghrah"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.9",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
