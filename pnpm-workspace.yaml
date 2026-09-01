@@ -1,0 +1,3 @@
+packages:
+  - 'ghrah-observer-webui/packages/*'
+  - 'ghrah-observer-webui/vscode-extension'

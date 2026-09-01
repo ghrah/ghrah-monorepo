@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+
+# Local-only: design docs & tool state (never push)
+plans/
+.kilo/
+.kilocode/
+.agents/
+.codex/
+.ghrah-workspace
+
+# Local env / sessions
+.env
+.env.*
+session-ses_*.md
+
+# OS
+.DS_Store
