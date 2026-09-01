@@ -1,0 +1,1202 @@
+# SPDX-FileCopyrightText: 2026 chenxya <chenxya@ghrah.org>
+#
+# SPDX-License-Identifier: Apache-2.0
+
+"""ActorAgent 基类：Actor + Ability 组合 + Hook 驱动循环 + ContextManager 集成。
+
+每个 ActorAgent 是一个 Agent Actor，内部持有：
+- LLMProtocol（通过 llm_factory 回调惰性创建）
+- 已注册的 Ability 集合（组合模式）
+- 绑定的 tool schema（从 Ability.bind_tool() 收集）
+- ContextManager（注入，上下文管理：消息历史、状态、链式历史、窗口管理、驱动循环控制状态）
+- AbilityExecutor（注入，Ability 执行器，将执行与 Agent 循环解耦）
+
+构造方式：
+    推荐使用 AgentBuilder.from_config() 便捷创建（零配置默认注入），
+    或直接调用 ActorAgent(...) 注入所有依赖（纯 DI，适合测试）。
+
+Hook:
+    三层 Hook 架构：
+    drive_loop 级：BEFORE_ACTION → _action → AFTER_ACTION
+    action 级：PRE_LLM_CALL → [LLM 调用] → POST_LLM_CALL → [tool 执行] → PRE/POST_EXECUTE
+    ability 级：PRE_EXECUTE → [execute] → POST_EXECUTE
+    特殊触发：ON_ERROR（异常时）、ON_MAX_ITERATIONS（达到最大迭代时）
+
+AbilityExecutor:
+    - AbilityExecutor 接口将 Ability 执行从 Agent 循环中解耦
+    - LocalAbilityExecutor：单体模式，在 Core 端本地执行 Ability + HITL
+
+ContextManager:
+    - ContextManager 统一管理消息、状态、链式历史和驱动循环控制状态
+    - _drive_loop 中每次迭代通过 begin_iteration / commit_iteration / rollback_iteration
+    - 驱动循环控制状态（iteration, max_iterations, should_continue 等）由 ContextManager 管理
+    - AbilityExecutionContext 只保留 Ability 执行所需的最少信息
+"""
+
+from __future__ import annotations
+
+import asyncio
+import copy
+import logging
+from collections.abc import Callable
+from typing import Any
+
+from ghrah.abilities.context import AbilityExecutionContext
+from ghrah.abilities.errors import AbilityNotFoundError
+from ghrah.abilities.hook_context import HookContext
+from ghrah.abilities.hook_runner import HookRunner
+from ghrah.abilities.hook_store import HookListView, HookStore
+from ghrah.abilities.hooks import Hook, HookPoint, HookResult
+from ghrah.chat.content import ContentBlock, block_to_dict, blocks_from_dicts
+from ghrah.chat.message import ChatMessage
+from ghrah.context.iteration_state import IterationState
+from ghrah.context.manager import ContextManager
+from ghrah.context.session import Session
+from ghrah.core.ability_protocol import AbilityProtocol, ExecutorProtocol
+from ghrah.core.event_publisher import (
+    EventPublisher,
+    NullEventPublisher,
+)
+from ghrah.core.events import (
+    ActionChainUpdatedEvent,
+    AgentErrorEvent,
+    AgentResponseEvent,
+    SessionArchivedEvent,
+    SessionCreatedEvent,
+    SessionDeletedEvent,
+    SessionSwitchedEvent,
+)
+from ghrah.core.exceptions import (
+    AgentError,
+    AgentInitializationError,
+)
+from ghrah.core.llm_protocol import LLMProtocol, LLMResponseProtocol
+from ghrah.core.message import AgentMessage, MessageType, classify_source
+from ghrah.types.config_types import AgentConfig
+from ghrah.types.results import ActionOutcome, ActionResult
+
+logger = logging.getLogger(__name__)
+
+_VISIBLE_RESPONSE_RETRY_PROMPT = (
+    "The previous generation ended without user-visible text or a tool call. "
+    "Answer the user's request now and put the final answer in the normal response "
+    "content. Do not return only reasoning content."
+)
+_EMPTY_VISIBLE_RESPONSE = "模型未返回可展示的正文，请重试。"
+
+
+class ActorAgent:
+    """基于 Ability 组合的 Agent Actor。
+
+    生命周期:
+        1. __init__ 接收注入的依赖（ContextManager, AbilityExecutor 等）
+        2. 首次调用 _ensure_llm() 时，通过 llm_factory 回调创建 LLM
+        3. 通过 register_ability() 注册能力（含 bind_tool 收集）
+        4. receive() 触发驱动循环：ability 选择 → hook 时序 → 执行 → 条件转移
+
+        - 所有消息和状态通过 ContextManager 管理
+        - 驱动循环控制状态（iteration, max_iterations 等）由 ContextManager 管理
+        - AbilityExecutionContext 只保留 Ability 执行所需的最少信息
+
+    用法:
+        # 推荐使用 AgentBuilder 便捷创建
+        agent = AgentBuilder.from_config(config, abilities=[ConversationAbility()])
+
+        # 或直接依赖注入（适合测试）
+        agent = ActorAgent(
+            config=config,
+            context_manager=context_manager,
+            ability_executor=executor,
+            context_manager_factory=lambda: context_manager,
+        )
+    """
+
+    def __init__(
+        self,
+        config: AgentConfig,
+        context_manager: ContextManager,
+        ability_executor: ExecutorProtocol,
+        context_manager_factory: Callable[[], ContextManager],
+        supervisor: Any = None,
+        event_publisher: EventPublisher | None = None,
+        llm_factory: Callable[[AgentConfig], LLMProtocol] | None = None,
+    ) -> None:
+        self.config = config
+        self._supervisor = supervisor
+        self._context_manager = context_manager
+        self._context_manager_factory = context_manager_factory
+        self._ability_executor = ability_executor
+        self._event_publisher = event_publisher or NullEventPublisher()
+        self._llm: LLMProtocol | None = None
+        self._llm_factory = llm_factory
+        self._initialized = False
+        self._abilities: dict[str, AbilityProtocol] = {}
+        self._bound_tools: list[dict[str, Any]] = []
+        self._hook_store = HookStore()
+        self._hook_runner = HookRunner(self._hook_store)
+        self._hook_view = self._hook_store.view()
+        if hasattr(self._ability_executor, "update_hook_runner"):
+            self._ability_executor.update_hook_runner(self._hook_runner)
+        self._message_queue: asyncio.Queue[ChatMessage] = asyncio.Queue()
+        self._iteration_state = IterationState()
+
+        # 框架级消息历史（AgentMessage 对象，使用自有 ChatMessage 格式）
+        # ContextManager 管理 ChatMessage 消息，这里保留框架 AgentMessage 对象的记录
+        self._message_history: list[AgentMessage] = []
+
+        logger.info(f"ActorAgent[{config.name}] created")
+
+    @property
+    def _all_hooks(self) -> HookListView:
+        """Compatibility view backed by HookStore."""
+
+        return self._hook_view
+
+    @_all_hooks.setter
+    def _all_hooks(self, hooks: list[Hook]) -> None:
+        self._hook_store.remove_owner(HookStore.AGENT_OWNER)
+        self._hook_store.add_hooks(HookStore.AGENT_OWNER, hooks)
+
+    # ----------------------------------------------------------------
+    # Ability 注册
+    # ----------------------------------------------------------------
+
+    def register_ability(self, ability: AbilityProtocol) -> str:
+        """注册一个能力到 Agent。
+
+        相当于 tool 的绑定，但比单纯的 tool bind 有更多的控制与自由度。
+        内部会调用 ability.bind_tool() 获取原生 Function Calling schema。
+        注册后会更新 ContextManager 中的状态作用域。
+
+        Args:
+            ability: 要注册的能力实例
+
+        Returns:
+            注册的 ability 名称（调用方可用于确认注册成功）
+
+        Raises:
+            AgentError: 如果同名能力已注册
+        """
+        if ability.name in self._abilities:
+            raise AgentError(
+                self.config.name,
+                f"Ability '{ability.name}' already registered",
+            )
+
+        # 收集 bind_tool 的 schema，后续绑定到 LLM
+        tool_schema = ability.bind_tool()
+        if tool_schema is not None:
+            self._bound_tools.append(tool_schema)
+
+        # 收集 hooks
+        ability_hooks = ability.get_hooks()
+        self._hook_store.add_hooks(ability.name, ability_hooks)
+
+        self._abilities[ability.name] = ability
+
+        # 写入 ability 默认状态到 ContextManager 的状态作用域
+        default_state = ability.get_default_state()
+        if default_state:
+            self._context_manager.set_state(ability.name, copy.deepcopy(default_state))
+
+        logger.info(
+            f"ActorAgent[{self.config.name}] registered ability: "
+            f"{ability.name} (tool_bound={tool_schema is not None}, "
+            f"hooks={len(ability_hooks)})"
+        )
+
+        return ability.name
+
+    def unregister_ability(self, name: str) -> None:
+        """移除已注册的能力。
+
+        Args:
+            name: 能力名称
+
+        Raises:
+            AbilityNotFoundError: 如果能力不存在
+        """
+        if name not in self._abilities:
+            raise AbilityNotFoundError(name)
+
+        ability = self._abilities.pop(name)
+
+        # 移除对应的 tool schema
+        tool_schema = ability.bind_tool()
+        if tool_schema is not None:
+            self._bound_tools = [
+                t for t in self._bound_tools if t.get("function", {}).get("name") != name
+            ]
+
+        # 移除对应的 hooks
+        self._hook_store.remove_owner(ability.name)
+
+        logger.info(f"ActorAgent[{self.config.name}] unregistered ability: {name}")
+
+    def get_abilities(self) -> list[str]:
+        """获取所有已注册的能力名称列表。"""
+        return list(self._abilities.keys())
+
+    def set_event_publisher(self, publisher: EventPublisher) -> None:
+        """注入事件发布器（由 Supervisor 在创建时注入）。
+        本地模式使用 NullEventPublisher（默认），Unit 挂载模式由宿主注入实现。
+        同时更新 AbilityExecutor 的事件发布器。
+
+        Args:
+            publisher: EventPublisher 实例
+        """
+        self._event_publisher = publisher
+        # 同步更新 executor 的事件发布器
+        self._ability_executor.update_event_publisher(publisher)
+        logger.info(
+            f"ActorAgent[{self.config.name}] event publisher set: {type(publisher).__name__}"
+        )
+
+    async def receive_hitl_response(
+        self,
+        ability_name: str,
+        tool_call_id: str,
+        approved: bool,
+        result: Any = None,
+    ) -> None:
+        """接收 HITL 审批结果（由 Supervisor 通过 Ray.remote 调用）。
+
+        当 Observer 审批 HITL 请求后，宿主将结果路由到
+        Supervisor，Supervisor 调用此方法将结果传递给 Agent。
+
+        此方法委托给 AbilityExecutor.receive_hitl_response()。
+
+        流程：Observer → Subject → Core → Supervisor → Agent
+
+        Args:
+            ability_name: Ability 名称
+            tool_call_id: 工具调用 ID
+            approved: 是否批准
+            result: 审批附加结果
+        """
+        self._ability_executor.receive_hitl_response(
+            ability_name=ability_name,
+            tool_call_id=tool_call_id,
+            approved=approved,
+            result=result,
+        )
+
+    async def inject_message(self, message: ChatMessage) -> None:
+        """向 Agent 注入消息，在下一轮迭代中被消费。
+
+        线程安全，可从外部（WebSocket、HITL 回调等）异步调用。
+        消息会在 _drive_loop 的下一次迭代开始时注入到 ContextManager。
+
+        Args:
+            message: 要注入的 ChatMessage
+        """
+        await self._message_queue.put(message)
+        logger.info(
+            f"ActorAgent[{self.config.name}] message injected: "
+            f"role={message.role}, queue_size={self._message_queue.qsize()}"
+        )
+
+    def _drain_message_queue(self) -> list[ChatMessage]:
+        """非阻塞排空消息队列，返回所有待处理消息。
+
+        使用 get_nowait() 非阻塞获取，不会等待新消息到达。
+        适用于 _drive_loop 每轮迭代开始时调用。
+
+        Returns:
+            队列中所有待处理的 ChatMessage 列表，可能为空
+        """
+        messages: list[ChatMessage] = []
+        while not self._message_queue.empty():
+            try:
+                msg = self._message_queue.get_nowait()
+                messages.append(msg)
+            except asyncio.QueueEmpty:
+                break
+        return messages
+
+    # ----------------------------------------------------------------
+    # LLM 初始化
+    # ----------------------------------------------------------------
+
+    async def _ensure_llm(self) -> LLMProtocol:
+        """惰性初始化 LLM 客户端。
+
+        通过 llm_factory 回调创建 LLM 实例。
+        采用惰性初始化避免进程间序列化问题。
+
+        使用 config.effective_agent_config_name 查找 agentconf 配置，
+        支持运行时名称与 LLM 配置名称分离（如 worker 池场景）。
+
+        LLM 创建后自动 configure_tools，使 LLM 能在响应中返回 tool_calls。
+        system_prompt 已在 ContextManager.__init__ 中注入，
+        此方法仅负责 LLM 客户端创建。
+        """
+        if self._llm is not None:
+            return self._llm
+
+        if self._llm_factory is None:
+            raise AgentInitializationError(
+                agent_name=self.config.name,
+                message="No llm_factory provided; cannot initialize LLM",
+            )
+
+        try:
+            self._llm = self._llm_factory(self.config)
+
+            if self._bound_tools:
+                self._llm.configure_tools(self._bound_tools)
+
+            self._inject_llm_into_summary_strategy(self._llm)
+
+            self._initialized = True
+
+            logger.info(
+                f"ActorAgent[{self.config.name}] LLM initialized: {self._llm.model}"
+            )
+            return self._llm
+
+        except Exception as e:
+            raise AgentInitializationError(
+                agent_name=self.config.name,
+                message=f"Failed to initialize LLM: {e}",
+            ) from e
+
+    def _inject_llm_into_summary_strategy(self, llm: LLMProtocol) -> None:
+        self._context_manager.inject_llm_into_summary(llm)
+
+    # ----------------------------------------------------------------
+    # 核心驱动循环
+    # ----------------------------------------------------------------
+
+    async def receive(self, message: AgentMessage) -> AgentMessage:
+        """接收并处理消息 — 驱动执行循环。
+
+        LLM 调用移入 _action 层，receive 不再直接传递 llm。
+        用户消息通过 ContextManager 管理。
+
+        Args:
+            message: 输入消息
+
+        Returns:
+            回复消息
+        """
+        logger.info(
+            f"ActorAgent[{self.config.name}] received: {message.type.value} from {message.sender}"
+        )
+        self._message_history.append(message)
+
+        if not self._abilities:
+            raise AgentError(
+                self.config.name,
+                "No abilities registered. Register at least one ability "
+                "(e.g., ConversationAbility) before calling receive(). "
+                "Agent behavior is determined by ability composition.",
+            )
+
+        try:
+            # 确保LLM已初始化（但不再直接传递给 context）
+            await self._ensure_llm()
+
+            # 将用户消息入队，供 _drive_loop 在迭代中消费
+            # AgentMessage.metadata（如 Room 投递的 room_id）合入 ChatMessage
+            # metadata——随 commit_iteration 落入链节点 messages_delta，
+            # 供回复归属推导（Room Filter）消费
+            if message.content_blocks:
+                text_or_blocks: str | list[ContentBlock] = blocks_from_dicts(
+                    message.content_blocks
+                )
+            else:
+                text_or_blocks = message.content
+            await self._message_queue.put(
+                ChatMessage.user(
+                    text_or_blocks=text_or_blocks,
+                    source=classify_source(message.sender),
+                    metadata=dict(message.metadata) if message.metadata else {},
+                )
+            )
+
+            # 将 max_iterations 从 config 设置到 IterationState
+            self._iteration_state.max_iterations = self.config.max_iterations
+            self._iteration_state.reset()
+
+            # 仅发布本轮新提交的节点。旧实现会在每次 receive 前重发当前链头；
+            # Subject 重启后 RoomFilter 的内存去重为空，旧回复因此会先于新回复
+            # 再次落入 RoomLog。历史同步由 get_chain_history 显式承担。
+            delivery_context = {
+                key: message.metadata[key]
+                for key in ("room_id", "project_id", "agent_id")
+                if message.metadata and message.metadata.get(key)
+            }
+            await self._drive_loop(delivery_context=delivery_context or None)
+
+            # 构建最终回复
+            response = self._build_response(message)
+
+            # ────── 发布 AgentResponse 事件 ──────
+            await self._event_publisher.publish(
+                AgentResponseEvent(
+                    agent_name=self.config.name,
+                    content=response.content,
+                    content_blocks=response.content_blocks,
+                    message_type="result",
+                    metadata={
+                        "iteration": self._iteration_state.iteration,
+                    },
+                )
+            )
+            # ────── 结束 ──────
+            return response
+
+        except AgentError:
+            raise
+        except Exception as e:
+            logger.error(f"ActorAgent[{self.config.name}] error in drive loop: {e}")
+            error_reply = AgentMessage(
+                sender=self.config.name,
+                recipient=message.sender,
+                content=f"Error: {e}",
+                type=MessageType.ERROR,
+                reply_to=message.id,
+            )
+            return error_reply
+
+    async def _drive_loop(
+        self,
+        delivery_context: dict[str, Any] | None = None,
+    ) -> None:
+        """核心驱动循环 — 每次迭代执行一个 action。
+
+        驱动循环控制状态（iteration, max_iterations, should_continue 等）
+        由 ContextManager 管理，不再通过 AbilityExecutionContext 传递。
+
+        三层 Hook 架构：
+            drive_loop 级：BEFORE_ACTION → _action → AFTER_ACTION
+            特殊触发：ON_ERROR、ON_MAX_ITERATIONS
+
+        每次迭代通过 ContextManager 的 begin/commit/rollback 管理事务。
+        每轮迭代开始时从 _message_queue 排空新消息并注入到 ContextManager，
+        支持迭代中注入新消息（如 HITL 回复、WebSocket 追加提示等）。
+        迭代失败回滚时，排空的消息会重新注入队列，防止消息丢失。
+        """
+        cm = self._context_manager
+        accumulated_data: dict[str, Any] = {}
+
+        while self._iteration_state.should_continue:
+            # 1. BEFORE_ACTION hook（drive_loop 级）
+            before_ctx = self._build_hook_context(accumulated_data)
+            hook_result = await self._run_hooks(HookPoint.BEFORE_ACTION, before_ctx)
+            if hook_result is not None:
+                if hook_result.modified_context:
+                    accumulated_data.update(hook_result.modified_context)
+                if not hook_result.should_continue:
+                    if hook_result.route_to:
+                        # 路由到指定 ability（如 end_task）
+                        await self._execute_routed_ability(
+                            accumulated_data,
+                            hook_result.route_to,
+                            delivery_context=delivery_context,
+                        )
+                    break
+
+            # 2. 开始事务
+            cm.begin_iteration()
+
+            # 在迭代内注入新消息（从队列排空）
+            # 保存本迭代排空的消息，用于回滚时重新入队，防止消息丢失
+            iteration_drained_messages: list[ChatMessage] = []
+            new_messages = self._drain_message_queue()
+            if new_messages:
+                iteration_drained_messages.extend(new_messages)
+                cm.add_messages(new_messages)
+
+            try:
+                # 3. 执行 _action（包含 LLM 调用 + tool 执行）
+                action_output = await self._action(accumulated_data)
+                action_results = action_output["results"]
+                llm_meta_for_node = action_output.get("llm_metadata", {})
+
+                # 4. 提交事务
+                ability_names = (
+                    [r.get("ability_name", "unknown") for r in action_results]
+                    if action_results
+                    else ["no_action"]
+                )
+                node_metadata = dict(llm_meta_for_node)
+                if delivery_context:
+                    # 一次 receive 可能跨多个 tool-call 迭代；只有首节点含
+                    # 用户 ChatMessage。把投递归属写入每个节点，确保最终
+                    # conversation 节点仍可稳定投影回原 Room。
+                    node_metadata["delivery_context"] = dict(delivery_context)
+                node = cm.commit_iteration(
+                    ability_names=ability_names,
+                    action_results=action_results,
+                    llm_metadata=node_metadata or None,
+                )
+
+                # ────── 发布 ActionChainUpdated 事件 ──────
+                # NOTE: 性能优化点 — 当前传输完整序列化 node，
+                # 后续可改为仅传输 delta 数据以减少序列化/反序列化开销。
+                from ghrah.context.persistence.serialization import serialize_node
+
+                await self._event_publisher.publish(
+                    ActionChainUpdatedEvent(
+                        agent_name=self.config.name,
+                        node=serialize_node(node),
+                    )
+                )
+                # ────── 结束 ──────
+
+                # 4.5 累加 token 用量到 accumulated_data
+                current_usage = node.metadata.get("token_usage", {})
+                if current_usage:
+                    cumulative = dict(
+                        accumulated_data.get(
+                            "cumulative_token_usage",
+                            {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                        )
+                    )
+                    cumulative["input_tokens"] += current_usage.get("input_tokens", 0)
+                    cumulative["output_tokens"] += current_usage.get("output_tokens", 0)
+                    cumulative["total_tokens"] += current_usage.get("total_tokens", 0)
+                    accumulated_data["cumulative_token_usage"] = cumulative
+            except Exception as e:
+                # ────── 发布 AgentError 事件 ──────
+                await self._event_publisher.publish(
+                    AgentErrorEvent(
+                        agent_name=self.config.name,
+                        error=str(e),
+                    )
+                )
+                # ────── 结束 ──────
+
+                cm.rollback_iteration(e)
+
+                # 将本迭代排空的消息重新注入队列，确保回滚后消息不丢失
+                for msg in iteration_drained_messages:
+                    await self._message_queue.put(msg)
+
+                error_ctx = self._build_hook_context(accumulated_data)
+                await self._run_hooks(HookPoint.ON_ERROR, error_ctx)
+                raise AgentError(self.config.name, f"Action failed: {e}") from e
+
+            # 5. AFTER_ACTION hook（drive_loop 级）
+            # 从 action_results 提取最后一个 ActionResult 作为 last_action_result
+            last_ability_name = ""
+            if action_results:
+                last_entry = action_results[-1]
+                self._iteration_state.last_action_result = last_entry.get("action_result")
+                last_ability_name = last_entry.get("ability_name", "")
+            else:
+                self._iteration_state.last_action_result = None
+
+            after_ctx = self._build_hook_context(accumulated_data, ability_name=last_ability_name)
+            hook_result = await self._run_hooks(HookPoint.AFTER_ACTION, after_ctx)
+            if hook_result is not None:
+                if hook_result.modified_context:
+                    accumulated_data.update(hook_result.modified_context)
+                if hook_result.route_to:
+                    self._iteration_state.pending_route = hook_result.route_to
+                    self._iteration_state.advance()
+                    continue
+                if not hook_result.should_continue:
+                    break
+
+            # 6. 检查最大迭代
+            iter_state = self._iteration_state
+            if (
+                not iter_state.is_unlimited
+                and iter_state.iteration + 1 >= iter_state.max_iterations
+            ):
+                max_ctx = self._build_hook_context(accumulated_data)
+                max_hook_result = await self._run_hooks(HookPoint.ON_MAX_ITERATIONS, max_ctx)
+                if max_hook_result is not None and max_hook_result.route_to:
+                    await self._execute_routed_ability(
+                        accumulated_data,
+                        max_hook_result.route_to,
+                        delivery_context=delivery_context,
+                    )
+                break
+
+            self._iteration_state.advance()
+
+    async def _action(self, accumulated_data: dict[str, Any]) -> dict[str, Any]:
+        """执行一次 action：调用 LLM → 解析响应 → 执行 abilities。
+
+        多个 tool_calls 使用 asyncio.gather 并行执行，
+
+        Args:
+            accumulated_data: 累积数据（跨迭代传递的中间结果）
+
+        Returns:
+            dict 包含:
+                - "results": list[dict] — 每个 dict 包含 "ability_name" 和 "action_result"
+                - "llm_metadata": dict — LLM 响应元数据（token_usage、response_metadata 等）
+        """
+        cm = self._context_manager
+        llm = await self._ensure_llm()
+
+        # 1. PRE_LLM_CALL hook（action 级）
+        pre_ctx = self._build_hook_context(accumulated_data)
+        hook_result = await self._run_hooks(HookPoint.PRE_LLM_CALL, pre_ctx)
+        if hook_result is not None:
+            if hook_result.modified_context:
+                accumulated_data.update(hook_result.modified_context)
+
+        # 2. 调用 LLM
+        messages = await cm.get_llm_messages()
+        llm_response: LLMResponseProtocol = await llm.generate(messages)
+        llm_responses: list[LLMResponseProtocol] = [llm_response]
+
+        # 某些 thinking 模型偶发以 finish_reason=stop 结束，但只返回
+        # reasoning_content，没有正文或 tool call。reasoning 不能直接投影给用户，
+        # 因此用仅对本次请求生效的协议提示安全补全一次；首次空响应不写入消息
+        # 历史，避免形成无法展示的幽灵 AI 消息。
+        if not llm_response.tool_calls and not llm_response.text.strip():
+            logger.warning(
+                "ActorAgent[%s]: LLM returned no visible content; retrying once",
+                self.config.name,
+            )
+            retry_messages = list(messages)
+            insert_at = 0
+            while insert_at < len(retry_messages) and retry_messages[insert_at].role == "system":
+                insert_at += 1
+            retry_messages.insert(
+                insert_at,
+                ChatMessage.system(
+                    _VISIBLE_RESPONSE_RETRY_PROMPT,
+                    source="system:runtime",
+                ),
+            )
+            llm_response = await llm.generate(retry_messages)
+            llm_responses.append(llm_response)
+
+        # 2.5 提取 LLM 响应 metadata
+        from ghrah.chat.response import (
+            extract_reasoning_content,
+            extract_response_metadata,
+            extract_token_usage,
+        )
+
+        token_usages = [extract_token_usage(response) for response in llm_responses]
+        cot_content = extract_reasoning_content(llm_response)
+        resp_meta = extract_response_metadata(llm_response)
+
+        # CoT 写入 accumulated_data，供 Ability/Hook 使用
+        if cot_content:
+            accumulated_data["cot_content"] = cot_content
+
+        # 构建 llm_metadata dict，供 commit_iteration 使用
+        llm_meta: dict[str, Any] = {}
+        used = [usage for usage in token_usages if usage is not None]
+        if used:
+            llm_meta["token_usage"] = {
+                "input_tokens": sum(usage.input_tokens for usage in used),
+                "output_tokens": sum(usage.output_tokens for usage in used),
+                "total_tokens": sum(usage.total_tokens for usage in used),
+            }
+        if resp_meta:
+            llm_meta["response_metadata"] = resp_meta
+        if len(llm_responses) > 1:
+            llm_meta["visible_response_retry_count"] = len(llm_responses) - 1
+
+        # 3. 将 AI 响应添加到消息历史
+        cm.add_messages([llm_response.to_chat_message(source=f"agent:{self.config.name}")])
+
+        # 4. POST_LLM_CALL hook（action 级）
+        post_ctx = self._build_hook_context(accumulated_data)
+        hook_result = await self._run_hooks(HookPoint.POST_LLM_CALL, post_ctx)
+        if hook_result is not None:
+            if hook_result.modified_context:
+                accumulated_data.update(hook_result.modified_context)
+
+        # 5. 解析 LLM 响应
+        tool_calls = llm_response.tool_calls
+        response_content = llm_response.text or ""
+        if not tool_calls and not response_content.strip():
+            # 两次调用都没有正文时返回明确、无思考泄露的可展示结果，保证
+            # ConversationAbility 与 RoomFilter 不会把该轮误记为空成功。
+            response_content = _EMPTY_VISIBLE_RESPONSE
+
+        results: list[dict] = []
+
+        if not tool_calls:
+            # 纯文本响应 → conversation ability
+            accumulated_data["llm_response"] = response_content
+            conversation_ability = self._abilities.get("conversation")
+            if conversation_ability:
+                ability_ctx = self._build_ability_context("conversation", {}, accumulated_data)
+                # 委托给 AbilityExecutor 执行（包含 PRE/POST_EXECUTE Hook 和 HITL 处理）
+                action_result = await self._ability_executor.execute_ability(
+                    conversation_ability, ability_ctx
+                )
+                results.append({"ability_name": "conversation", "action_result": action_result})
+        else:
+            # 有 tool_calls → 委托给 AbilityExecutor 执行
+            results = await self._ability_executor.execute_tool_calls(
+                tool_calls=tool_calls,
+                abilities=self._abilities,
+                accumulated_data=accumulated_data,
+                context_manager=cm,
+                last_action_result=self._iteration_state.last_action_result,
+            )
+
+            # 将 ChatMessage.tool() 添加到 ContextManager
+            tool_messages: list[ChatMessage] = []
+            for result_dict in results:
+                tc_id = result_dict.get("tool_call_id", "")
+                action_result = result_dict["action_result"]
+                if tc_id:
+                    if action_result.outcome == ActionOutcome.SUCCESS:
+                        tool_messages.append(
+                            ChatMessage.tool(
+                                tool_call_id=tc_id,
+                                content=str(action_result.data),
+                                source=f"agent:{self.config.name}",
+                            )
+                        )
+                    else:
+                        error_msg = action_result.data.get("error", "Unknown error")
+                        tool_messages.append(
+                            ChatMessage.tool(
+                                tool_call_id=tc_id,
+                                content=f"Error: {error_msg}",
+                                success=False,
+                                error=error_msg,
+                                source=f"agent:{self.config.name}",
+                            )
+                        )
+            if tool_messages:
+                cm.add_messages(tool_messages)
+
+        return {"results": results, "llm_metadata": llm_meta}
+
+    async def _execute_routed_ability(
+        self,
+        accumulated_data: dict[str, Any],
+        ability_name: str,
+        *,
+        delivery_context: dict[str, Any] | None = None,
+    ) -> None:
+        """执行路由目标的 ability（用于 BEFORE_ACTION 和 ON_MAX_ITERATIONS 的强制路由）。"""
+        cm = self._context_manager
+        ability = self._abilities.get(ability_name)
+        if ability is None:
+            logger.warning(f"Route target ability '{ability_name}' not found")
+            return
+
+        cm.begin_iteration()
+        try:
+            ctx = self._build_ability_context(ability_name, {}, accumulated_data)
+            action_result = await ability.execute(ctx)
+            self._iteration_state.last_action_result = action_result
+            cm.commit_iteration(
+                ability_names=[ability_name],
+                action_results=[{"ability_name": ability_name, "action_result": action_result}],
+                llm_metadata=(
+                    {"delivery_context": dict(delivery_context)}
+                    if delivery_context
+                    else None
+                ),
+            )
+        except Exception as e:
+            cm.rollback_iteration(e)
+            raise
+
+    # ----------------------------------------------------------------
+    # Hook 运行机制
+    # ----------------------------------------------------------------
+
+    async def _run_hooks(
+        self,
+        point: HookPoint,
+        context: AbilityExecutionContext,
+        result: ActionResult | None = None,
+    ) -> HookResult | None:
+        """运行所有注册的指定触发点的 hooks。
+
+        Args:
+            point: Hook 触发点
+            context: 当前执行上下文
+            result: ActionResult（POST_EXECUTE 时传入）
+
+        Returns:
+            合并后的 HookResult，如果没有 hook 触发则返回 None
+
+        Raises:
+            HookError: hook 执行出错时
+        """
+        hook_context = HookContext.from_ability_context(point, context, result)
+        return await self._hook_runner.run(hook_context)
+
+    # ----------------------------------------------------------------
+    # 上下文构建和回复
+    # ----------------------------------------------------------------
+
+    def _build_hook_context(
+        self,
+        accumulated_data: dict[str, Any],
+        ability_name: str = "",
+    ) -> AbilityExecutionContext:
+        """构建用于 Hook 的 AbilityExecutionContext。
+
+        Args:
+            accumulated_data: 累积数据
+            ability_name: 最后执行的 ability 名称（供 AFTER_ACTION 等 hook 判断）
+
+        Returns:
+            初始化后的 AbilityExecutionContext
+        """
+        cm = self._context_manager
+        return AbilityExecutionContext(
+            current_ability_name=ability_name,
+            agent_state=cm.get_current_state(),
+            context_manager=cm,
+            accumulated_data=copy.deepcopy(accumulated_data),
+            last_action_result=self._iteration_state.last_action_result,
+            supervisor=self._supervisor,
+            agent_name=self.config.name,
+        )
+
+    def _build_ability_context(
+        self,
+        ability_name: str,
+        tool_args: dict[str, Any],
+        accumulated_data: dict[str, Any],
+    ) -> AbilityExecutionContext:
+        """构建用于 Ability 执行的 AbilityExecutionContext。
+
+        Args:
+            ability_name: ability 名称
+            tool_args: 工具调用参数
+            accumulated_data: 累积数据
+
+        Returns:
+            初始化后的 AbilityExecutionContext
+        """
+        cm = self._context_manager
+        return AbilityExecutionContext(
+            current_ability_name=ability_name,
+            tool_args=tool_args,
+            agent_state=cm.get_current_state(),
+            context_manager=cm,
+            accumulated_data={
+                **copy.deepcopy(accumulated_data),
+                "tool_args": tool_args,
+            },
+            last_action_result=self._iteration_state.last_action_result,
+            supervisor=self._supervisor,
+            agent_name=self.config.name,
+        )
+
+    def _build_response(self, original: AgentMessage) -> AgentMessage:
+        """根据循环结果构建最终回复消息。
+
+        Args:
+            original: 原始输入消息
+
+        Returns:
+            回复消息
+        """
+        cm = self._context_manager
+
+        # 从 last_action_result 中提取回复内容
+        if self._iteration_state.last_action_result is not None:
+            ar = self._iteration_state.last_action_result
+            content = ar.data.get("response", ar.data.get("content", ""))
+            if not content:
+                # 尝试将整个 data 转为字符串
+                content = str(ar.data) if ar.data else "Task completed"
+        else:
+            content = "No action executed"
+
+        # 从 ContextManager 的最后一条 AI 消息中提取结构化 content_blocks
+        # 以保留 reasoning/text 等类型区分
+        content_blocks: list[dict] | None = None
+        messages = cm.message_store.current_messages
+        for msg in reversed(messages):
+            if msg.role == "ai" and msg.content_blocks:
+                content_blocks = [block_to_dict(b) for b in msg.content_blocks]
+                break
+
+        reply = AgentMessage.create_reply(
+            original=original,
+            content=content,
+            msg_type=MessageType.RESULT,
+            content_blocks=content_blocks,
+        )
+        self._message_history.append(reply)
+
+        # LLM 响应已在 _action 中作为 AI ChatMessage 纳入本轮事务并随节点
+        # commit。这里再追加一次会生成不属于任何 node delta 的幽灵消息，
+        # 持久化/恢复后表现为上下文里每条最终回复重复两遍。
+
+        logger.info(f"ActorAgent[{self.config.name}] replied: {content[:100]}...")
+        return reply
+
+    # ----------------------------------------------------------------
+    # Session 管理
+    # ----------------------------------------------------------------
+
+    async def create_session(
+        self,
+        from_node_id: str | None = None,
+        system_prompt: str | None = None,
+        session_name: str | None = None,
+        session_metadata: dict[str, Any] | None = None,
+    ) -> Session:
+        """创建新 session 并发布事件。
+
+        委托给 ContextManager.create_session() 完成实际创建，
+        然后发布 SessionCreatedEvent。
+
+        Args:
+            from_node_id: fork 起始节点 ID
+            system_prompt: 新 session 的系统提示词
+            session_name: 人类可读的分支名
+            session_metadata: 扩展元数据
+
+        Returns:
+            新创建的 Session 实例
+        """
+        session = self._context_manager.create_session(
+            from_node_id=from_node_id,
+            system_prompt=system_prompt,
+            session_name=session_name,
+            session_metadata=session_metadata,
+        )
+
+        await self._event_publisher.publish(
+            SessionCreatedEvent(
+                agent_name=self.config.name,
+                session_id=session.session_id,
+                branch_name=session.branch_name,
+                parent_session_id=session.parent_session_id,
+                fork_point_node_id=session.parent_node_id,
+            )
+        )
+
+        logger.info(
+            f"ActorAgent[{self.config.name}] created session "
+            f"id={session.session_id} branch={session.branch_name}"
+        )
+        return session
+
+    async def switch_session(self, session_id: str) -> None:
+        """切换到指定 session 并发布事件。
+
+        委托给 ContextManager.switch_session() 完成实际切换，
+        然后发布 SessionSwitchedEvent。
+
+        Args:
+            session_id: 目标 session ID
+
+        Raises:
+            ValueError: session 不存在
+        """
+        self._context_manager.switch_session(session_id)
+
+        session = self._context_manager.get_active_session()
+        await self._event_publisher.publish(
+            SessionSwitchedEvent(
+                agent_name=self.config.name,
+                session_id=session.session_id,
+                branch_name=session.branch_name,
+            )
+        )
+
+        logger.info(
+            f"ActorAgent[{self.config.name}] switched to session "
+            f"id={session.session_id} branch={session.branch_name}"
+        )
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        """列出所有 session 的信息。
+
+        Returns:
+            Session 信息字典列表，每个包含 session_id、branch_name、state 等
+        """
+        sessions = self._context_manager.list_sessions()
+        result = []
+        for session in sessions:
+            is_active = session.session_id == self._context_manager.active_session_id
+            head_node = self._context_manager.get_branch_head(session.branch_name)
+            result.append({
+                "session_id": session.session_id,
+                "agent_name": session.agent_name,
+                "branch_name": session.branch_name,
+                "state": "active" if is_active else "idle",
+                "head_node_id": head_node.id if head_node else None,
+                "parent_session_id": session.parent_session_id,
+                "fork_point_node_id": session.parent_node_id,
+                "created_at": session.created_at.isoformat() if session.created_at else "",
+                "metadata": session.metadata,
+                "message_count": self._context_manager.message_count,
+                "iteration_count": self._iteration_state.iteration,
+            })
+        return result
+
+    async def archive_session(self, session_id: str) -> None:
+        """归档指定 session 并发布事件。
+
+        将 session 状态标记为 archived。
+
+        Args:
+            session_id: 要归档的 session ID
+
+        Raises:
+            KeyError: session 不存在
+        """
+        self._context_manager.archive_session(session_id)
+
+        await self._event_publisher.publish(
+            SessionArchivedEvent(
+                agent_name=self.config.name,
+                session_id=session_id,
+            )
+        )
+
+        logger.info(
+            f"ActorAgent[{self.config.name}] archived session id={session_id}"
+        )
+
+    async def delete_session(self, session_id: str) -> None:
+        """删除指定 session 并发布事件。
+
+        不能删除当前活跃的 session。
+
+        Args:
+            session_id: 要删除的 session ID
+
+        Raises:
+            KeyError: session 不存在
+            ValueError: 试图删除当前活跃 session
+        """
+        self._context_manager.delete_session(session_id)
+
+        await self._event_publisher.publish(
+            SessionDeletedEvent(
+                agent_name=self.config.name,
+                session_id=session_id,
+            )
+        )
+
+        logger.info(
+            f"ActorAgent[{self.config.name}] deleted session id={session_id}"
+        )
+
+    # ----------------------------------------------------------------
+    # 消息 API
+    # ----------------------------------------------------------------
+
+    async def chat(self, content: str, sender: str = "user") -> str:
+        """简化的对话接口。
+
+        Args:
+            content: 用户输入文本
+            sender: 发送者标识
+
+        Returns:
+            AI 回复文本
+        """
+        message = AgentMessage(
+            sender=sender,
+            recipient=self.config.name,
+            content=content,
+            type=MessageType.CHAT,
+        )
+        reply = await self.receive(message)
+        return reply.content
+
+    def get_history(self) -> list[dict[str, Any]]:
+        """获取消息历史。"""
+        return [
+            {
+                "id": msg.id,
+                "sender": msg.sender,
+                "type": msg.type.value,
+                "content": msg.content[:200],
+                "timestamp": msg.timestamp,
+            }
+            for msg in self._message_history
+        ]
+
+    def get_state(self) -> dict[str, Any]:
+        """获取 Agent 内部状态。"""
+        return {
+            "name": self.config.name,
+            "initialized": self._initialized,
+            "abilities": list(self._abilities.keys()),
+            "bound_tools": len(self._bound_tools),
+            "message_count": len(self._message_history),
+            "state": self._context_manager.get_current_state(),
+            "event_publisher_type": type(self._event_publisher).__name__,
+            "ability_executor_type": type(self._ability_executor).__name__,
+        }
+
+    def set_state(self, key: str, value: Any) -> None:
+        """设置 Agent 内部状态。
+
+        委托给 ContextManager.set_state()，适用于迭代外的状态设置。
+        """
+        self._context_manager.set_state(key, value)
+
+    async def reset(self) -> None:
+        """重置 Agent 状态（清空对话历史，保留 LLM 客户端和 abilities）。
+
+        重建 ContextManager 而非清空列表。
+        """
+        self._message_history.clear()
+
+        # 清空消息队列
+        self._message_queue = asyncio.Queue()
+
+        # 重置驱动循环状态（iteration/last_action_result/pending_route 归零，
+        # max_iterations 从 config 重新同步——与 _drive_loop 初始化一致）
+        self._iteration_state.max_iterations = self.config.max_iterations
+        self._iteration_state.reset()
+
+        # 重建 ContextManager（通过注入的 factory 回调）
+        self._context_manager = self._context_manager_factory()
+
+        # 重新写入所有 ability 的默认状态（一次性收集，避免多次 update_state）
+        default_states: dict[str, dict[str, Any]] = {}
+        for ability in self._abilities.values():
+            default_state = ability.get_default_state()
+            if default_state:
+                default_states[ability.name] = copy.deepcopy(default_state)
+
+        if default_states:
+            self._context_manager.update_state(default_states)
+
+        logger.info(f"ActorAgent[{self.config.name}] reset")
+
+    async def send(self, target: str, content: str) -> AgentMessage:
+        """向其他 Agent 发送消息。
+
+        通过构造函数注入的 Supervisor handle 路由消息，
+        无需每次调用传入 supervisor。
+
+        Args:
+            target: 目标 Agent 名称
+            content: 消息内容
+
+        Returns:
+            目标 Agent 的回复消息
+
+        Raises:
+            AgentError: 如果未配置 Supervisor
+        """
+        if self._supervisor is None:
+            raise AgentError(
+                self.config.name,
+                "No supervisor configured, cannot send message to other agents",
+            )
+
+        message = AgentMessage(
+            sender=self.config.name,
+            recipient=target,
+            content=content,
+            type=MessageType.COMMAND,
+        )
+        logger.info(f"ActorAgent[{self.config.name}] sending to {target}: {content[:100]}...")
+        return await self._supervisor.route_message(message)
