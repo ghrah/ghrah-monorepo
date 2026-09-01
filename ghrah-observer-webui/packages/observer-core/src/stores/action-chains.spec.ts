@@ -8,6 +8,10 @@ function makeNode(overrides: Partial<ActionNode> = {}): ActionNode {
   return ActionNodeSchema.parse(overrides);
 }
 
+function makePayload(agent_name: string, node: ActionNode): ActionChainUpdatedPayload {
+  return { agent_id: "", project_id: "", cluster_id: "", agent_name, node };
+}
+
 describe("useActionChainsStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -20,9 +24,9 @@ describe("useActionChainsStore", () => {
 
   it("onActionChainUpdated adds typed node to agent chain", () => {
     const store = useActionChainsStore();
-    const payload: ActionChainUpdatedPayload = {
-      agent_name: "agent-1",
-      node: makeNode({
+    const payload = makePayload(
+      "agent-1",
+      makeNode({
         id: "node-1",
         ability_names: ["read_file"],
         action_results: [
@@ -32,7 +36,7 @@ describe("useActionChainsStore", () => {
           },
         ],
       }),
-    };
+    );
     store.onActionChainUpdated(payload);
     const chain = store.getChain("agent-1");
     expect(chain).toHaveLength(1);
@@ -42,14 +46,12 @@ describe("useActionChainsStore", () => {
 
   it("onActionChainUpdated appends nodes to existing chain", () => {
     const store = useActionChainsStore();
-    store.onActionChainUpdated({
-      agent_name: "agent-1",
-      node: makeNode({ id: "n1", ability_names: ["read_file"] }),
-    });
-    store.onActionChainUpdated({
-      agent_name: "agent-1",
-      node: makeNode({ id: "n2", ability_names: ["write_file"] }),
-    });
+    store.onActionChainUpdated(
+      makePayload("agent-1", makeNode({ id: "n1", ability_names: ["read_file"] })),
+    );
+    store.onActionChainUpdated(
+      makePayload("agent-1", makeNode({ id: "n2", ability_names: ["write_file"] })),
+    );
     const chain = store.getChain("agent-1");
     expect(chain).toHaveLength(2);
     expect(chain[0].id).toBe("n1");
@@ -58,14 +60,12 @@ describe("useActionChainsStore", () => {
 
   it("chains are separated by agent_name", () => {
     const store = useActionChainsStore();
-    store.onActionChainUpdated({
-      agent_name: "agent-1",
-      node: makeNode({ id: "n1", ability_names: ["read_file"] }),
-    });
-    store.onActionChainUpdated({
-      agent_name: "agent-2",
-      node: makeNode({ id: "n2", ability_names: ["execute_command"] }),
-    });
+    store.onActionChainUpdated(
+      makePayload("agent-1", makeNode({ id: "n1", ability_names: ["read_file"] })),
+    );
+    store.onActionChainUpdated(
+      makePayload("agent-2", makeNode({ id: "n2", ability_names: ["execute_command"] })),
+    );
     expect(store.getChain("agent-1")).toHaveLength(1);
     expect(store.getChain("agent-2")).toHaveLength(1);
     expect(store.getChain("agent-3")).toHaveLength(0);
@@ -73,10 +73,7 @@ describe("useActionChainsStore", () => {
 
   it("id dedup: same node.id replay does not duplicate", () => {
     const store = useActionChainsStore();
-    const payload = {
-      agent_name: "agent-1",
-      node: makeNode({ id: "n1", ability_names: ["read_file"] }),
-    };
+    const payload = makePayload("agent-1", makeNode({ id: "n1", ability_names: ["read_file"] }));
     store.onActionChainUpdated(payload);
     store.onActionChainUpdated(payload);
     expect(store.getChain("agent-1")).toHaveLength(1);
@@ -84,24 +81,21 @@ describe("useActionChainsStore", () => {
 
   it("clearChain removes agent chain", () => {
     const store = useActionChainsStore();
-    store.onActionChainUpdated({
-      agent_name: "agent-1",
-      node: makeNode({ id: "n1", ability_names: ["read_file"] }),
-    });
+    store.onActionChainUpdated(
+      makePayload("agent-1", makeNode({ id: "n1", ability_names: ["read_file"] })),
+    );
     store.clearChain("agent-1");
     expect(store.getChain("agent-1")).toHaveLength(0);
   });
 
   it("clearAll removes all chains", () => {
     const store = useActionChainsStore();
-    store.onActionChainUpdated({
-      agent_name: "agent-1",
-      node: makeNode({ id: "n1", ability_names: ["read_file"] }),
-    });
-    store.onActionChainUpdated({
-      agent_name: "agent-2",
-      node: makeNode({ id: "n2", ability_names: ["write_file"] }),
-    });
+    store.onActionChainUpdated(
+      makePayload("agent-1", makeNode({ id: "n1", ability_names: ["read_file"] })),
+    );
+    store.onActionChainUpdated(
+      makePayload("agent-2", makeNode({ id: "n2", ability_names: ["write_file"] })),
+    );
     store.clearAll();
     expect(store.getChain("agent-1")).toHaveLength(0);
     expect(store.getChain("agent-2")).toHaveLength(0);
@@ -120,10 +114,9 @@ describe("useActionChainsStore", () => {
   it("setChain merges idempotently with concurrent increments (node id dedup)", () => {
     const store = useActionChainsStore();
     // 刷新瞬间：增量事件已先到 n1
-    store.onActionChainUpdated({
-      agent_name: "agent-1",
-      node: makeNode({ id: "n1", ability_names: ["conversation"] }),
-    });
+    store.onActionChainUpdated(
+      makePayload("agent-1", makeNode({ id: "n1", ability_names: ["conversation"] })),
+    );
     // 读回的完整链含 n1（重复）+ n2（新）
     store.setChain("agent-1", [
       makeNode({ id: "n1", ability_names: ["conversation"] }),

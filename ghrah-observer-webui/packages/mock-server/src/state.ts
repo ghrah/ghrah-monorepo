@@ -231,6 +231,7 @@ export class MockState {
       version: 1,
       created_at: isoNow(),
       updated_at: isoNow(),
+      archived_at: null,
     };
     this.rooms.set(room.room_id, room);
     this.roomLogs.set(room.room_id, []);
@@ -388,6 +389,7 @@ export class MockState {
       version: 1,
       created_at: isoNow(),
       updated_at: isoNow(),
+      archived_at: null,
       deleted_at: null,
     };
     this.projects.set(project.project_id, project);
@@ -511,6 +513,9 @@ export class MockState {
   ): HITLRequestPayload {
     const payload: HITLRequestPayload = {
       promise_id: `hitl-${uuid().replace(/-/g, "").slice(0, 12)}`,
+      agent_id: "",
+      project_id: "",
+      cluster_id: "",
       agent_name: agentName,
       ability_name: abilityName,
       tool_args: toolArgs,

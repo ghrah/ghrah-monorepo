@@ -19,6 +19,8 @@ function makeProject(overrides: Partial<ProjectInfoPayload> = {}): ProjectInfoPa
     version: 1,
     created_at: "",
     updated_at: "",
+    archived_at: null,
+    deleted_at: null,
     ...overrides,
   };
 }

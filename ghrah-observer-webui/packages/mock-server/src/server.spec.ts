@@ -355,9 +355,13 @@ describe("mock-server 协议层", () => {
   it("初始同步形态：list_agents / room_list / project_list / room_get_log 与 bind.ts 消费端一致", async () => {
     const client = await makeClient();
     try {
-      await request(client, CommandType.SPAWN_AGENT, {
+      const project = await request(client, CommandType.PROJECT_CREATE, { name: "p1" });
+      const projectId = (project.data as { project: { project_id: string } }).project.project_id;
+      const spawned = await request(client, CommandType.SPAWN_AGENT, {
+        project_id: projectId,
         config: { name: "architect", description: "架构师" },
       });
+      expect(spawned.success).toBe(true);
       const roomId = await setupRoom(client);
       await request(client, CommandType.ROOM_SEND, {
         room_id: roomId,

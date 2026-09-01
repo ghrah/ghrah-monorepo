@@ -1,3 +1,5 @@
 packages:
   - 'ghrah-observer-webui/packages/*'
   - 'ghrah-observer-webui/vscode-extension'
+allowBuilds:
+  esbuild: set this to true or false

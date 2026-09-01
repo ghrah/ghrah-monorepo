@@ -14,6 +14,7 @@ function makeRoom(overrides: Partial<RoomInfoPayload> = {}): RoomInfoPayload {
     version: 1,
     created_at: "",
     updated_at: "",
+    archived_at: null,
     ...overrides,
   };
 }

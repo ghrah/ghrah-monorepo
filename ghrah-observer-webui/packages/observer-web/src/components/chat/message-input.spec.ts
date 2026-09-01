@@ -26,6 +26,7 @@ function roomWithAgents(id: string, agents: string[]): RoomInfoPayload {
     version: 1,
     created_at: "",
     updated_at: "",
+    archived_at: null,
   };
 }
 

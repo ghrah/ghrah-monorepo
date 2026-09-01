@@ -148,6 +148,10 @@ describe("connectStores", () => {
       const store = useAgentsStore();
       store.onAgentSpawned({
         name: "agent-1",
+        agent_id: "",
+        project_id: "",
+        cluster_id: "",
+        incarnation_id: "",
         config: { ...DEFAULT_CONFIG, name: "agent-1" },
       });
 

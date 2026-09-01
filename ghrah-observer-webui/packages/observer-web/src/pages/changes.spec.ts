@@ -9,6 +9,8 @@ import ChangesPage from "./changes.vue";
 
 function change(overrides: Partial<FileChange> = {}): FileChange {
   return {
+    projectId: "p1",
+    agentId: "a1",
     agentName: "alpha",
     abilityName: "write_file",
     filePath: "src/a.ts",

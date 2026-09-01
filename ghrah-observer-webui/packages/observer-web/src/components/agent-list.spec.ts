@@ -33,6 +33,7 @@ function room(id: string, name: string, members: string[] = []): RoomInfoPayload
     version: 1,
     created_at: "",
     updated_at: "",
+    archived_at: null,
   };
 }
 

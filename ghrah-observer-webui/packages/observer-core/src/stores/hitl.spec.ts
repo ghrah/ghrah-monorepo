@@ -1,6 +1,23 @@
+import type { HITLRequestPayload } from "@ghrah/protocol";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it } from "vitest";
 import { useHitlStore } from "./hitl.js";
+
+const makeRequest = (
+  promise_id: string,
+  agent_name: string,
+  ability_name: string,
+  tool_args: Record<string, unknown> = {},
+): HITLRequestPayload => ({
+  promise_id,
+  agent_id: "",
+  project_id: "",
+  cluster_id: "",
+  agent_name,
+  ability_name,
+  tool_args,
+  context: {},
+});
 
 describe("useHitlStore", () => {
   beforeEach(() => {
@@ -15,13 +32,7 @@ describe("useHitlStore", () => {
 
   it("onHitlRequest adds request to the list", () => {
     const store = useHitlStore();
-    store.onHitlRequest({
-      promise_id: "p1",
-      agent_name: "agent-1",
-      ability_name: "write_file",
-      tool_args: { file_path: "/tmp/test.ts" },
-      context: {},
-    });
+    store.onHitlRequest(makeRequest("p1", "agent-1", "write_file", { file_path: "/tmp/test.ts" }));
     expect(store.requests).toHaveLength(1);
     expect(store.requests[0].promiseId).toBe("p1");
     expect(store.requests[0].agentName).toBe("agent-1");
@@ -30,20 +41,8 @@ describe("useHitlStore", () => {
 
   it("removeRequest removes by promiseId", () => {
     const store = useHitlStore();
-    store.onHitlRequest({
-      promise_id: "p1",
-      agent_name: "agent-1",
-      ability_name: "write_file",
-      tool_args: {},
-      context: {},
-    });
-    store.onHitlRequest({
-      promise_id: "p2",
-      agent_name: "agent-1",
-      ability_name: "execute_command",
-      tool_args: {},
-      context: {},
-    });
+    store.onHitlRequest(makeRequest("p1", "agent-1", "write_file"));
+    store.onHitlRequest(makeRequest("p2", "agent-1", "execute_command"));
     expect(store.requests).toHaveLength(2);
 
     store.removeRequest("p1");
@@ -53,20 +52,8 @@ describe("useHitlStore", () => {
 
   it("clearAll removes all requests", () => {
     const store = useHitlStore();
-    store.onHitlRequest({
-      promise_id: "p1",
-      agent_name: "agent-1",
-      ability_name: "write_file",
-      tool_args: {},
-      context: {},
-    });
-    store.onHitlRequest({
-      promise_id: "p2",
-      agent_name: "agent-2",
-      ability_name: "execute_command",
-      tool_args: {},
-      context: {},
-    });
+    store.onHitlRequest(makeRequest("p1", "agent-1", "write_file"));
+    store.onHitlRequest(makeRequest("p2", "agent-2", "execute_command"));
     store.clearAll();
     expect(store.requests).toHaveLength(0);
   });
