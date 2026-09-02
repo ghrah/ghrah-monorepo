@@ -103,6 +103,7 @@ def create_persistence(
         f"Supported types: {PERSISTENCE_BACKEND_TYPES}"
     )
 
+
 __all__ = [
     "PersistenceBackend",
     "InMemoryBackend",

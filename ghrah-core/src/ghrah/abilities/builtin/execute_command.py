@@ -162,9 +162,7 @@ class ExecuteCommandAbility(Ability):
             return await self._execute_via_runner(command, working_dir)
         return await self._execute_subprocess(command, working_dir)
 
-    async def _execute_via_runner(
-        self, command: str, working_dir: str | None
-    ) -> ActionResult:
+    async def _execute_via_runner(self, command: str, working_dir: str | None) -> ActionResult:
         try:
             args = shlex.split(command)
         except ValueError as e:
@@ -199,9 +197,7 @@ class ExecuteCommandAbility(Ability):
             },
         )
 
-    async def _execute_subprocess(
-        self, command: str, working_dir: str | None
-    ) -> ActionResult:
+    async def _execute_subprocess(self, command: str, working_dir: str | None) -> ActionResult:
         try:
             process = await asyncio.create_subprocess_shell(
                 command,

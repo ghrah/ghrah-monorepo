@@ -37,18 +37,14 @@ def _make_openai_response(
     if reasoning_content:
         message.reasoning_content = reasoning_content
     choice = SimpleNamespace(message=message, finish_reason=finish_reason)
-    resp_usage = usage or SimpleNamespace(
-        prompt_tokens=10, completion_tokens=5, total_tokens=15
-    )
+    resp_usage = usage or SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
     return SimpleNamespace(choices=[choice], model=model, usage=resp_usage)
 
 
 def _make_tool_call(
     id: str = "c1", name: str = "read", args: str = '{"path":"/tmp"}'
 ) -> SimpleNamespace:
-    return SimpleNamespace(
-        id=id, function=SimpleNamespace(name=name, arguments=args)
-    )
+    return SimpleNamespace(id=id, function=SimpleNamespace(name=name, arguments=args))
 
 
 class TestOpenAIFormatInit:
@@ -230,9 +226,7 @@ class TestFormatMessagesMultimodal:
 
     def test_file_block(self) -> None:
         fmt = OpenAIFormat(model="gpt-4o")
-        file = FileBlock(
-            base64="filedata", mime_type="application/pdf", filename="doc.pdf"
-        )
+        file = FileBlock(base64="filedata", mime_type="application/pdf", filename="doc.pdf")
         messages = [ChatMessage.user(text_or_blocks=[file])]
         result = fmt._format_messages(messages)
         assert result[0]["content"][0]["type"] == "file"
@@ -248,9 +242,7 @@ class TestFormatTools:
 
     def test_custom_format_conversion(self) -> None:
         fmt = OpenAIFormat(model="gpt-4o")
-        tools = [
-            {"name": "read", "parameters": {"type": "object"}, "description": "Read a file"}
-        ]
+        tools = [{"name": "read", "parameters": {"type": "object"}, "description": "Read a file"}]
         result = fmt._format_tools(tools)
         assert result[0]["type"] == "function"
         assert result[0]["function"]["name"] == "read"

@@ -70,9 +70,9 @@ async def _wait_for(
 
 
 async def _make_project(ctx: Context, name: str = "demo") -> str:
-    return _data(await bridge_command(ctx, "project_create", {"name": name}))[
-        "project"
-    ]["project_id"]
+    return _data(await bridge_command(ctx, "project_create", {"name": name}))["project"][
+        "project_id"
+    ]
 
 
 async def _spawn_agent_with_send(ctx: Context, project_id: str, name: str) -> str:
@@ -141,9 +141,7 @@ class TestRoomRealEndToEnd:
             # room_get_log 读回 + room_list 过滤
             log = _data(await bridge_command(ctx, "room_get_log", {"room_id": arch}))
             assert log["count"] == 3
-            listed = _data(
-                await bridge_command(ctx, "room_list", {"project_id": project_id})
-            )
+            listed = _data(await bridge_command(ctx, "room_list", {"project_id": project_id}))
             assert listed["count"] == 4
 
     async def test_send_ability_real_path_appends_room_log(self, tmp_path: Path) -> None:
@@ -161,9 +159,7 @@ class TestRoomRealEndToEnd:
 
             project_id = await _make_project(ctx)
             room = _data(
-                await bridge_command(
-                    ctx, "room_create", {"project_id": project_id, "name": "arch"}
-                )
+                await bridge_command(ctx, "room_create", {"project_id": project_id, "name": "arch"})
             )["room"]
             architect_id = await _spawn_agent_with_send(ctx, project_id, "architect")
             await bridge_command(
@@ -198,9 +194,7 @@ class TestRoomRealEndToEnd:
             assert ability_data["rooms"] == [room["room_id"]]
 
             # RoomLog 真实落账（author=agent author_type=agent）
-            log = _data(
-                await bridge_command(ctx, "room_get_log", {"room_id": room["room_id"]})
-            )
+            log = _data(await bridge_command(ctx, "room_get_log", {"room_id": room["room_id"]}))
             assert log["count"] == 1
             entry = log["entries"][0]
             # author 为 project-scoped 稳定 agent_id（成员按稳定 ID 保存）
@@ -216,9 +210,7 @@ class TestRoomRealEndToEnd:
         async with _stack(tmp_path) as ctx:
             project_id = await _make_project(ctx)
             room = _data(
-                await bridge_command(
-                    ctx, "room_create", {"project_id": project_id, "name": "r"}
-                )
+                await bridge_command(ctx, "room_create", {"project_id": project_id, "name": "r"})
             )["room"]
             room_id = room["room_id"]
             await bridge_command(
@@ -240,9 +232,7 @@ class TestRoomRealEndToEnd:
             assert log["entries"][0]["data"]["message"] == "persisted"
             assert log["entries"][0]["seq"] == 1
 
-    async def test_human_send_delivery_and_spawn_persistence(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_human_send_delivery_and_spawn_persistence(self, tmp_path: Path) -> None:
         """投递回路冒烟（D1/D2）。
 
         - D2：spawn 即持久化——ghrah.db 建表 + agents 行落库（WAL 只读连接
@@ -254,9 +244,7 @@ class TestRoomRealEndToEnd:
         async with _stack(tmp_path) as ctx:
             project_id = await _make_project(ctx)
             room = _data(
-                await bridge_command(
-                    ctx, "room_create", {"project_id": project_id, "name": "test"}
-                )
+                await bridge_command(ctx, "room_create", {"project_id": project_id, "name": "test"})
             )["room"]
 
             spawn = await bridge_command(
@@ -274,9 +262,9 @@ class TestRoomRealEndToEnd:
             assert spawn["success"], spawn.get("error")
 
             # D2：Core sqlite 真相源已按 Project Root 隔离。
-            project = _data(
-                await bridge_command(ctx, "project_get", {"project_id": project_id})
-            )["project"]
+            project = _data(await bridge_command(ctx, "project_get", {"project_id": project_id}))[
+                "project"
+            ]
             core_db_path = ProjectPaths.from_locator(
                 project["project_root_locator"]
             ).action_chain_db_path
@@ -284,14 +272,10 @@ class TestRoomRealEndToEnd:
             try:
                 tables = {
                     row[0]
-                    for row in conn.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table'"
-                    )
+                    for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
                 }
                 assert {"runs", "agents", "nodes", "chain_meta"} <= tables
-                agent_rows = [
-                    row[0] for row in conn.execute("SELECT agent_name FROM agents")
-                ]
+                agent_rows = [row[0] for row in conn.execute("SELECT agent_name FROM agents")]
                 assert agent_rows == [spawn["data"]["agent_id"]]
             finally:
                 conn.close()
@@ -367,9 +351,7 @@ class TestRoomRealEndToEnd:
 
             project_id = await _make_project(ctx)
             room = _data(
-                await bridge_command(
-                    ctx, "room_create", {"project_id": project_id, "name": "test"}
-                )
+                await bridge_command(ctx, "room_create", {"project_id": project_id, "name": "test"})
             )["room"]
             spawned = await bridge_command(
                 ctx,
@@ -425,9 +407,7 @@ class TestRoomRealEndToEnd:
             )
             await _wait_for(lambda: bool(events), timeout=5.0)
 
-            log = _data(
-                await bridge_command(ctx, "room_get_log", {"room_id": room["room_id"]})
-            )
+            log = _data(await bridge_command(ctx, "room_get_log", {"room_id": room["room_id"]}))
             assert log["count"] == 1
             entry = log["entries"][0]
             assert entry["author"] == spawned["data"]["agent_id"]
@@ -461,7 +441,5 @@ class TestRoomRealEndToEnd:
                 },
             )
             await asyncio.sleep(0.3)
-            log = _data(
-                await bridge_command(ctx, "room_get_log", {"room_id": room["room_id"]})
-            )
+            log = _data(await bridge_command(ctx, "room_get_log", {"room_id": room["room_id"]}))
             assert log["count"] == 1

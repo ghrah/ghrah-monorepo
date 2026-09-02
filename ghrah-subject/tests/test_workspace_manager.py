@@ -27,9 +27,7 @@ from ghrah.subject.sandbox.executor import SandboxExecutor
 from ghrah.subject.sandbox.workspace import WorkspaceManager
 from ghrah.subject.workspace import WorkspaceRecord, path_to_locator
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("git") is None, reason="git not available"
-)
+pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
 
 
 class _Sandbox:

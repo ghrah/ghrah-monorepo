@@ -78,9 +78,10 @@ export class ServerClient {
     this._maxReconnectDelay = opts?.maxReconnectDelay ?? 60_000;
     this._initialReconnectDelay = opts?.initialReconnectDelay ?? 1_000;
     this._wsFactory = opts?.wsFactory ?? defaultWebSocketFactory;
-    this._clientId = (typeof crypto !== "undefined" && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    this._clientId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   }
 
   get connected(): boolean {
@@ -294,7 +295,9 @@ export class ServerClient {
 
     if (msgType === SystemType.COMMAND_RESULT) {
       const payload = message.payload as CommandResultPayload;
-      const requestId = (payload as Record<string, unknown>).request_id as string | undefined || message.request_id;
+      const requestId =
+        ((payload as Record<string, unknown>).request_id as string | undefined) ||
+        message.request_id;
       if (requestId) {
         const originalCommand = this._requestCommandTypes.get(requestId);
         if (originalCommand) {

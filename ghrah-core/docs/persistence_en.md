@@ -11,27 +11,28 @@ ghrah provides flexible persistence backends and window management strategies fo
 ```python
 from ghrah.context.persistence import PersistenceBackend
 
+
 class MyBackend(PersistenceBackend):
     async def save_node(self, node: ContextNode) -> None:
         """Save a single node"""
         ...
-    
+
     async def load_node(self, node_id: str) -> ContextNode | None:
         """Load a single node"""
         ...
-    
+
     async def save_chain_meta(self, agent_name: str, meta: dict) -> None:
         """Save chain metadata"""
         ...
-    
+
     async def load_chain_meta(self, agent_name: str) -> dict | None:
         """Load chain metadata"""
         ...
-    
+
     async def save_messages(self, agent_name: str, messages: list) -> None:
         """Save message list"""
         ...
-    
+
     async def load_messages(self, agent_name: str) -> list:
         """Load message list"""
         ...
@@ -57,8 +58,8 @@ backend = InMemoryBackend()
 from ghrah.context.persistence import JsonFileBackend
 
 backend = JsonFileBackend(
-    root_dir="/tmp/agent_data",    # Storage root directory
-    compress=True,                  # Enable gzip compression
+    root_dir="/tmp/agent_data",  # Storage root directory
+    compress=True,  # Enable gzip compression
     session_id="session_20260422",  # Session ID (optional, auto-generated)
 )
 ```
@@ -86,7 +87,7 @@ from ghrah.context.persistence.sqlite_backend import SqliteBackend
 
 backend = SqliteBackend(
     db_path="/tmp/agent_data/ghrah.db",  # Database file path
-    session_id="session_20260428",        # Session ID (optional, auto-generated)
+    session_id="session_20260428",  # Session ID (optional, auto-generated)
 )
 ```
 
@@ -173,10 +174,14 @@ await agent._context_manager.restore()
 
 ```python
 from ghrah.context.persistence import (
-    serialize_node, deserialize_node,
-    serialize_action_result, deserialize_action_result,
-    serialize_action_results, deserialize_action_results,
-    serialize_messages, deserialize_messages,
+    serialize_node,
+    deserialize_node,
+    serialize_action_result,
+    deserialize_action_result,
+    serialize_action_results,
+    deserialize_action_results,
+    serialize_messages,
+    deserialize_messages,
 )
 
 # Serialize ContextNode
@@ -206,10 +211,10 @@ from ghrah.core.config import AgentConfig, WindowConfig
 config = AgentConfig(
     name="my-agent",
     window=WindowConfig(
-        max_tokens=4096,                                       # Token budget
-        strategies=["tool_call_fold", "truncation"],           # Strategy list
-        tool_call_max_length=500,                               # ToolCall fold max length
-        sliding_window_size=20,                                 # Sliding window size
+        max_tokens=4096,  # Token budget
+        strategies=["tool_call_fold", "truncation"],  # Strategy list
+        tool_call_max_length=500,  # ToolCall fold max length
+        sliding_window_size=20,  # Sliding window size
     ),
 )
 ```
@@ -303,14 +308,15 @@ Implement the [`WindowStrategy`](../src/ghrah/context/window.py) interface:
 from ghrah.context.window import WindowStrategy
 from ghrah.chat.message import ChatMessage
 
+
 class MyStrategy(WindowStrategy):
     """Custom window strategy"""
-    
+
     def apply(self, messages: list[ChatMessage], max_tokens: int) -> list[ChatMessage]:
         # Implement compression logic
         # Return compressed message list within max_tokens
         return compressed_messages
-    
+
     @property
     def name(self) -> str:
         return "my_strategy"
@@ -337,7 +343,6 @@ config = AgentConfig(
     description="Code writing assistant",
     system_prompt="You are a code writing expert.",
     max_iterations=15,
-    
     # Window management configuration
     window=WindowConfig(
         max_tokens=8192,
@@ -345,7 +350,6 @@ config = AgentConfig(
         tool_call_max_length=500,
         sliding_window_size=30,
     ),
-    
     # Context management configuration
     context=ContextConfig(
         persistence_type="json_file",

@@ -32,6 +32,7 @@ from ghrah.protocol.types import (
     SpawnAgentPayload,
     TerminateAgentPayload,
 )
+
 from ghrah.subject.errors import StableError
 from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.runtime.ouroboros_bridge import mount_unit, wait_active
@@ -245,8 +246,7 @@ class CoreClusterRegistry:
                 return entry.handle
             if self._ctx is None:
                 raise ValueError(
-                    "cluster_mount_failed: CoreClusterRegistry has not been "
-                    "bound to a Context."
+                    "cluster_mount_failed: CoreClusterRegistry has not been bound to a Context."
                 )
 
             fiber: Fiber | None = None
@@ -260,9 +260,7 @@ class CoreClusterRegistry:
                     with contextlib.suppress(Exception):
                         await fiber.dispose()
                 raise ValueError(f"cluster_mount_failed: {cluster_id}: {exc}") from exc
-            handle = CoreUnitHandle(
-                self, cluster_id, project_id, project_root_locator, unit
-            )
+            handle = CoreUnitHandle(self, cluster_id, project_id, project_root_locator, unit)
             self._clusters[cluster_id] = _ClusterEntry(
                 unit, fiber, handle, project_id, project_root_locator
             )
@@ -318,14 +316,10 @@ def default_core_unit_factory(
         create_core_unit,
     )
 
-    def factory(
-        cluster_id: str, project_id: str, project_root_locator: str
-    ) -> Any:
+    def factory(cluster_id: str, project_id: str, project_root_locator: str) -> Any:
         if not project_root_locator:
             raise ValueError("project_root_locator required")
-        core_db_path = str(
-            ProjectPaths.from_locator(project_root_locator).action_chain_db_path
-        )
+        core_db_path = str(ProjectPaths.from_locator(project_root_locator).action_chain_db_path)
 
         def persistence_factory(agent_config: Any) -> Any:
             return SqliteBackend(db_path=core_db_path)

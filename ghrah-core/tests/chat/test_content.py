@@ -145,13 +145,15 @@ class TestBlockFromDict:
         assert b.text == "hi"
 
     def test_extra_fields_on_tool_call(self) -> None:
-        b = block_from_dict({
-            "type": "tool_call",
-            "id": "c1",
-            "name": "read",
-            "arguments": {"path": "/tmp"},
-            "legacy_field": 42,
-        })
+        b = block_from_dict(
+            {
+                "type": "tool_call",
+                "id": "c1",
+                "name": "read",
+                "arguments": {"path": "/tmp"},
+                "legacy_field": 42,
+            }
+        )
         assert isinstance(b, ToolCallBlock)
         assert b.name == "read"
         assert b.arguments == {"path": "/tmp"}
@@ -168,9 +170,7 @@ class TestBlockRoundTrip:
             AudioBlock(data="base64audio", mime_type="audio/wav"),
             FileBlock(base64="filedata", mime_type="application/pdf", filename="doc.pdf"),
             ToolCallBlock(id="c1", name="read", arguments={"path": "/tmp"}),
-            ToolResultBlock(
-                tool_call_id="tc1", name="read", content="file content", success=True
-            ),
+            ToolResultBlock(tool_call_id="tc1", name="read", content="file content", success=True),
             ErrorBlock(error_type="RuntimeError", message="crashed"),
         ],
     )

@@ -350,9 +350,7 @@ class ActorAgent:
 
             self._initialized = True
 
-            logger.info(
-                f"ActorAgent[{self.config.name}] LLM initialized: {self._llm.model}"
-            )
+            logger.info(f"ActorAgent[{self.config.name}] LLM initialized: {self._llm.model}")
             return self._llm
 
         except Exception as e:
@@ -402,9 +400,7 @@ class ActorAgent:
             # metadata——随 commit_iteration 落入链节点 messages_delta，
             # 供回复归属推导（Room Filter）消费
             if message.content_blocks:
-                text_or_blocks: str | list[ContentBlock] = blocks_from_dicts(
-                    message.content_blocks
-                )
+                text_or_blocks: str | list[ContentBlock] = blocks_from_dicts(message.content_blocks)
             else:
                 text_or_blocks = message.content
             await self._message_queue.put(
@@ -793,9 +789,7 @@ class ActorAgent:
                 ability_names=[ability_name],
                 action_results=[{"ability_name": ability_name, "action_result": action_result}],
                 llm_metadata=(
-                    {"delivery_context": dict(delivery_context)}
-                    if delivery_context
-                    else None
+                    {"delivery_context": dict(delivery_context)} if delivery_context else None
                 ),
             )
         except Exception as e:
@@ -1020,19 +1014,21 @@ class ActorAgent:
         for session in sessions:
             is_active = session.session_id == self._context_manager.active_session_id
             head_node = self._context_manager.get_branch_head(session.branch_name)
-            result.append({
-                "session_id": session.session_id,
-                "agent_name": session.agent_name,
-                "branch_name": session.branch_name,
-                "state": "active" if is_active else "idle",
-                "head_node_id": head_node.id if head_node else None,
-                "parent_session_id": session.parent_session_id,
-                "fork_point_node_id": session.parent_node_id,
-                "created_at": session.created_at.isoformat() if session.created_at else "",
-                "metadata": session.metadata,
-                "message_count": self._context_manager.message_count,
-                "iteration_count": self._iteration_state.iteration,
-            })
+            result.append(
+                {
+                    "session_id": session.session_id,
+                    "agent_name": session.agent_name,
+                    "branch_name": session.branch_name,
+                    "state": "active" if is_active else "idle",
+                    "head_node_id": head_node.id if head_node else None,
+                    "parent_session_id": session.parent_session_id,
+                    "fork_point_node_id": session.parent_node_id,
+                    "created_at": session.created_at.isoformat() if session.created_at else "",
+                    "metadata": session.metadata,
+                    "message_count": self._context_manager.message_count,
+                    "iteration_count": self._iteration_state.iteration,
+                }
+            )
         return result
 
     async def archive_session(self, session_id: str) -> None:
@@ -1055,9 +1051,7 @@ class ActorAgent:
             )
         )
 
-        logger.info(
-            f"ActorAgent[{self.config.name}] archived session id={session_id}"
-        )
+        logger.info(f"ActorAgent[{self.config.name}] archived session id={session_id}")
 
     async def delete_session(self, session_id: str) -> None:
         """删除指定 session 并发布事件。
@@ -1080,9 +1074,7 @@ class ActorAgent:
             )
         )
 
-        logger.info(
-            f"ActorAgent[{self.config.name}] deleted session id={session_id}"
-        )
+        logger.info(f"ActorAgent[{self.config.name}] deleted session id={session_id}")
 
     # ----------------------------------------------------------------
     # 消息 API

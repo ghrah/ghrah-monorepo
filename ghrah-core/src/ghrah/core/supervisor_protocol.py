@@ -29,9 +29,7 @@ class SupervisorProtocol(Protocol):
 
     async def terminate_agent(self, name: str) -> None: ...
 
-    async def spawn_agent(
-        self, config: Any, abilities: list[Any] | None = None
-    ) -> str: ...
+    async def spawn_agent(self, config: Any, abilities: list[Any] | None = None) -> str: ...
 
     async def send(
         self,

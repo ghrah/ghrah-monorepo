@@ -65,6 +65,7 @@ logger = logging.getLogger(__name__)
 # 工作区路径配置
 # ============================================================================
 
+
 def create_workspace() -> Path:
     """创建临时工作区目录结构。
 
@@ -91,6 +92,7 @@ def create_workspace() -> Path:
 # ============================================================================
 # 权限检查器工厂
 # ============================================================================
+
 
 def make_checker(workspace: Path, agent_name: str) -> FSPermissionChecker:
     """为指定 Agent 创建文件系统权限检查器。
@@ -124,6 +126,7 @@ def make_checker(workspace: Path, agent_name: str) -> FSPermissionChecker:
 # ============================================================================
 # Agent Ability 组合
 # ============================================================================
+
 
 def make_planner_abilities(checker: FSPermissionChecker) -> list:
     """创建 planner 的 Ability 组合：对话 + 结束 + 写文件 + 列目录。"""
@@ -162,6 +165,7 @@ def make_reviewer_abilities(
 # ============================================================================
 # 主流程
 # ============================================================================
+
 
 async def main() -> None:
     """运行多 Agent 并行协作示例。"""
@@ -347,9 +351,7 @@ async def main() -> None:
     coder_dir = workspace / "coder"
     code_files = []
     if coder_dir.exists():
-        code_files = sorted(
-            f.name for f in coder_dir.iterdir() if f.suffix == ".py"
-        )
+        code_files = sorted(f.name for f in coder_dir.iterdir() if f.suffix == ".py")
     print(f"  发现代码文件: {code_files}")
 
     # 读取所有代码文件内容
@@ -362,7 +364,7 @@ async def main() -> None:
 
     all_code = "\n\n".join(code_contents)
 
-    report_path = workspace / 'reviewer' / 'review_report.md'
+    report_path = workspace / "reviewer" / "review_report.md"
     reviewer_prompt = (
         f"请审查以下 Python 代码，并将审查报告写入 {report_path}。\n\n"
         f"代码内容:\n{all_code}\n\n"

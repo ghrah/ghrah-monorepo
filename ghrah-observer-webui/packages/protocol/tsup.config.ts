@@ -11,4 +11,7 @@ export default defineConfig({
   },
   clean: true,
   sourcemap: true,
+  esbuildOptions(options) {
+    options.sourcesContent = false;
+  },
 });

@@ -165,23 +165,17 @@ class TestIterationStateLoopSimulation:
 
         # 第 1 次迭代
         assert state.should_continue is True
-        state.last_action_result = ActionResult(
-            outcome=ActionOutcome.SUCCESS, data={"step": 1}
-        )
+        state.last_action_result = ActionResult(outcome=ActionOutcome.SUCCESS, data={"step": 1})
         state.advance()
 
         # 第 2 次迭代
         assert state.should_continue is True
-        state.last_action_result = ActionResult(
-            outcome=ActionOutcome.SUCCESS, data={"step": 2}
-        )
+        state.last_action_result = ActionResult(outcome=ActionOutcome.SUCCESS, data={"step": 2})
         state.advance()
 
         # 第 3 次迭代
         assert state.should_continue is True
-        state.last_action_result = ActionResult(
-            outcome=ActionOutcome.SUCCESS, data={"step": 3}
-        )
+        state.last_action_result = ActionResult(outcome=ActionOutcome.SUCCESS, data={"step": 3})
         state.advance()
 
         # 第 4 次迭代 — 应该停止

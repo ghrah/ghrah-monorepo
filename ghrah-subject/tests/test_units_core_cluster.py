@@ -230,9 +230,7 @@ class TestCoreClusterRegistryUnit:
             payload = SpawnAgentPayload(
                 project_id=PROJECT_ID,
                 cluster_id="default",
-                config=AgentConfigPayload(
-                    name="coder-1", agent_id="agent-1", system_prompt=""
-                ),
+                config=AgentConfigPayload(name="coder-1", agent_id="agent-1", system_prompt=""),
                 manifest_ref="ghrah.coder",
             )
             result = await handle.spawn_agent(payload)
@@ -281,9 +279,7 @@ class TestCoreClusterRegistryUnit:
                 SpawnAgentPayload(
                     project_id=PROJECT_ID,
                     cluster_id="default",
-                    config=AgentConfigPayload(
-                        name="x", agent_id="agent-x", system_prompt=""
-                    ),
+                    config=AgentConfigPayload(name="x", agent_id="agent-x", system_prompt=""),
                 )
             )
             assert spawn_result["success"] is False
@@ -299,9 +295,7 @@ class TestCoreClusterRegistryUnit:
             await registry.stop()
             await ctx.__aexit__(None, None, None)
 
-    async def test_cluster_cannot_be_reused_by_another_project(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_cluster_cannot_be_reused_by_another_project(self, tmp_path: Path) -> None:
         ctx, _, registry, _ = await _boot(tmp_path)
         try:
             await registry.ensure_cluster(
@@ -334,9 +328,7 @@ class TestCoreClusterRegistryUnit:
             assert all(u.stopped for u in created)
             await ctx.__aexit__(None, None, None)
 
-    async def test_concurrent_ensure_mounts_single_instance(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_concurrent_ensure_mounts_single_instance(self, tmp_path: Path) -> None:
         """回归 H2：并发 ensure 同一 cluster 只挂载一个 CoreUnit 实例。"""
         import asyncio
 
@@ -356,9 +348,7 @@ class TestCoreClusterRegistryUnit:
             await registry.stop()
             await ctx.__aexit__(None, None, None)
 
-    async def test_mount_failure_recycled_and_retry_succeeds(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_mount_failure_recycled_and_retry_succeeds(self, tmp_path: Path) -> None:
         """回归 H2/H3：挂载失败回收 fiber、返回稳定错误码，重试可成功。"""
         created: list[_FlakyStartCoreUnit] = []
         fail = {"on": True}
@@ -396,9 +386,7 @@ class _ProjectManagerStub:
     def __init__(self, project: dict[str, Any]) -> None:
         self._project = project
 
-    async def handle_command(
-        self, command: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def handle_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         assert command == "project_get"
         return {"success": True, "data": {"project": self._project}}
 
@@ -434,12 +422,8 @@ class TestProjectRuntimeStateGuards:
         ctx.provide("project_manager", _ProjectManagerStub(project))
         return ctx, unit, registry, created
 
-    async def test_stopped_project_rejects_runtime_reviving_commands(
-        self, tmp_path: Path
-    ) -> None:
-        ctx, unit, registry, created = await self._boot_guard(
-            tmp_path, self._project("stopped")
-        )
+    async def test_stopped_project_rejects_runtime_reviving_commands(self, tmp_path: Path) -> None:
+        ctx, unit, registry, created = await self._boot_guard(tmp_path, self._project("stopped"))
         try:
             cases = [
                 ("spawn_agent", {"project_id": PROJECT_ID, "config": {"name": "x"}}),
@@ -467,9 +451,7 @@ class TestProjectRuntimeStateGuards:
                 ),
             ]
             for command, payload in cases:
-                result = await unit.handle_command(
-                    command, payload, CommandContext.internal()
-                )
+                result = await unit.handle_command(command, payload, CommandContext.internal())
                 assert result["success"] is False, command
                 assert result["error"] == "project_not_active", (command, result["error"])
             # cluster 全程未被惰性挂载
@@ -479,12 +461,8 @@ class TestProjectRuntimeStateGuards:
             await registry.stop()
             await ctx.__aexit__(None, None, None)
 
-    async def test_stopped_project_reads_and_terminate_without_mount(
-        self, tmp_path: Path
-    ) -> None:
-        ctx, unit, registry, created = await self._boot_guard(
-            tmp_path, self._project("stopped")
-        )
+    async def test_stopped_project_reads_and_terminate_without_mount(self, tmp_path: Path) -> None:
+        ctx, unit, registry, created = await self._boot_guard(tmp_path, self._project("stopped"))
         try:
             listed = await unit.handle_command(
                 "list_agents", {"project_id": PROJECT_ID}, CommandContext.internal()
@@ -578,9 +556,7 @@ class TestSpawnRetryAndDiagnostics:
                 "project_id": PROJECT_ID,
                 "config": {"name": "coder", "agent_id": "agent-9"},
             }
-            result = await unit.handle_command(
-                "spawn_agent", payload, CommandContext.internal()
-            )
+            result = await unit.handle_command("spawn_agent", payload, CommandContext.internal())
             assert result["success"], result.get("error")
             assert result["data"]["agent_id"] == "agent-9"
             assert len(calls) == 2  # 第一次冲突、重试成功
@@ -588,9 +564,7 @@ class TestSpawnRetryAndDiagnostics:
             await registry.stop()
             await ctx.__aexit__(None, None, None)
 
-    async def test_spawn_returns_stable_code_after_retry_exhausted(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_spawn_returns_stable_code_after_retry_exhausted(self, tmp_path: Path) -> None:
         ctx, unit, registry, created = await _boot(tmp_path)
         project = self._active_project()
 
@@ -644,9 +618,7 @@ class TestRealCoreUnitMultiCluster:
         from ghrah.core.unit import CoreUnitConfig, create_core_unit
 
         def factory(cluster_id: str, project_id: str, project_root_locator: str) -> Any:
-            return create_core_unit(
-                CoreUnitConfig(cluster_id=cluster_id, project_id=project_id)
-            )
+            return create_core_unit(CoreUnitConfig(cluster_id=cluster_id, project_id=project_id))
 
         config = _config(tmp_path)
         unit = CoreClusterRegistryUnit(config, unit_factory=factory)

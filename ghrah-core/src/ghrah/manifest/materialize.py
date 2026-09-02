@@ -200,8 +200,6 @@ def _make_command_approval(
     if auto_approved:
         require_approval = False
     else:
-        require_approval = (
-            bool(permissions.require_hitl) or require_approval_by_default
-        )
+        require_approval = bool(permissions.require_hitl) or require_approval_by_default
     command_checker = CommandSafetyChecker(require_approval=require_approval)
     return command_checker, [CommandApprovalHook(command_checker)]

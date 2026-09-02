@@ -197,9 +197,10 @@ async def test_archived_project_freezes_task_root_until_restore(tmp_path: Path) 
             )
         )["project"]
         assert restored["status"] == "stopped"
-        assert _data(
-            await _dispatch(ctx, "task_get", {"task_id": task["task_id"]})
-        )["task"]["task_id"] == task["task_id"]
+        assert (
+            _data(await _dispatch(ctx, "task_get", {"task_id": task["task_id"]}))["task"]["task_id"]
+            == task["task_id"]
+        )
 
 
 async def test_task_rejects_agent_owned_by_another_project(tmp_path: Path) -> None:

@@ -10,14 +10,14 @@ ghrah 的配置分为两层：框架层配置（`AgentConfig` 等）和 LLM 配�
 from ghrah.core.config import AgentConfig
 
 config = AgentConfig(
-    name="my-agent",              # Agent 运行时名称（必填，用于消息路由和持久化路径）
+    name="my-agent",  # Agent 运行时名称（必填，用于消息路由和持久化路径）
     agent_config_name="assistant",  # agentconf 中的配置名称（可选，None 时回退到 name）
-    description="通用助手",        # Agent 描述（用于发现和路由）
-    system_prompt="你是一个助手",   # 系统提示词
-    max_iterations=10,            # 最大推理迭代次数
+    description="通用助手",  # Agent 描述（用于发现和路由）
+    system_prompt="你是一个助手",  # 系统提示词
+    max_iterations=10,  # 最大推理迭代次数
     resources={"CPU": 2, "GPU": 1},  # 资源需求
-    window=WindowConfig(...),     # 窗口管理配置
-    context=ContextConfig(...),   # 上下文管理配置
+    window=WindowConfig(...),  # 窗口管理配置
+    context=ContextConfig(...),  # 上下文管理配置
 )
 ```
 
@@ -51,8 +51,8 @@ config = AgentConfig(
 # Worker 池：多个 worker 共享同一份 agentconf 配置
 for i in range(num_workers):
     config = AgentConfig(
-        name=f"solve_worker_{i}",        # 运行时唯一标识
-        agent_config_name="solve_worker",   # agentconf 中的模板名称
+        name=f"solve_worker_{i}",  # 运行时唯一标识
+        agent_config_name="solve_worker",  # agentconf 中的模板名称
         system_prompt=f"你是解题 Worker #{i}",
     )
     # Agent 初始化时会使用 "solve_worker" 查找 agentconf 配置
@@ -76,10 +76,10 @@ config = AgentConfig(
 from ghrah.core.config import WindowConfig
 
 window_config = WindowConfig(
-    max_tokens=4096,                                    # token 预算
-    strategies=["tool_call_fold", "truncation"],        # 策略列表
-    tool_call_max_length=500,                            # ToolCall 折叠最大长度
-    sliding_window_size=20,                              # 滑动窗口大小
+    max_tokens=4096,  # token 预算
+    strategies=["tool_call_fold", "truncation"],  # 策略列表
+    tool_call_max_length=500,  # ToolCall 折叠最大长度
+    sliding_window_size=20,  # 滑动窗口大小
 )
 ```
 
@@ -109,12 +109,12 @@ window_config = WindowConfig(
 from ghrah.core.config import ContextConfig
 
 context_config = ContextConfig(
-    snapshot_interval=5,                # 快照间隔
-    auto_persist=False,                  # 自动持久化
-    persistence_type="json_file",       # 持久化后端类型
-    persistence_root_dir="/tmp/data",    # 存储根目录
-    persistence_compress=True,           # gzip 压缩
-    persistence_run_id="my_session", # 会话 ID
+    snapshot_interval=5,  # 快照间隔
+    auto_persist=False,  # 自动持久化
+    persistence_type="json_file",  # 持久化后端类型
+    persistence_root_dir="/tmp/data",  # 存储根目录
+    persistence_compress=True,  # gzip 压缩
+    persistence_run_id="my_session",  # 会话 ID
 )
 ```
 
@@ -252,7 +252,6 @@ config = AgentConfig(
     system_prompt="你是一个代码编写专家。请根据需求编写高质量的代码。",
     max_iterations=15,
     resources={"CPU": 2},
-    
     # 窗口管理
     window=WindowConfig(
         max_tokens=8192,
@@ -260,7 +259,6 @@ config = AgentConfig(
         tool_call_max_length=500,
         sliding_window_size=30,
     ),
-    
     # 上下文管理
     context=ContextConfig(
         snapshot_interval=10,
@@ -318,8 +316,8 @@ from ghrah.core.config import AgentConfig
 # agentconf 中只需创建一个 "solve_worker" 配置
 worker_configs = [
     AgentConfig(
-        name=f"solve_worker_{i}",        # 运行时唯一标识
-        agent_config_name="solve_worker",   # agentconf 中的模板名称
+        name=f"solve_worker_{i}",  # 运行时唯一标识
+        agent_config_name="solve_worker",  # agentconf 中的模板名称
         description=f"解题 Worker #{i}",
         system_prompt=f"你是解题 Worker #{i}。",
     )
@@ -328,8 +326,8 @@ worker_configs = [
 
 # 角色别名：不同运行时名称，共享同一份 LLM 配置
 reviewer_config = AgentConfig(
-    name="code_reviewer_v2",     # 新版本运行时标识
-    agent_config_name="reviewer",   # 复用 reviewer 的 LLM 配置
+    name="code_reviewer_v2",  # 新版本运行时标识
+    agent_config_name="reviewer",  # 复用 reviewer 的 LLM 配置
     description="代码审查专家 v2",
     system_prompt="你是一个代码审查专家。",
 )

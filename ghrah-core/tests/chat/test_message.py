@@ -133,9 +133,7 @@ class TestChatMessageProperties:
         msg_img = ChatMessage.user(text_or_blocks=[ImageBlock(url="https://a.png")])
         assert msg_img.is_multimodal is True
 
-        msg_audio = ChatMessage.user(
-            text_or_blocks=[AudioBlock(data="abc", mime_type="audio/wav")]
-        )
+        msg_audio = ChatMessage.user(text_or_blocks=[AudioBlock(data="abc", mime_type="audio/wav")])
         assert msg_audio.is_multimodal is True
 
     def test_tool_results(self) -> None:

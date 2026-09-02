@@ -150,9 +150,7 @@ class TestManifestResolver:
     def test_resolve_ref_ability(self) -> None:
         store = BuiltinManifestStore()
         resolver = ManifestResolver(store)
-        manifest = _make_agent_manifest(
-            abilities=[AbilityRef(ref="ghrah.fs.read_file")]
-        )
+        manifest = _make_agent_manifest(abilities=[AbilityRef(ref="ghrah.fs.read_file")])
         result = resolver.resolve(manifest)
 
         assert len(result.abilities) == 1
@@ -214,18 +212,14 @@ class TestManifestResolver:
     def test_resolve_ref_not_found_raises(self) -> None:
         store = BuiltinManifestStore()
         resolver = ManifestResolver(store)
-        manifest = _make_agent_manifest(
-            abilities=[AbilityRef(ref="nonexistent.ability")]
-        )
+        manifest = _make_agent_manifest(abilities=[AbilityRef(ref="nonexistent.ability")])
         with pytest.raises(ManifestNotFoundError):
             resolver.resolve(manifest)
 
     def test_resolve_unknown_type_raises(self) -> None:
         store = BuiltinManifestStore()
         resolver = ManifestResolver(store)
-        manifest = _make_agent_manifest(
-            abilities=[AbilityRef(type="totally_unknown_ability")]
-        )
+        manifest = _make_agent_manifest(abilities=[AbilityRef(type="totally_unknown_ability")])
         with pytest.raises(ManifestValidationError, match="Unknown builtin"):
             resolver.resolve(manifest)
 
@@ -422,9 +416,7 @@ class TestWindowConfigZeroValues:
         store = BuiltinManifestStore()
         resolver = ManifestResolver(store)
         manifest = _make_agent_manifest(
-            context=ContextOverrides(
-                window=WindowOverrides(max_tokens=0)
-            )
+            context=ContextOverrides(window=WindowOverrides(max_tokens=0))
         )
         result = resolver.resolve(manifest)
 
@@ -435,9 +427,7 @@ class TestWindowConfigZeroValues:
         store = BuiltinManifestStore()
         resolver = ManifestResolver(store)
         manifest = _make_agent_manifest(
-            context=ContextOverrides(
-                window=WindowOverrides(sliding_window_size=0)
-            )
+            context=ContextOverrides(window=WindowOverrides(sliding_window_size=0))
         )
         result = resolver.resolve(manifest)
 
@@ -448,9 +438,7 @@ class TestWindowConfigZeroValues:
         store = BuiltinManifestStore()
         resolver = ManifestResolver(store)
         manifest = _make_agent_manifest(
-            context=ContextOverrides(
-                window=WindowOverrides(tool_call_max_length=0)
-            )
+            context=ContextOverrides(window=WindowOverrides(tool_call_max_length=0))
         )
         result = resolver.resolve(manifest)
 
@@ -461,9 +449,7 @@ class TestWindowConfigZeroValues:
         store = BuiltinManifestStore()
         resolver = ManifestResolver(store)
         manifest = _make_agent_manifest(
-            context=ContextOverrides(
-                persistence=PersistenceOverrides(snapshot_interval=0)
-            )
+            context=ContextOverrides(persistence=PersistenceOverrides(snapshot_interval=0))
         )
         result = resolver.resolve(manifest)
 

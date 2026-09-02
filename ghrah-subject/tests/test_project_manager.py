@@ -235,9 +235,7 @@ def _make_manager(
 
 
 class TestProjectCreate:
-    async def test_create_success(
-        self, store: ProjectStore, tmp_path: Path
-    ) -> None:
+    async def test_create_success(self, store: ProjectStore, tmp_path: Path) -> None:
         events: list[tuple[str, dict[str, Any]]] = []
         mgr = _make_manager(store, events=events, default_locator=_default_locator(tmp_path))
         result = await mgr.handle_command(
@@ -418,10 +416,9 @@ class TestProjectCreate:
         assert mgr._workspace_mgr.list_records() == []  # type: ignore[attr-defined]
         assert not root.exists()
 
+
 class TestProjectGetList:
-    async def test_get_and_list(
-        self, store: ProjectStore, tmp_path: Path
-    ) -> None:
+    async def test_get_and_list(self, store: ProjectStore, tmp_path: Path) -> None:
         mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         created = await mgr.handle_command(
             "project_create",
@@ -450,9 +447,7 @@ class TestProjectAddRemoveAgent:
             {"name": "P1", "writable_workspaces": _workspace_input(tmp_path)},
         )
 
-    async def test_add_agent(
-        self, store: ProjectStore, tmp_path: Path
-    ) -> None:
+    async def test_add_agent(self, store: ProjectStore, tmp_path: Path) -> None:
         events: list[tuple[str, dict[str, Any]]] = []
         mgr = _make_manager(store, events=events, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
@@ -467,9 +462,7 @@ class TestProjectAddRemoveAgent:
                 "agent": {
                     "name": "a1",
                     "cluster_id": cluster_id,
-                    "path_grants": [
-                        {"workspace_id": workspace_id, "subpath": "."}
-                    ],
+                    "path_grants": [{"workspace_id": workspace_id, "subpath": "."}],
                 },
             },
         )
@@ -553,9 +546,7 @@ class TestProjectAddRemoveAgent:
         assert duplicate["error"] == "agent_name_exists"
         assert "already exists in project" in duplicate["error_detail"]
 
-    async def test_remove_agent(
-        self, store: ProjectStore, tmp_path: Path
-    ) -> None:
+    async def test_remove_agent(self, store: ProjectStore, tmp_path: Path) -> None:
         events: list[tuple[str, dict[str, Any]]] = []
         mgr = _make_manager(store, events=events, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
@@ -757,9 +748,7 @@ class TestProjectStatusTransitions:
             {"name": "P1", "writable_workspaces": _workspace_input(tmp_path)},
         )
 
-    async def test_pause_resume_stop(
-        self, store: ProjectStore, tmp_path: Path
-    ) -> None:
+    async def test_pause_resume_stop(self, store: ProjectStore, tmp_path: Path) -> None:
         events: list[tuple[str, dict[str, Any]]] = []
         mgr = _make_manager(store, events=events, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
@@ -779,9 +768,7 @@ class TestProjectStatusTransitions:
         assert stopped["success"]
         assert stopped["data"]["project"]["status"] == ProjectStatus.STOPPED.value
 
-    async def test_illegal_transition_rejected(
-        self, store: ProjectStore, tmp_path: Path
-    ) -> None:
+    async def test_illegal_transition_rejected(self, store: ProjectStore, tmp_path: Path) -> None:
         mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
         pid = created["data"]["project"]["project_id"]
@@ -1019,9 +1006,7 @@ class TestProjectLifecycleAndDelete:
         paths = ProjectPaths.from_locator(project["project_root_locator"])
         rooms = RoomStore(paths.room_db_path)
         await rooms.start()
-        await rooms.upsert(
-            make_room_record(project_id=project["project_id"], name="room")
-        )
+        await rooms.upsert(make_room_record(project_id=project["project_id"], name="room"))
         await rooms.stop()
 
         result = await mgr.handle_command(
@@ -1108,15 +1093,11 @@ class TestProjectLinkTask:
             {"name": "P1", "writable_workspaces": _workspace_input(tmp_path)},
         )
 
-    async def test_link_unlink_task(
-        self, store: ProjectStore, tmp_path: Path
-    ) -> None:
+    async def test_link_unlink_task(self, store: ProjectStore, tmp_path: Path) -> None:
         mgr = _make_manager(store, default_locator=_default_locator(tmp_path))
         created = await self._create(mgr, tmp_path)
         pid = created["data"]["project"]["project_id"]
-        linked = await mgr.handle_command(
-            "project_link_task", {"project_id": pid, "task_id": "t1"}
-        )
+        linked = await mgr.handle_command("project_link_task", {"project_id": pid, "task_id": "t1"})
         assert linked["success"]
         assert "t1" in linked["data"]["project"]["task_ids"]
 
@@ -1136,9 +1117,7 @@ class TestProjectLinkTask:
         )
         created = await self._create(mgr, tmp_path)
         pid = created["data"]["project"]["project_id"]
-        result = await mgr.handle_command(
-            "project_link_task", {"project_id": pid, "task_id": "t1"}
-        )
+        result = await mgr.handle_command("project_link_task", {"project_id": pid, "task_id": "t1"})
         assert not result["success"]
         assert "task not found" in (result["error"] or "")
 

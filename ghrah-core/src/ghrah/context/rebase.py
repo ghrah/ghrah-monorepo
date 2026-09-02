@@ -83,8 +83,7 @@ def create_rebased_context(
     source_messages: list[Any] = []
     if inherit_messages:
         source_messages = [
-            m for m in source_cm.message_store.current_messages
-            if not _is_system_message(m)
+            m for m in source_cm.message_store.current_messages if not _is_system_message(m)
         ]
 
     # 4. 创建新 CM（与源 CM 共享同一 persistence backend）

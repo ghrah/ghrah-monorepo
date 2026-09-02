@@ -76,6 +76,7 @@ def _tool(content: str = "result", tool_call_id: str = "tc1") -> ChatMessage:
 @dataclass
 class MockBlock:
     """满足 WindowableBlock Protocol 的 mock block。"""
+
     type: str
     _text: str = ""
     _arguments: dict[str, Any] | None = None
@@ -117,6 +118,7 @@ class MockBlock:
 @dataclass
 class MockMessage:
     """满足 WindowableMessage Protocol 的 mock 消息。"""
+
     role: str
     _content_blocks: list[MockBlock] = field(default_factory=list)
     _text: str = ""
@@ -287,6 +289,7 @@ class TestTokenEstimationWithMock:
 
     def test_estimate_plain_object_fallback(self) -> None:
         """普通对象（无 WindowableMessage）的降级估算。"""
+
         class SimpleObj:
             text = "hello world"
 

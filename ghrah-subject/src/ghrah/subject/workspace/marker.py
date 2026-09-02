@@ -59,9 +59,7 @@ def write_marker(dir_path: str, record: WorkspaceRecord) -> None:
         "created_at": record.created_at.isoformat(),
         "name": record.name,
     }
-    atomic_write_text(
-        marker_path, json.dumps(payload, ensure_ascii=False) + "\n"
-    )
+    atomic_write_text(marker_path, json.dumps(payload, ensure_ascii=False) + "\n")
 
 
 def read_marker(dir_path: str) -> MarkerData | None:

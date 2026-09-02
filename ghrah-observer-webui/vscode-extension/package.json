@@ -4,6 +4,14 @@
   "description": "AI Agent orchestration with Human-in-the-Loop",
   "version": "0.2.0-alpha.0",
   "publisher": "ghrah",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ghrah/ghrah-monorepo.git",
+    "directory": "ghrah-observer-webui/vscode-extension"
+  },
+  "homepage": "https://github.com/ghrah/ghrah-monorepo#readme",
+  "bugs": "https://github.com/ghrah/ghrah-monorepo/issues",
   "type": "module",
   "engines": {
     "vscode": "^1.95.0"
@@ -99,6 +107,7 @@
   "devDependencies": {
     "@types/node": "^25.6.0",
     "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.24.0",
     "typescript": "^5.7.0"
   }

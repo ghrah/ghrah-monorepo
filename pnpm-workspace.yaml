@@ -2,4 +2,6 @@ packages:
   - 'ghrah-observer-webui/packages/*'
   - 'ghrah-observer-webui/vscode-extension'
 allowBuilds:
-  esbuild: set this to true or false
+  '@vscode/vsce-sign': true
+  esbuild: true
+  keytar: true

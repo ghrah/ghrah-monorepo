@@ -74,10 +74,10 @@ restored = block_from_dict(data)  # TextBlock(text="Hello")
 from ghrah.chat.message import ChatMessage
 
 msg = ChatMessage(
-    role="user",                          # "system" | "user" | "ai" | "tool"
+    role="user",  # "system" | "user" | "ai" | "tool"
     content_blocks=[TextBlock(text="Hello")],
-    source="human",                       # 消息来源追踪
-    metadata={},                          # 附加元数据
+    source="human",  # 消息来源追踪
+    metadata={},  # 附加元数据
 )
 ```
 
@@ -118,13 +118,13 @@ msg = ChatMessage.ai(
     tool_calls=[ToolCallBlock(id="call_1", name="read_file", arguments={})],
 )
 
-msg.text           # "让我查看文件" — 所有 TextBlock 的文本拼接
-msg.tool_calls     # [ToolCallBlock(...)] — 所有 ToolCallBlock
-msg.has_tool_calls # True
-msg.reasoning      # "用户需要读取文件" — 第一个 ReasoningBlock 的内容
-msg.images         # [] — 所有 ImageBlock
+msg.text  # "让我查看文件" — 所有 TextBlock 的文本拼接
+msg.tool_calls  # [ToolCallBlock(...)] — 所有 ToolCallBlock
+msg.has_tool_calls  # True
+msg.reasoning  # "用户需要读取文件" — 第一个 ReasoningBlock 的内容
+msg.images  # [] — 所有 ImageBlock
 msg.is_multimodal  # False — 是否包含图片/音频/文件
-msg.tool_results   # [] — 所有 ToolResultBlock
+msg.tool_results  # [] — 所有 ToolResultBlock
 ```
 
 ### source 字段
@@ -157,9 +157,9 @@ response = LLMResponse(
     raw=None,
 )
 
-response.text           # "Hello"
-response.tool_calls     # [ToolCallBlock(...)]
-response.reasoning      # None
+response.text  # "Hello"
+response.tool_calls  # [ToolCallBlock(...)]
+response.reasoning  # None
 response.to_chat_message(source="gpt-4o")  # 转换为 ChatMessage
 ```
 
@@ -171,15 +171,15 @@ response.to_chat_message(source="gpt-4o")  # 转换为 ChatMessage
 from abc import ABC, abstractmethod
 from ghrah.chat.format import ChatFormat, LLMResponse
 
+
 class ChatFormat(ABC):
     @abstractmethod
     async def generate(
         self,
         messages: list[ChatMessage],
         tools: list[dict[str, Any]] | None = None,
-    ) -> LLMResponse:
-        ...
-    
+    ) -> LLMResponse: ...
+
     def configure_tools(self, tools: list[dict[str, Any]]) -> None:
         self._tools = tools
 ```
@@ -272,11 +272,15 @@ messages = deserialize_messages(data)
 [`response.py`](../src/ghrah/chat/response.py) 提供从 LLMResponse 提取元数据的工具函数：
 
 ```python
-from ghrah.chat.response import extract_token_usage, extract_reasoning_content, extract_response_metadata
+from ghrah.chat.response import (
+    extract_token_usage,
+    extract_reasoning_content,
+    extract_response_metadata,
+)
 
-token_usage = extract_token_usage(response)       # TokenUsage | None
-reasoning = extract_reasoning_content(response)   # str | None
-metadata = extract_response_metadata(response)    # dict
+token_usage = extract_token_usage(response)  # TokenUsage | None
+reasoning = extract_reasoning_content(response)  # str | None
+metadata = extract_response_metadata(response)  # dict
 ```
 
 ## 模块结构

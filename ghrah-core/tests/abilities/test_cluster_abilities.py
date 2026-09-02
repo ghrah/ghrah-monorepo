@@ -46,8 +46,7 @@ def _make_supervisor(
     supervisor.list_agents = AsyncMock(return_value=list_agents_return or [])
     supervisor.send = AsyncMock(return_value=send_return)
     supervisor.broadcast = AsyncMock(
-        return_value=broadcast_return
-        or [{"responder": "mock-agent", "content": "ok"}]
+        return_value=broadcast_return or [{"responder": "mock-agent", "content": "ok"}]
     )
     supervisor.spawn_agent = AsyncMock(return_value=spawn_agent_return)
     return supervisor
@@ -236,9 +235,7 @@ class TestBroadcastMessageAbility:
         assert result.data["responses"] == responses
         assert result.data["recipients"] == ["b", "c"]
         assert result.data["agent_count"] == 2
-        supervisor.broadcast.assert_awaited_once_with(
-            content="hello all", sender="agent-a"
-        )
+        supervisor.broadcast.assert_awaited_once_with(content="hello all", sender="agent-a")
 
     async def test_execute_missing_content(self) -> None:
         supervisor = _make_supervisor()

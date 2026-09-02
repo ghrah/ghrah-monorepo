@@ -109,9 +109,7 @@ class SendMessageAbility(Ability):
         sender = context.agent_name or "unknown"
 
         if fire_and_forget:
-            asyncio.create_task(
-                self._fire_and_reinject(context, sender, target, content)
-            )
+            asyncio.create_task(self._fire_and_reinject(context, sender, target, content))
             return ActionResult(
                 outcome=ActionOutcome.SUCCESS,
                 data={"target": target, "status": "message_sent", "mode": "async"},

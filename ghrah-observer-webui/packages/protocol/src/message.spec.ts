@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ClientType, SystemType } from "./enums.js";
-import { ServerMessageSchema, parseMessage, serializeMessage } from "./message.js";
+import { parseMessage, ServerMessageSchema, serializeMessage } from "./message.js";
 
 describe("ServerMessageSchema", () => {
   it("parses a minimal message with only type", () => {

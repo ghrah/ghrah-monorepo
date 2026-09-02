@@ -666,8 +666,7 @@ class ContextManager:
         if self._in_iteration and self._pending_messages:
             messages = messages + list(self._pending_messages)
             logger.debug(
-                "get_llm_messages: merged %d pending "
-                "messages into LLM context (total=%d)",
+                "get_llm_messages: merged %d pending messages into LLM context (total=%d)",
                 len(self._pending_messages),
                 len(messages),
             )
@@ -990,18 +989,13 @@ class ContextManager:
                 f"found {len(roots)}"
             )
         if not branches:
-            raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': no branches"
-            )
+            raise ValueError(f"Invalid checkpoint for agent '{agent_name}': no branches")
         missing_heads = {
-            branch: head_id
-            for branch, head_id in branches.items()
-            if head_id not in node_ids
+            branch: head_id for branch, head_id in branches.items() if head_id not in node_ids
         }
         if missing_heads:
             raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': missing branch heads "
-                f"{missing_heads}"
+                f"Invalid checkpoint for agent '{agent_name}': missing branch heads {missing_heads}"
             )
         missing_parents = {
             node.id: node.parent_id
@@ -1010,14 +1004,12 @@ class ContextManager:
         }
         if missing_parents:
             raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': missing parents "
-                f"{missing_parents}"
+                f"Invalid checkpoint for agent '{agent_name}': missing parents {missing_parents}"
             )
         foreign_nodes = [node.id for node in nodes if node.agent_name != agent_name]
         if foreign_nodes:
             raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': foreign nodes "
-                f"{foreign_nodes}"
+                f"Invalid checkpoint for agent '{agent_name}': foreign nodes {foreign_nodes}"
             )
         sessions_by_id = {session.session_id: session for session in sessions}
         if active_session_id and active_session_id not in sessions_by_id:
@@ -1032,8 +1024,7 @@ class ContextManager:
         ]
         if invalid_sessions:
             raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': invalid sessions "
-                f"{invalid_sessions}"
+                f"Invalid checkpoint for agent '{agent_name}': invalid sessions {invalid_sessions}"
             )
 
         # 重建 chain

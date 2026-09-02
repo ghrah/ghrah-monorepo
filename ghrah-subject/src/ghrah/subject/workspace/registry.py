@@ -50,9 +50,7 @@ class ProviderRegistry:
         """取 provider 实例；未注册抛 WorkspaceProviderError。"""
         provider = self._providers.get(provider_type)
         if provider is None:
-            raise WorkspaceProviderError(
-                f"Unknown workspace provider type: {provider_type!r}"
-            )
+            raise WorkspaceProviderError(f"Unknown workspace provider type: {provider_type!r}")
         return provider
 
     def has(self, provider_type: str) -> bool:

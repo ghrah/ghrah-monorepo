@@ -45,9 +45,7 @@ class PlainWorkspaceProvider(WorkspaceProvider):
             and existing_marker.provider_type == record.provider_type
             and existing_marker.subject_id == record.subject_id
         ):
-            logger.debug(
-                "Plain workspace %s already initialized (marker match)", record.locator
-            )
+            logger.debug("Plain workspace %s already initialized (marker match)", record.locator)
             return
         os.makedirs(ws_path, exist_ok=True)
         write_marker(ws_path, record)

@@ -57,9 +57,7 @@ class CommunicationTimeoutError(ActorAgentError):
         self.sender = sender
         self.recipient = recipient
         self.timeout = timeout
-        super().__init__(
-            f"Communication timeout: {sender} -> {recipient} after {timeout}s"
-        )
+        super().__init__(f"Communication timeout: {sender} -> {recipient} after {timeout}s")
 
 
 class HookError(ActorAgentError):

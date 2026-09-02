@@ -168,9 +168,7 @@ class RoomStore:
         """读出 → 校验乐观锁 → mutator → version+1 → 写回（范式同 TaskStore）。"""
         async with self._lock:
             db = self._require_db()
-            cursor = await db.execute(
-                "SELECT * FROM subject_rooms WHERE room_id = ?", (room_id,)
-            )
+            cursor = await db.execute("SELECT * FROM subject_rooms WHERE room_id = ?", (room_id,))
             row = await cursor.fetchone()
             if row is None:
                 return None
@@ -193,9 +191,7 @@ class RoomStore:
     async def get(self, room_id: str) -> RoomRecord | None:
         async with self._lock:
             db = self._require_db()
-            cursor = await db.execute(
-                "SELECT * FROM subject_rooms WHERE room_id = ?", (room_id,)
-            )
+            cursor = await db.execute("SELECT * FROM subject_rooms WHERE room_id = ?", (room_id,))
             row = await cursor.fetchone()
             return _row_to_room(row) if row is not None else None
 
@@ -223,9 +219,7 @@ class RoomStore:
             rows = await cursor.fetchall()
             return [_row_to_room(r) for r in rows]
 
-    async def delete(
-        self, room_id: str, *, expected_version: int | None = None
-    ) -> bool:
+    async def delete(self, room_id: str, *, expected_version: int | None = None) -> bool:
         """Atomically hard-delete Room metadata, membership and all log entries."""
 
         async with self._lock:
@@ -245,12 +239,8 @@ class RoomStore:
                         f"Room {room_id} modified: expected version {expected_version}, "
                         f"got {current_version}"
                     )
-                await db.execute(
-                    "DELETE FROM subject_room_logs WHERE room_id = ?", (room_id,)
-                )
-                await db.execute(
-                    "DELETE FROM subject_rooms WHERE room_id = ?", (room_id,)
-                )
+                await db.execute("DELETE FROM subject_room_logs WHERE room_id = ?", (room_id,))
+                await db.execute("DELETE FROM subject_rooms WHERE room_id = ?", (room_id,))
                 await db.commit()
                 return True
             except Exception:
@@ -282,9 +272,7 @@ class RoomStore:
         """
         async with self._lock:
             db = self._require_db()
-            cursor = await db.execute(
-                "SELECT * FROM subject_rooms WHERE room_id = ?", (room_id,)
-            )
+            cursor = await db.execute("SELECT * FROM subject_rooms WHERE room_id = ?", (room_id,))
             row = await cursor.fetchone()
             if row is None:
                 return None
@@ -310,8 +298,7 @@ class RoomStore:
             room.seq_watermark = seq
             room.updated_at = now_iso()
             await db.execute(
-                "UPDATE subject_rooms SET seq_watermark = ?, updated_at = ? "
-                "WHERE room_id = ?",
+                "UPDATE subject_rooms SET seq_watermark = ?, updated_at = ? WHERE room_id = ?",
                 (seq, room.updated_at, room_id),
             )
             return record, room
@@ -328,8 +315,7 @@ class RoomStore:
             db = self._require_db()
             if since_seq is not None:
                 cursor = await db.execute(
-                    "SELECT * FROM subject_room_logs WHERE room_id = ? AND seq > ? "
-                    "ORDER BY seq",  # noqa: S608
+                    "SELECT * FROM subject_room_logs WHERE room_id = ? AND seq > ? ORDER BY seq",  # noqa: S608
                     (room_id, since_seq),
                 )
             else:

@@ -66,8 +66,7 @@ def validate_project_path_boundaries(
             continue
         if overlap:
             raise ValueError(
-                f"Project Root overlaps a writable Workspace: "
-                f"{root_locator!r} vs {workspace!r}."
+                f"Project Root overlaps a writable Workspace: {root_locator!r} vs {workspace!r}."
             )
 
 

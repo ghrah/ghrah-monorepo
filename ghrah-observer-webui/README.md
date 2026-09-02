@@ -31,6 +31,10 @@ pnpm -r test        # 全部包（含 mock-server、observer-web）
 
 # 类型检查（递归所有包）
 pnpm type-check
+pnpm lint
+
+# 完整构建（含 Web、mock-server 与 VS Code 扩展）
+pnpm -r build
 ```
 
 ## 本目录下的 scripts

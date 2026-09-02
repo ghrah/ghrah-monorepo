@@ -210,6 +210,7 @@ class LocalAbilityExecutor(AbilityExecutor):
             self._event_publisher: EventPublisher = event_publisher
         else:
             from ghrah.core.event_publisher import NullEventPublisher
+
             self._event_publisher = NullEventPublisher()
         self._hitl_store = HITLFutureStore()
         self._hitl_timeout = hitl_timeout
@@ -366,7 +367,10 @@ class LocalAbilityExecutor(AbilityExecutor):
             raw_results = await asyncio.gather(
                 *[
                     self._execute_single_with_context(
-                        ability, args, accumulated_data, context_manager,
+                        ability,
+                        args,
+                        accumulated_data,
+                        context_manager,
                         last_action_result,
                     )
                     for ability, args, _tc_id in tool_call_tasks
@@ -562,5 +566,3 @@ class LocalAbilityExecutor(AbilityExecutor):
                 f"(no pending future): ability={ability_name}, tool_call_id={tool_call_id}"
             )
         return resolved
-
-

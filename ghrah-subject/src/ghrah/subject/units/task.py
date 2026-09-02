@@ -51,6 +51,7 @@ class TaskUnit(SubjectUnit):
 
     async def init(self, ctx: Any) -> None:
         self._ctx = ctx
+
         async def project_roots() -> dict[str, str]:
             try:
                 manager = ctx.get(PROJECT_MANAGER.name)
@@ -58,9 +59,7 @@ class TaskUnit(SubjectUnit):
                 return {}
             if manager is None:
                 return {}
-            result = await manager.handle_command(
-                "project_list", {"archived": None}
-            )
+            result = await manager.handle_command("project_list", {"archived": None})
             projects = (result.get("data") or {}).get("projects", [])
             return {
                 p["project_id"]: p["project_root_locator"]
@@ -68,9 +67,7 @@ class TaskUnit(SubjectUnit):
                 if p.get("project_root_locator")
             }
 
-        self._store = ProjectScopedTaskStore(
-            self._config.persistence.db_path, project_roots
-        )
+        self._store = ProjectScopedTaskStore(self._config.persistence.db_path, project_roots)
         self._manager = TaskManager(cast(Any, self._store), on_event=self._emit_event)
         ctx.provide(TASK_MANAGER.name, self._manager)
         ctx.provide(TASK_STORE.name, self._store)
@@ -100,9 +97,7 @@ class TaskUnit(SubjectUnit):
         except ProjectArchivedError:
             return {"success": False, "data": None, "error": "resource_archived"}
 
-    async def _guard_project_access(
-        self, payload: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _guard_project_access(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """Reject Task commands before a frozen Project Root is read or written."""
 
         ctx = self._ctx
@@ -121,9 +116,7 @@ class TaskUnit(SubjectUnit):
             project_id = task.project_id if task is not None else ""
         if not project_id:
             return None
-        result = await manager.handle_command(
-            "project_get", {"project_id": project_id}
-        )
+        result = await manager.handle_command("project_get", {"project_id": project_id})
         if not result.get("success"):
             return {
                 "success": False,
@@ -161,9 +154,7 @@ class TaskUnit(SubjectUnit):
             project_id = task.project_id if task is not None else ""
         if not project_id:
             return payload
-        result = await project_manager.handle_command(
-            "project_get", {"project_id": project_id}
-        )
+        result = await project_manager.handle_command("project_get", {"project_id": project_id})
         project = (result.get("data") or {}).get("project") or {}
         agents = project.get("agents") or []
         matches = [

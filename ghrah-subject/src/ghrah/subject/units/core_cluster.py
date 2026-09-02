@@ -20,6 +20,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ghrah.protocol.types import ProjectStatus
+
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.core_cluster.registry import (
     CoreClusterRegistry,
@@ -272,9 +273,7 @@ class CoreClusterRegistryUnit(SubjectUnit):
             raise ValueError("agent_id required")
         name = str(payload.get(name_field) or "")
         matches = [
-            agent
-            for agent in project.get("agents") or []
-            if agent.get("agent_id") == agent_id
+            agent for agent in project.get("agents") or [] if agent.get("agent_id") == agent_id
         ]
         if len(matches) != 1:
             raise ValueError(f"agent not found in project: {agent_id}")
@@ -383,13 +382,9 @@ class CoreClusterRegistryUnit(SubjectUnit):
             agents.append(item)
         return {"success": True, "data": {"agents": agents}, "error": None}
 
-    async def _broadcast(
-        self, project: dict[str, Any], payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _broadcast(self, project: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         responses: dict[str, Any] = {}
-        cluster_ids = {
-            str(agent.get("cluster_id") or "") for agent in project.get("agents") or []
-        }
+        cluster_ids = {str(agent.get("cluster_id") or "") for agent in project.get("agents") or []}
         for cluster_id in sorted(cluster_ids - {""}):
             handle = await self.service.ensure_cluster(
                 cluster_id,
@@ -403,9 +398,7 @@ class CoreClusterRegistryUnit(SubjectUnit):
             responses[cluster_id] = result
         return {"success": True, "data": {"clusters": responses}, "error": None}
 
-    async def _delegate(
-        self, project: dict[str, Any], payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _delegate(self, project: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
         from_id = str(payload.get("from_agent_id") or "")
         to_id = str(payload.get("to_agent_id") or "")
         agents = project.get("agents") or []

@@ -134,7 +134,7 @@ def _spawn_payload_with_id(name: str, agent_id: str) -> dict[str, Any]:
             "name": name,
             "agent_id": agent_id,
             "system_prompt": "You are a test agent.",
-        }
+        },
     }
 
 
@@ -461,9 +461,7 @@ class TestReceiptShape:
 
     async def test_handle_before_init(self, ctx: FakeCtx) -> None:
         unit = create_core_unit(CoreUnitConfig(project_id="default"))
-        result = await unit.handle_command(
-            "list_agents", {"project_id": "default"}, None
-        )
+        result = await unit.handle_command("list_agents", {"project_id": "default"}, None)
         assert result["success"] is False
         assert "not initialized" in result["error"]
 
@@ -913,9 +911,7 @@ async def test_multi_agent_core_restart_restores_independent_snapshots(
         assert cm.get_current_state() == {"waiting_at": name}
 
     listed = await restarted.handle_command("list_agents", {"project_id": "default"}, None)
-    assert {item["agent_id"] for item in listed["data"]["agents"]} == set(
-        identities.values()
-    )
+    assert {item["agent_id"] for item in listed["data"]["agents"]} == set(identities.values())
     await restarted.stop()
 
 

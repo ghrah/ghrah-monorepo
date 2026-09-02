@@ -22,7 +22,9 @@ config = AgentConfig(name="my-agent", system_prompt="你是一个助手")
 agent = ActorAgent(config)
 
 # 分布式模式（通过 ContextConfig.persistence_type="remote" 启用）
-config = AgentConfig(name="my-agent", system_prompt="你是一个助手", context=ContextConfig(persistence_type="remote"))
+config = AgentConfig(
+    name="my-agent", system_prompt="你是一个助手", context=ContextConfig(persistence_type="remote")
+)
 agent = ActorAgent(config)
 ```
 
@@ -119,9 +121,9 @@ from ghrah.core.message import Message, MessageType
 
 # 创建消息
 msg = Message(
-    sender="user",           # 发送者
-    recipient="assistant",   # 接收者（"*" 表示广播）
-    content="你好",          # 消息内容
+    sender="user",  # 发送者
+    recipient="assistant",  # 接收者（"*" 表示广播）
+    content="你好",  # 消息内容
     type=MessageType.CHAT,  # 消息类型
 )
 

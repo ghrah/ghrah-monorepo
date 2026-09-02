@@ -23,8 +23,6 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
-from pydantic import ValidationError
-
 from ghrah.protocol.types import (
     AbilityDefinitionPayload,
     AgentConfigPayload,
@@ -42,6 +40,8 @@ from ghrah.protocol.types import (
     RecoveryAction,
     SpawnAgentPayload,
 )
+from pydantic import ValidationError
+
 from ghrah.subject.errors import StableError
 from ghrah.subject.project.isolation import (
     validate_path_grants_non_overlapping,
@@ -108,6 +108,7 @@ def _strip_envelope(payload: dict[str, Any]) -> dict[str, Any]:
     if _ENVELOPE_KEYS.isdisjoint(payload):
         return payload
     return {k: v for k, v in payload.items() if k not in _ENVELOPE_KEYS}
+
 
 __all__ = ["ProjectManager"]
 
@@ -209,9 +210,7 @@ class ProjectManager:
             return
         await self._on_event(event_type, {"project": record.to_wire()})
 
-    async def _emit_agent(
-        self, event_type: str, record: ProjectRecord, agent: AgentSpec
-    ) -> None:
+    async def _emit_agent(self, event_type: str, record: ProjectRecord, agent: AgentSpec) -> None:
         if self._on_event is None:
             return
         await self._on_event(
@@ -311,9 +310,7 @@ class ProjectManager:
             # cascade guard must still inspect the authoritative Root DB.
             from ghrah.subject.room.store import RoomStore
 
-            store = RoomStore(
-                ProjectPaths.from_locator(record.project_root_locator).room_db_path
-            )
+            store = RoomStore(ProjectPaths.from_locator(record.project_root_locator).room_db_path)
             await store.start()
             try:
                 return len(await store.list(project_id=record.project_id))
@@ -379,9 +376,7 @@ class ProjectManager:
         )
         root_locator = self._root_locator_for(record.project_id, p.project_root_locator)
         project_paths = ProjectPaths.from_locator(root_locator)
-        record = record.model_copy(
-            update={"project_root_locator": root_locator}
-        )
+        record = record.model_copy(update={"project_root_locator": root_locator})
         cluster_id = uuid4().hex
         await self._check_create_paths(
             root_locator, [str(w["locator"]) for w in normalized_workspaces]
@@ -453,9 +448,7 @@ class ProjectManager:
             logger.exception("project_created event delivery failed for %s", record.project_id)
         return _ok({"project": record.to_wire()})
 
-    async def _check_create_paths(
-        self, root_locator: str, workspace_locators: list[str]
-    ) -> None:
+    async def _check_create_paths(self, root_locator: str, workspace_locators: list[str]) -> None:
         records = await self._store.list(archived=None)
         existing_roots = [r.project_root_locator for r in records if r.project_root_locator]
         existing_workspaces: list[str] = []
@@ -573,9 +566,7 @@ class ProjectManager:
                 await self._restore_project_resources(existing.project_id)
                 return _err_code("project_resource_close_failed", str(close_error))
             try:
-                updated = await self._store.archive(
-                    existing.project_id, p.expected_version
-                )
+                updated = await self._store.archive(existing.project_id, p.expected_version)
             except Exception:
                 await self._restore_project_resources(existing.project_id)
                 raise
@@ -599,9 +590,9 @@ class ProjectManager:
             if conflict is not None:
                 return conflict
             try:
-                ProjectPaths.from_locator(
-                    existing.project_root_locator
-                ).validate_owner(existing.project_id)
+                ProjectPaths.from_locator(existing.project_root_locator).validate_owner(
+                    existing.project_id
+                )
             except (OSError, ValueError) as exc:
                 return _err(str(exc))
             updated = await self._store.restore(existing.project_id, p.expected_version)
@@ -657,9 +648,7 @@ class ProjectManager:
                 if existing.archived_at is None:
                     await self._restore_project_resources(existing.project_id)
                 return _err_code("project_root_purge_failed", str(exc))
-            deleted = await self._store.hard_delete(
-                existing.project_id, p.expected_version
-            )
+            deleted = await self._store.hard_delete(existing.project_id, p.expected_version)
             if not deleted:
                 return _err(f"project not found: {existing.project_id}")
             await self._evict_project_resources(existing.project_id)
@@ -718,8 +707,7 @@ class ProjectManager:
             identity_report = await migrate_project_agent_ids(updated)
             if identity_report.migrated_rows:
                 logger.info(
-                    "add_agent: migrated legacy checkpoint project=%s agent=%s "
-                    "rows=%s backup=%s",
+                    "add_agent: migrated legacy checkpoint project=%s agent=%s rows=%s backup=%s",
                     updated.project_id,
                     agent.name,
                     identity_report.migrated_rows,
@@ -822,10 +810,7 @@ class ProjectManager:
                 system_prompt=agent.system_prompt or "",
             ),
             abilities=(
-                [
-                    AbilityDefinitionPayload(ability_type=name, params={})
-                    for name in agent.abilities
-                ]
+                [AbilityDefinitionPayload(ability_type=name, params={}) for name in agent.abilities]
                 if agent.abilities
                 else None
             ),
@@ -865,14 +850,9 @@ class ProjectManager:
             def is_target(candidate: AgentSpec) -> bool:
                 if target.agent_id:
                     return candidate.agent_id == target.agent_id
-                return (
-                    candidate.name == target.name
-                    and candidate.cluster_id == target.cluster_id
-                )
+                return candidate.name == target.name and candidate.cluster_id == target.cluster_id
 
-            return r.model_copy(
-                update={"agents": [a for a in r.agents if not is_target(a)]}
-            )
+            return r.model_copy(update={"agents": [a for a in r.agents if not is_target(a)]})
 
         # 先 terminate runtime、成功后再删定义：terminate 失败保留定义并返回
         # 稳定错误码——宁可不删，不留"定义已删、runtime 仍在运行"的游离
@@ -1044,9 +1024,7 @@ class ProjectManager:
         record = make_project_record(name="default")
         root_locator = self._root_locator_for(record.project_id)
         project_paths = ProjectPaths.from_locator(root_locator)
-        record = record.model_copy(
-            update={"project_root_locator": root_locator}
-        )
+        record = record.model_copy(update={"project_root_locator": root_locator})
         cluster_id = "default"
         await self._check_create_paths(root_locator, [locator])
         receipt = None
@@ -1064,9 +1042,7 @@ class ProjectManager:
                 role="default",
                 default_for_agents=True,
             )
-            record = record.model_copy(
-                update={"cluster_ids": [cluster_id], "workspaces": [mount]}
-            )
+            record = record.model_copy(update={"cluster_ids": [cluster_id], "workspaces": [mount]})
             await self._store.upsert(record)
             stored = True
             cluster_attempted = True
@@ -1126,9 +1102,7 @@ class ProjectManager:
             spec = AgentSpec(
                 name=name,
                 cluster_id=cluster_id,
-                agent_id=(
-                    str(info.get("agent_id")) if info.get("agent_id") else uuid4().hex
-                ),
+                agent_id=(str(info.get("agent_id")) if info.get("agent_id") else uuid4().hex),
                 manifest_ref="",
                 instance_manifest_path="",
             )

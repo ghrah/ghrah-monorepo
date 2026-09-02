@@ -63,9 +63,9 @@ class HookStore:
     def __init__(self) -> None:
         self._entries: list[_HookEntry] = []
         self._global_by_point: dict[HookPoint, list[_HookEntry]] = defaultdict(list)
-        self._by_point_and_ability: dict[
-            tuple[HookPoint, str], list[_HookEntry]
-        ] = defaultdict(list)
+        self._by_point_and_ability: dict[tuple[HookPoint, str], list[_HookEntry]] = defaultdict(
+            list
+        )
         self._legacy_by_point: dict[HookPoint, list[_HookEntry]] = defaultdict(list)
 
     def view(self, owner: str = AGENT_OWNER) -> HookListView:

@@ -57,15 +57,16 @@ graph TD
 from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 from ghrah.abilities.context import AbilityExecutionContext
 
+
 class MyHook(Hook):
     """Custom Hook example"""
-    
+
     hook_point = HookPoint.BEFORE_ACTION  # Specify trigger point
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         """Determine whether to trigger, execute when True"""
         return context.current_ability_name == "my_ability"
-    
+
     async def execute(
         self, context: AbilityExecutionContext, result: ActionResult | None
     ) -> HookResult:
@@ -112,11 +113,12 @@ Built-in Hook of [`ConversationAbility`](../src/ghrah/abilities/builtin/conversa
 ```python
 class ConversationDoneHook(Hook):
     """Terminate loop after ConversationAbility execution"""
+
     hook_point = HookPoint.AFTER_ACTION
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         return context.current_ability_name == "conversation"
-    
+
     async def execute(self, context, result) -> HookResult:
         return HookResult.stop()  # Pure conversation only needs one LLM call
 ```
@@ -128,16 +130,17 @@ class ConversationDoneHook(Hook):
 ```python
 class AccessApprovalHook(Hook):
     """Access operation human approval Hook"""
+
     hook_point = HookPoint.PRE_EXECUTE
-    
+
     WRITE_ABILITIES = {"write_file", "edit_file", "move_file", "delete_file"}
     READ_ABILITIES = {"read_file", "list_directory"}
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         # Trigger for read and write Abilities
         name = context.current_ability_name
         return name in self.WRITE_ABILITIES or name in self.READ_ABILITIES
-    
+
     async def execute(self, context, result) -> HookResult:
         # Request human approval
         tool_args = context.tool_args or context.accumulated_data.get("tool_args", {})
@@ -173,17 +176,19 @@ class FSPermissionChecker:
 from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 from ghrah.abilities.context import AbilityExecutionContext
 
+
 class RateLimitHook(Hook):
     """Limit Ability call count"""
+
     hook_point = HookPoint.BEFORE_ACTION
-    
+
     def __init__(self, max_calls: int = 10):
         self._max_calls = max_calls
         self._call_count = 0
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         return True  # Always trigger
-    
+
     async def execute(self, context, result) -> HookResult:
         self._call_count += 1
         if self._call_count >= self._max_calls:
@@ -196,13 +201,15 @@ class RateLimitHook(Hook):
 ```python
 import logging
 
+
 class LoggingHook(Hook):
     """Log each action execution"""
+
     hook_point = HookPoint.AFTER_ACTION
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         return True
-    
+
     async def execute(self, context, result) -> HookResult:
         logging.info(
             f"Ability {context.current_ability_name} executed: "
@@ -216,15 +223,16 @@ class LoggingHook(Hook):
 ```python
 class DelegateToExpertHook(Hook):
     """Route to expert Agent based on content"""
+
     hook_point = HookPoint.BEFORE_ACTION
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         messages = context.context_manager.message_store.get_recent_messages(1)
         if messages:
             content = messages[0].content.lower()
             return "code" in content or "programming" in content
         return False
-    
+
     async def execute(self, context, result) -> HookResult:
         return HookResult.route_to("coder")
 ```

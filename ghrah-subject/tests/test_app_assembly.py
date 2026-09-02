@@ -101,9 +101,7 @@ class TestAssembleSubject:
 
             # 聚合裁决 D-C：spawn 的 agent 链落 Core sqlite（core_db_path），
             # 与 ledger 读侧投影同源（persistence_factory 注入验证）
-            project_result = await ctx.get("project_manager").handle_command(
-                "project_list", {}
-            )
+            project_result = await ctx.get("project_manager").handle_command("project_list", {})
             project = project_result["data"]["projects"][0]
             spawn = await bridge_command(
                 ctx,
@@ -121,9 +119,7 @@ class TestAssembleSubject:
             action_chain_db_path = ProjectPaths.from_locator(
                 project["project_root_locator"]
             ).action_chain_db_path
-            assert str(actor._context_manager.persistence.db_path) == str(
-                action_chain_db_path
-            )
+            assert str(actor._context_manager.persistence.db_path) == str(action_chain_db_path)
 
             # ledger 读侧直连连通（同文件 WAL 双连接）。P2a 新契约：spawn 即
             # connect + 首次 persist——根节点（system prompt 快照）与 agents

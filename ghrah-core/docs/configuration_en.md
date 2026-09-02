@@ -10,14 +10,14 @@ ghrah configuration is divided into two layers: framework configuration (`AgentC
 from ghrah.core.config import AgentConfig
 
 config = AgentConfig(
-    name="my-agent",              # Agent runtime name (required, for routing and persistence paths)
+    name="my-agent",  # Agent runtime name (required, for routing and persistence paths)
     agent_config_name="assistant",  # agentconf configuration name (optional, falls back to name)
     description="General assistant",  # Agent description (for discovery and routing)
     system_prompt="You are an assistant",  # System prompt
-    max_iterations=10,            # Maximum reasoning iterations
+    max_iterations=10,  # Maximum reasoning iterations
     resources={"CPU": 2, "GPU": 1},  # Resource requirements
-    window=WindowConfig(...),     # Window management configuration
-    context=ContextConfig(...),   # Context management configuration
+    window=WindowConfig(...),  # Window management configuration
+    context=ContextConfig(...),  # Context management configuration
 )
 ```
 
@@ -51,8 +51,8 @@ When multiple runtime Agents share the same LLM configuration (e.g., Worker pool
 # Worker pool: multiple workers share the same agentconf configuration
 for i in range(num_workers):
     config = AgentConfig(
-        name=f"solve_worker_{i}",        # Runtime unique identifier
-        agent_config_name="solve_worker",   # Template name in agentconf
+        name=f"solve_worker_{i}",  # Runtime unique identifier
+        agent_config_name="solve_worker",  # Template name in agentconf
         system_prompt=f"You are solve Worker #{i}",
     )
     # Agent initialization uses "solve_worker" to look up agentconf configuration
@@ -76,10 +76,10 @@ config = AgentConfig(
 from ghrah.core.config import WindowConfig
 
 window_config = WindowConfig(
-    max_tokens=4096,                                    # Token budget
-    strategies=["tool_call_fold", "truncation"],        # Strategy list
-    tool_call_max_length=500,                            # ToolCall fold max length
-    sliding_window_size=20,                              # Sliding window size
+    max_tokens=4096,  # Token budget
+    strategies=["tool_call_fold", "truncation"],  # Strategy list
+    tool_call_max_length=500,  # ToolCall fold max length
+    sliding_window_size=20,  # Sliding window size
 )
 ```
 
@@ -109,12 +109,12 @@ window_config = WindowConfig(
 from ghrah.core.config import ContextConfig
 
 context_config = ContextConfig(
-    snapshot_interval=5,                # Snapshot interval
-    auto_persist=False,                  # Auto-persist
-    persistence_type="json_file",       # Persistence backend type
-    persistence_root_dir="/tmp/data",    # Storage root directory
-    persistence_compress=True,           # gzip compression
-    persistence_run_id="my_session", # Session ID
+    snapshot_interval=5,  # Snapshot interval
+    auto_persist=False,  # Auto-persist
+    persistence_type="json_file",  # Persistence backend type
+    persistence_root_dir="/tmp/data",  # Storage root directory
+    persistence_compress=True,  # gzip compression
+    persistence_run_id="my_session",  # Session ID
 )
 ```
 
@@ -252,7 +252,6 @@ config = AgentConfig(
     system_prompt="You are a code writing expert. Write high-quality code based on requirements.",
     max_iterations=15,
     resources={"CPU": 2},
-    
     # Window management
     window=WindowConfig(
         max_tokens=8192,
@@ -260,7 +259,6 @@ config = AgentConfig(
         tool_call_max_length=500,
         sliding_window_size=30,
     ),
-    
     # Context management
     context=ContextConfig(
         snapshot_interval=10,
@@ -318,8 +316,8 @@ from ghrah.core.config import AgentConfig
 # Only need to create one "solve_worker" configuration in agentconf
 worker_configs = [
     AgentConfig(
-        name=f"solve_worker_{i}",        # Runtime unique identifier
-        agent_config_name="solve_worker",   # Template name in agentconf
+        name=f"solve_worker_{i}",  # Runtime unique identifier
+        agent_config_name="solve_worker",  # Template name in agentconf
         description=f"Solve Worker #{i}",
         system_prompt=f"You are solve Worker #{i}.",
     )
@@ -328,8 +326,8 @@ worker_configs = [
 
 # Role alias: different runtime name, shared LLM configuration
 reviewer_config = AgentConfig(
-    name="code_reviewer_v2",     # New version runtime identifier
-    agent_config_name="reviewer",   # Reuse reviewer's LLM configuration
+    name="code_reviewer_v2",  # New version runtime identifier
+    agent_config_name="reviewer",  # Reuse reviewer's LLM configuration
     description="Code review expert v2",
     system_prompt="You are a code review expert.",
 )

@@ -55,7 +55,7 @@ def create_workspace() -> Path:
     persistence_dir = temp_root / "agentactionchain"
     workspace.mkdir(parents=True, exist_ok=True)
     persistence_dir.mkdir(parents=True, exist_ok=True)
-    for p in ["coder","planner","reviewer"]:
+    for p in ["coder", "planner", "reviewer"]:
         agent_workspace = workspace / p
         agent_workspace.mkdir(parents=True, exist_ok=True)
 
@@ -143,7 +143,7 @@ async def main() -> None:
 
     coder_prompt = (
         f"请根据以下设计文档编写 Python 代码。\n\n"
-        f"设计文档内容位于:{workspace / 'planner' } 下\n"
+        f"设计文档内容位于:{workspace / 'planner'} 下\n"
         f"首先阅读设计文档，然后开始实现 \n"
         f"要求：\n"
         f"1. 将每个模块写入独立文件，放在 {workspace / 'coder'}/ 目录下\n"

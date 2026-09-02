@@ -65,9 +65,7 @@ class WorkspaceRecord(BaseModel):
     def _ser_dt(self, value: datetime | None) -> str | None:
         return value.isoformat() if value is not None else None
 
-    @field_validator(
-        "created_at", "updated_at", "deleted_at", mode="before"
-    )
+    @field_validator("created_at", "updated_at", "deleted_at", mode="before")
     @classmethod
     def _coerce_dt(cls, value: Any) -> Any:
         if value is None or isinstance(value, datetime):

@@ -50,12 +50,25 @@ class SandboxExecutorConfig:
 
     default_timeout: float = 300.0
     max_output_bytes: int = 1_000_000
-    blocked_commands: set[str] = field(default_factory=lambda: {
-        "rm", "rmdir", "mkfs", "dd", "format",
-        "shutdown", "reboot", "kill", "killall",
-        # Windows 危险命令
-        "taskkill", "del", "rd", "reg", "regedit",
-    })
+    blocked_commands: set[str] = field(
+        default_factory=lambda: {
+            "rm",
+            "rmdir",
+            "mkfs",
+            "dd",
+            "format",
+            "shutdown",
+            "reboot",
+            "kill",
+            "killall",
+            # Windows 危险命令
+            "taskkill",
+            "del",
+            "rd",
+            "reg",
+            "regedit",
+        }
+    )
     env_overrides: dict[str, str] = field(default_factory=dict)
 
 
@@ -134,8 +147,11 @@ class SandboxExecutor:
         allowed, reason = self.check_command(command)
         if not allowed:
             return CommandResult(
-                exit_code=-1, stdout="", stderr=reason,
-                command=command, cwd=cwd or "",
+                exit_code=-1,
+                stdout="",
+                stderr=reason,
+                command=command,
+                cwd=cwd or "",
             )
 
         resolved_cwd = self._resolve_cwd(cwd)
@@ -166,17 +182,16 @@ class SandboxExecutor:
             )
 
             if stdout_truncated:
-                stderr_text += (
-                    f"\n[stdout truncated at {self._config.max_output_bytes} bytes]"
-                )
+                stderr_text += f"\n[stdout truncated at {self._config.max_output_bytes} bytes]"
             if stderr_truncated:
-                stderr_text += (
-                    f"\n[stderr truncated at {self._config.max_output_bytes} bytes]"
-                )
+                stderr_text += f"\n[stderr truncated at {self._config.max_output_bytes} bytes]"
 
             return CommandResult(
-                exit_code=exit_code, stdout=stdout, stderr=stderr_text,
-                command=command, cwd=cwd or "",
+                exit_code=exit_code,
+                stdout=stdout,
+                stderr=stderr_text,
+                command=command,
+                cwd=cwd or "",
             )
 
         except TimeoutError:
@@ -184,13 +199,20 @@ class SandboxExecutor:
                 process.kill()
                 await process.wait()
             return CommandResult(
-                exit_code=-1, stdout="", stderr=f"Command timed out after {effective_timeout}s",
-                timed_out=True, command=command, cwd=cwd or "",
+                exit_code=-1,
+                stdout="",
+                stderr=f"Command timed out after {effective_timeout}s",
+                timed_out=True,
+                command=command,
+                cwd=cwd or "",
             )
         except Exception as e:
             return CommandResult(
-                exit_code=-1, stdout="", stderr=str(e),
-                command=command, cwd=cwd or "",
+                exit_code=-1,
+                stdout="",
+                stderr=str(e),
+                command=command,
+                cwd=cwd or "",
             )
 
     def check_command(self, command: list[str]) -> tuple[bool, str]:

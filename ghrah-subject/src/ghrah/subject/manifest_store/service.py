@@ -14,6 +14,7 @@ from ghrah.manifest.resolver import ManifestResolver
 from ghrah.protocol.types import (  # type: ignore[import-untyped]
     MANIFEST_COMMANDS as _MANIFEST_COMMANDS,
 )
+
 from ghrah.subject.manifest_store.store import ManifestStore
 
 logger = logging.getLogger(__name__)
@@ -67,17 +68,19 @@ def handle_manifest_command(
             for name in names:
                 try:
                     m = store.get_ability(name)
-                    abilities.append({
-                        "full_name": m.full_name,
-                        "namespace": m.metadata.namespace,
-                        "name": m.metadata.name,
-                        "title": m.metadata.title,
-                        "description": m.description,
-                        "tags": m.metadata.tags,
-                        "permissions": m.permissions.model_dump(mode="python"),
-                        "implementation_type": m.implementation.type,
-                        "has_hitl": m.permissions.require_hitl,
-                    })
+                    abilities.append(
+                        {
+                            "full_name": m.full_name,
+                            "namespace": m.metadata.namespace,
+                            "name": m.metadata.name,
+                            "title": m.metadata.title,
+                            "description": m.description,
+                            "tags": m.metadata.tags,
+                            "permissions": m.permissions.model_dump(mode="python"),
+                            "implementation_type": m.implementation.type,
+                            "has_hitl": m.permissions.require_hitl,
+                        }
+                    )
                 except Exception:
                     abilities.append({"full_name": name})
             return {"success": True, "data": {"abilities": abilities}}
@@ -122,19 +125,21 @@ def handle_manifest_command(
             for name in names:
                 try:
                     m = store.get_agent(name)
-                    agents.append({
-                        "full_name": m.full_name,
-                        "namespace": m.metadata.namespace,
-                        "name": m.metadata.name,
-                        "title": m.metadata.title,
-                        "description": m.description,
-                        "tags": m.metadata.tags,
-                        "agent_config_name": m.model.agent_config_name,
-                        "system_prompt": m.system_prompt,
-                        "ability_refs": [ar.ref or ar.type or "" for ar in m.abilities],
-                        "max_iterations": m.max_iterations,
-                        "communication_timeout": m.communication_timeout,
-                    })
+                    agents.append(
+                        {
+                            "full_name": m.full_name,
+                            "namespace": m.metadata.namespace,
+                            "name": m.metadata.name,
+                            "title": m.metadata.title,
+                            "description": m.description,
+                            "tags": m.metadata.tags,
+                            "agent_config_name": m.model.agent_config_name,
+                            "system_prompt": m.system_prompt,
+                            "ability_refs": [ar.ref or ar.type or "" for ar in m.abilities],
+                            "max_iterations": m.max_iterations,
+                            "communication_timeout": m.communication_timeout,
+                        }
+                    )
                 except Exception:
                     agents.append({"full_name": name})
             return {"success": True, "data": {"agents": agents}}

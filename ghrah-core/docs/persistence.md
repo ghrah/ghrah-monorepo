@@ -11,27 +11,28 @@ ghrah 提供了灵活的持久化后端和窗口管理策略，用于保存 Agen
 ```python
 from ghrah.context.persistence import PersistenceBackend
 
+
 class MyBackend(PersistenceBackend):
     async def save_node(self, node: ContextNode) -> None:
         """保存单个节点"""
         ...
-    
+
     async def load_node(self, node_id: str) -> ContextNode | None:
         """加载单个节点"""
         ...
-    
+
     async def save_chain_meta(self, agent_name: str, meta: dict) -> None:
         """保存链元信息"""
         ...
-    
+
     async def load_chain_meta(self, agent_name: str) -> dict | None:
         """加载链元信息"""
         ...
-    
+
     async def save_messages(self, agent_name: str, messages: list) -> None:
         """保存消息列表"""
         ...
-    
+
     async def load_messages(self, agent_name: str) -> list:
         """加载消息列表"""
         ...
@@ -57,8 +58,8 @@ backend = InMemoryBackend()
 from ghrah.context.persistence import JsonFileBackend
 
 backend = JsonFileBackend(
-    root_dir="/tmp/agent_data",    # 存储根目录
-    compress=True,                  # 启用 gzip 压缩
+    root_dir="/tmp/agent_data",  # 存储根目录
+    compress=True,  # 启用 gzip 压缩
     session_id="session_20260422",  # 会话 ID（可选，自动生成）
 )
 ```
@@ -86,7 +87,7 @@ from ghrah.context.persistence.sqlite_backend import SqliteBackend
 
 backend = SqliteBackend(
     db_path="/tmp/agent_data/ghrah.db",  # 数据库文件路径
-    session_id="session_20260428",        # 会话 ID（可选，自动生成）
+    session_id="session_20260428",  # 会话 ID（可选，自动生成）
 )
 ```
 
@@ -149,15 +150,13 @@ config = AgentConfig(
     context=ContextConfig(
         # 持久化后端类型
         persistence_type="json_file",  # "json_file" | "memory" | "sqlite" | "remote" | None
-        
         # JSON 文件后端配置
         persistence_root_dir="/tmp/agent_data",  # 存储根目录
-        persistence_compress=True,                 # gzip 压缩
-        persistence_run_id="my_session",       # 会话 ID
-        
+        persistence_compress=True,  # gzip 压缩
+        persistence_run_id="my_session",  # 会话 ID
         # 快照和自动持久化
-        snapshot_interval=5,    # 每 5 次迭代存储一次快照
-        auto_persist=False,    # 是否在每次 commit/rollback 后自动持久化
+        snapshot_interval=5,  # 每 5 次迭代存储一次快照
+        auto_persist=False,  # 是否在每次 commit/rollback 后自动持久化
     ),
 )
 ```
@@ -215,10 +214,10 @@ from ghrah.core.config import AgentConfig, WindowConfig
 config = AgentConfig(
     name="my-agent",
     window=WindowConfig(
-        max_tokens=4096,                                       # token 预算
-        strategies=["tool_call_fold", "truncation"],           # 策略列表
-        tool_call_max_length=500,                               # ToolCall 折叠最大长度
-        sliding_window_size=20,                                 # 滑动窗口大小
+        max_tokens=4096,  # token 预算
+        strategies=["tool_call_fold", "truncation"],  # 策略列表
+        tool_call_max_length=500,  # ToolCall 折叠最大长度
+        sliding_window_size=20,  # 滑动窗口大小
     ),
 )
 ```
@@ -312,14 +311,15 @@ msg_tokens = estimate_message_tokens(message)
 from ghrah.context.window import WindowStrategy
 from ghrah.chat.message import ChatMessage
 
+
 class MyStrategy(WindowStrategy):
     """自定义窗口策略"""
-    
+
     def apply(self, messages: list[ChatMessage], max_tokens: int) -> list[ChatMessage]:
         # 实现压缩逻辑
         # 返回压缩后的消息列表，总 token 数不超过 max_tokens
         return compressed_messages
-    
+
     @property
     def name(self) -> str:
         return "my_strategy"
@@ -346,7 +346,6 @@ config = AgentConfig(
     description="代码编写助手",
     system_prompt="你是一个代码编写专家。",
     max_iterations=15,
-    
     # 窗口管理配置
     window=WindowConfig(
         max_tokens=8192,
@@ -354,7 +353,6 @@ config = AgentConfig(
         tool_call_max_length=500,
         sliding_window_size=30,
     ),
-    
     # 上下文管理配置
     context=ContextConfig(
         persistence_type="json_file",

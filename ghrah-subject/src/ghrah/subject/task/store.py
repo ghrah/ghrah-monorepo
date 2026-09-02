@@ -103,9 +103,7 @@ async def _ensure_compat_columns(db: aiosqlite.Connection) -> None:
     cursor = await db.execute("PRAGMA table_info(subject_tasks)")
     columns = {row[1] for row in await cursor.fetchall()}
     if "project_id" not in columns:
-        await db.execute(
-            "ALTER TABLE subject_tasks ADD COLUMN project_id TEXT NOT NULL DEFAULT ''"
-        )
+        await db.execute("ALTER TABLE subject_tasks ADD COLUMN project_id TEXT NOT NULL DEFAULT ''")
     if "agent_id" not in columns:
         await db.execute("ALTER TABLE subject_tasks ADD COLUMN agent_id TEXT")
     await db.execute(
@@ -231,9 +229,7 @@ class TaskStore:
 
     # ─── 读取 ───
 
-    async def get(
-        self, task_id: str, *, include_deleted: bool = False
-    ) -> TaskRecord | None:
+    async def get(self, task_id: str, *, include_deleted: bool = False) -> TaskRecord | None:
         """按 task_id 取记录；默认排除软删。"""
         async with self._lock:
             db = self._require_db()
@@ -345,8 +341,7 @@ class TaskStore:
         async with self._lock:
             db = self._require_db()
             cursor = await db.execute(
-                "SELECT COUNT(*) FROM subject_tasks "
-                "WHERE parent_id = ? AND deleted_at IS NULL",
+                "SELECT COUNT(*) FROM subject_tasks WHERE parent_id = ? AND deleted_at IS NULL",
                 (parent_id,),
             )
             row = await cursor.fetchone()

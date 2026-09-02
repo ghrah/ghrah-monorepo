@@ -112,9 +112,7 @@ class TestStoreRoundtrip:
         assert got.name == "new"
 
     async def test_list_filters_by_provider_type(self, store: WorkspaceStore) -> None:
-        await store.upsert(
-            _record(workspace_id="g1", locator=path_to_locator("/abs/g1"))
-        )
+        await store.upsert(_record(workspace_id="g1", locator=path_to_locator("/abs/g1")))
         await store.upsert(
             _record(
                 workspace_id="p1",
@@ -340,9 +338,7 @@ class TestAdoptProviderTypeMismatch:
             git_provider = GitWorkspaceProvider(sandbox)
             plain_provider = PlainWorkspaceProvider()
             d = str(tmp_path / "root" / "gitdir")
-            git_rec = _record(
-                workspace_id="g1", provider_type="git", locator=path_to_locator(d)
-            )
+            git_rec = _record(workspace_id="g1", provider_type="git", locator=path_to_locator(d))
             await git_provider.init(git_rec)
             assert await plain_provider.adopt(path_to_locator(d)) is None
             result = await git_provider.adopt(path_to_locator(d))

@@ -51,24 +51,18 @@ def _data(result: dict) -> dict:
 
 
 async def _make_room(m: RoomManager, name: str = "architecture") -> dict:
-    result = await m.handle_command(
-        "room_create", {"project_id": "proj-1", "name": name}
-    )
+    result = await m.handle_command("room_create", {"project_id": "proj-1", "name": name})
     return _data(result)["room"]
 
 
 async def test_create_validates_project_and_name(tmp_path: Path) -> None:
     m = await _manager(tmp_path)
     try:
-        bad_project = await m.handle_command(
-            "room_create", {"project_id": "nope", "name": "n"}
-        )
+        bad_project = await m.handle_command("room_create", {"project_id": "nope", "name": "n"})
         assert not bad_project["success"]
         assert "project not found" in bad_project["error"]
 
-        blank = await m.handle_command(
-            "room_create", {"project_id": "proj-1", "name": "  "}
-        )
+        blank = await m.handle_command("room_create", {"project_id": "proj-1", "name": "  "})
         assert not blank["success"]
 
         missing = await m.handle_command("room_create", {"name": "n"})
@@ -89,9 +83,7 @@ async def test_create_list_get_event_flow(tmp_path: Path) -> None:
         assert events[0][1]["room"]["room_id"] == room["room_id"]
 
         other = await _make_room(m, "frontend")
-        listed = _data(
-            await m.handle_command("room_list", {"project_id": "proj-1"})
-        )
+        listed = _data(await m.handle_command("room_list", {"project_id": "proj-1"}))
         assert listed["count"] == 2
         assert {r["name"] for r in listed["rooms"]} == {"architecture", "frontend"}
 
@@ -196,13 +188,9 @@ async def test_archive_restore_guards_and_preserves_room_aggregate(tmp_path: Pat
             ),
         ]
         for command, extra in guarded_commands:
-            result = await m.handle_command(
-                command, {"room_id": room["room_id"], **extra}
-            )
+            result = await m.handle_command(command, {"room_id": room["room_id"], **extra})
             assert result["error"] == "resource_archived", command
-        direct = await m.append_log(
-            room["room_id"], author="architect", author_type="agent"
-        )
+        direct = await m.append_log(room["room_id"], author="architect", author_type="agent")
         assert direct["error"] == "resource_archived"
         recipients = await m.resolve_recipients([room["room_id"]])
         assert recipients["error"] == "resource_archived"
@@ -211,9 +199,7 @@ async def test_archive_restore_guards_and_preserves_room_aggregate(tmp_path: Pat
         got = _data(await m.handle_command("room_get", {"room_id": room["room_id"]}))
         assert got["room"] == archived
         listed = _data(
-            await m.handle_command(
-                "room_list", {"project_id": "proj-1", "status": "archived"}
-            )
+            await m.handle_command("room_list", {"project_id": "proj-1", "status": "archived"})
         )
         assert [item["room_id"] for item in listed["rooms"]] == [room["room_id"]]
 
@@ -302,9 +288,7 @@ async def test_parent_project_archive_blocks_all_room_access(tmp_path: Path) -> 
         ):
             result = await m.handle_command(command, payload)
             assert result["error"] == "project_archived", command
-        direct = await m.append_log(
-            room["room_id"], author="architect", author_type="agent"
-        )
+        direct = await m.append_log(room["room_id"], author="architect", author_type="agent")
         assert direct["error"] == "project_archived"
         recipients = await m.resolve_recipients([room["room_id"]])
         assert recipients["error"] == "project_archived"
@@ -415,11 +399,7 @@ async def test_join_leave_membership_and_events(tmp_path: Path) -> None:
         assert again["success"]
         assert events[-1][0] == "room_member_joined"
 
-        members = _data(
-            await m.handle_command(
-                "room_get_members", {"room_id": room["room_id"]}
-            )
-        )
+        members = _data(await m.handle_command("room_get_members", {"room_id": room["room_id"]}))
         assert members["count"] == 1
         assert members["room_id"] == room["room_id"]
 
@@ -662,15 +642,11 @@ async def _delivery_manager(
             ],
         }
 
-    async def deliver(
-        target: str, sender: str, content: str, room_id: str
-    ) -> dict[str, Any]:
+    async def deliver(target: str, sender: str, content: str, room_id: str) -> dict[str, Any]:
         deliveries.append((target, sender, content))
         return {"success": True, "data": {"content": "ok"}, "error": None}
 
-    return RoomManager(
-        store, on_event=on_event, project_get=project_get, deliver=deliver
-    )
+    return RoomManager(store, on_event=on_event, project_get=project_get, deliver=deliver)
 
 
 async def _join(m: RoomManager, room_id: str, subject: str, subject_type: str) -> None:
@@ -774,9 +750,7 @@ async def test_delivery_failure_does_not_affect_room_send(tmp_path: Path) -> Non
     store = RoomStore(tmp_path / "rooms.db")
     await store.start()
 
-    async def deliver(
-        target: str, sender: str, content: str, room_id: str
-    ) -> dict[str, Any]:
+    async def deliver(target: str, sender: str, content: str, room_id: str) -> dict[str, Any]:
         deliveries.append((target, sender, content))
         if target == "bad":
             raise RuntimeError("boom")

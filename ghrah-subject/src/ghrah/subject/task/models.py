@@ -4,9 +4,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from pydantic import ConfigDict, Field, field_serializer, field_validator
-
 from ghrah.protocol.types import TaskInfoPayload, TaskPriority, TaskStatus
+from pydantic import ConfigDict, Field, field_serializer, field_validator
 
 __all__ = [
     "TERMINAL_STATUSES",

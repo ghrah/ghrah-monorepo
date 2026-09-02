@@ -16,7 +16,6 @@ import logging
 import uuid
 
 from fastapi import WebSocket, WebSocketDisconnect
-
 from ghrah.protocol.types import (
     EventType,
     Message,
@@ -26,6 +25,7 @@ from ghrah.protocol.types import (
     create_pong,
     envelope_from_dict,
 )
+
 from ghrah.subject.server.config import ObserverServerConfig
 from ghrah.subject.server.connection_manager import ConnectionManager
 from ghrah.subject.server.event_bus import EventBus
@@ -94,9 +94,7 @@ class ObserverServer:
                 logger.info(f"Evicted stale session {evicted} for client_id={client_id}")
 
         try:
-            await self._connection_manager.connect(
-                session_id, websocket, client_id=client_id
-            )
+            await self._connection_manager.connect(session_id, websocket, client_id=client_id)
             logger.info(f"Observer WebSocket session established: {session_id}")
 
             welcome_msg = create_command_result(
@@ -163,9 +161,7 @@ class ObserverServer:
             # 心跳
             if message.type == SystemType.PING.value:
                 pong = create_pong()
-                await self._connection_manager.send_to(
-                    session_id, pong.model_dump_with_timestamp()
-                )
+                await self._connection_manager.send_to(session_id, pong.model_dump_with_timestamp())
                 continue
 
             # 事件消息
@@ -183,9 +179,7 @@ class ObserverServer:
                 lambda t, sid=session_id: self._session_tasks.get(sid, set()).discard(t)
             )
 
-    async def _handle_command_async(
-        self, message: Message, session_id: str
-    ) -> None:
+    async def _handle_command_async(self, message: Message, session_id: str) -> None:
         """在后台 Task 中处理命令，将结果发送给客户端。"""
         try:
             result = await self._router.handle_command(message, session_id)
@@ -211,6 +205,4 @@ class ObserverServer:
             if not task.done():
                 task.cancel()
         if tasks:
-            logger.info(
-                f"Cancelled {len(tasks)} background task(s) for session {session_id}"
-            )
+            logger.info(f"Cancelled {len(tasks)} background task(s) for session {session_id}")

@@ -90,9 +90,7 @@ class TestDesiredStateStore:
         shared_id = "a" * 32
         p1 = _project("P1")
         p1 = p1.model_copy(
-            update={
-                "agents": [AgentSpec(name="old-name", cluster_id="c1", agent_id=shared_id)]
-            }
+            update={"agents": [AgentSpec(name="old-name", cluster_id="c1", agent_id=shared_id)]}
         )
         p2 = make_project_record(name="P2").model_copy(
             update={
@@ -104,9 +102,7 @@ class TestDesiredStateStore:
 
         loaded = await store.load("default")
         assert loaded is not None
-        assert [(a.agent_id, a.name) for a in loaded.agents] == [
-            (shared_id, "old-name")
-        ]
+        assert [(a.agent_id, a.name) for a in loaded.agents] == [(shared_id, "old-name")]
 
     async def test_save_overwrites_single_row(self, store: DesiredStateStore) -> None:
         r1 = DesiredStateRecord(subject_id="default", projects=[_project("A")])

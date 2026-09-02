@@ -109,9 +109,7 @@ class TestUnitsAssembly:
             assert fibers["project"].state.value == "active"
             assert fibers["recovery"].state.value == "active"
 
-    async def test_reconcile_bootstrap_creates_default_project(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_reconcile_bootstrap_creates_default_project(self, tmp_path: Path) -> None:
         async with _boot(tmp_path) as (ctx, _, _):
             svc = ctx.get(RECONCILIATION_SERVICE.name)
             # 显式触发首启 reconcile（自动触发归阶段 3.4）：无 workspace → bootstrap
@@ -126,9 +124,7 @@ class TestUnitsAssembly:
             assert listed["data"]["count"] == 1
             assert listed["data"]["projects"][0]["name"] == "default"
 
-    async def test_project_create_command_via_dispatcher(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_project_create_command_via_dispatcher(self, tmp_path: Path) -> None:
         async with _boot(tmp_path) as (ctx, _, _):
             result = await bridge_command(
                 ctx,
@@ -149,9 +145,7 @@ class TestUnitsAssembly:
 
     async def test_reconcile_now_command(self, tmp_path: Path) -> None:
         async with _boot(tmp_path) as (ctx, _, _):
-            result = await bridge_command(
-                ctx, "reconcile_now", {"subject_id": "default"}
-            )
+            result = await bridge_command(ctx, "reconcile_now", {"subject_id": "default"})
             assert result["success"]
             assert "projects_reconciled" in result["data"]
 

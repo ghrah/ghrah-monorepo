@@ -16,7 +16,6 @@ members = [
     "ghrah-core",
     "ghrah-protocol",
     "ghrah-subject",
-    "shuoxi",
 ]
 
 [tool.uv.sources]

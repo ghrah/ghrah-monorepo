@@ -43,9 +43,7 @@ async def _make_project(ctx: Context) -> str:
 
 
 async def _add_project_agent(ctx: Context, project_id: str, name: str) -> str:
-    project = _data(
-        await _dispatch(ctx, "project_get", {"project_id": project_id})
-    )["project"]
+    project = _data(await _dispatch(ctx, "project_get", {"project_id": project_id}))["project"]
     result = await _dispatch(
         ctx,
         "project_add_agent",
@@ -85,9 +83,7 @@ async def test_room_commands_via_serial_and_events(tmp_path: Path) -> None:
         await _add_project_agent(ctx, project_id, "architect")
 
         room = _data(
-            await _dispatch(
-                ctx, "room_create", {"project_id": project_id, "name": "architecture"}
-            )
+            await _dispatch(ctx, "room_create", {"project_id": project_id, "name": "architecture"})
         )["room"]
         assert emitted[0][0] == "room_created"
 
@@ -122,9 +118,7 @@ async def test_room_create_validates_project_via_project_manager(
 ) -> None:
     async with Context() as ctx:
         await mount_builtin_units(ctx, _config(tmp_path), profile="full")
-        result = await _dispatch(
-            ctx, "room_create", {"project_id": "missing-project", "name": "n"}
-        )
+        result = await _dispatch(ctx, "room_create", {"project_id": "missing-project", "name": "n"})
         assert not result["success"]
         assert "project not found" in result["error"]
 
@@ -135,11 +129,9 @@ async def test_send_ability_serial_path_converges(tmp_path: Path) -> None:
         await mount_builtin_units(ctx, _config(tmp_path), profile="full")
         project_id = await _make_project(ctx)
         agent_id = await _add_project_agent(ctx, project_id, "architect")
-        room = _data(
-            await _dispatch(
-                ctx, "room_create", {"project_id": project_id, "name": "r"}
-            )
-        )["room"]
+        room = _data(await _dispatch(ctx, "room_create", {"project_id": project_id, "name": "r"}))[
+            "room"
+        ]
 
         # 模拟 Core 侧 send ability 的落账调用（D3：serial 保持命令面统一）
         result = await _dispatch(
@@ -183,11 +175,9 @@ async def test_room_log_persistence_across_restart(tmp_path: Path) -> None:
     async with Context() as ctx:
         await mount_builtin_units(ctx, config, profile="full")
         project_id = await _make_project(ctx)
-        room = _data(
-            await _dispatch(
-                ctx, "room_create", {"project_id": project_id, "name": "r"}
-            )
-        )["room"]
+        room = _data(await _dispatch(ctx, "room_create", {"project_id": project_id, "name": "r"}))[
+            "room"
+        ]
         await _dispatch(
             ctx,
             "room_send",
@@ -214,9 +204,7 @@ async def test_room_delivery_routes_agent_id_to_owning_cluster(tmp_path: Path) -
     """两个 cluster 存在同名 agent 时，Room UUID 必须只投递到所属 CoreUnit。"""
 
     class ProjectManagerStub:
-        async def handle_command(
-            self, command: str, payload: dict[str, Any]
-        ) -> dict[str, Any]:
+        async def handle_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
             project = {
                 "project_id": "project-1",
                 "project_root_locator": "",
@@ -293,9 +281,7 @@ async def test_room_delivery_routes_agent_id_to_owning_cluster(tmp_path: Path) -
         [member] = joined["data"]["room"]["members"]
         assert member["subject"] == "b" * 32
         assert member["subject_name"] == "planner"
-        result = await unit.service._deliver(
-            "b" * 32, "human:yuki", "resume", room_id
-        )
+        result = await unit.service._deliver("b" * 32, "human:yuki", "resume", room_id)
         assert result["success"] is True
         assert registry.ensure_calls == ["c2"]
         assert registry.handles["c1"].messages == []

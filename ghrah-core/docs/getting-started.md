@@ -90,6 +90,7 @@ from ghrah.agents.base import ActorAgent
 from ghrah.chat.format.openai import OpenAIFormat
 from ghrah.core.config import AgentConfig
 
+
 async def main():
     config = AgentConfig(
         name="assistant",
@@ -123,6 +124,7 @@ from ghrah.abilities.builtin.conversation import ConversationAbility
 from ghrah.agents.base import ActorAgent
 from ghrah.core.config import AgentConfig
 
+
 async def main():
     # 创建 Agent 配置（name 对应 agentconf 中的 agent name）
     config = AgentConfig(
@@ -138,6 +140,7 @@ async def main():
     # 使用简化接口对话
     response = await agent.chat("你好，请介绍一下你自己。")
     print(f"AI: {response}")
+
 
 asyncio.run(main())
 ```
@@ -217,12 +220,12 @@ agent = ActorAgent(config)
 # 注册 Ability
 agent.register_ability(ConversationAbility())
 agent.register_ability(EndTaskAbility())
-agent.register_ability(ReadFileAbility(
-    permission_checker=FSPermissionChecker(allowed_dirs=["/tmp/workspace"])
-))
-agent.register_ability(WriteFileAbility(
-    permission_checker=FSPermissionChecker(allowed_dirs=["/tmp/workspace"])
-))
+agent.register_ability(
+    ReadFileAbility(permission_checker=FSPermissionChecker(allowed_dirs=["/tmp/workspace"]))
+)
+agent.register_ability(
+    WriteFileAbility(permission_checker=FSPermissionChecker(allowed_dirs=["/tmp/workspace"]))
+)
 ```
 
 运行：

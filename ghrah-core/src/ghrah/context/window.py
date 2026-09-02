@@ -62,9 +62,7 @@ def estimate_message_tokens(message: Any) -> int:
                     total += max(1, len(getattr(block, "text", "")) // _CHARS_PER_TOKEN)
                 case "tool_call":
                     args = getattr(block, "arguments", None)
-                    args_str = (
-                        json.dumps(args, ensure_ascii=False) if args else ""
-                    )
+                    args_str = json.dumps(args, ensure_ascii=False) if args else ""
                     total += max(1, len(args_str) // _CHARS_PER_TOKEN)
                     total += max(1, len(getattr(block, "name", "")) // _CHARS_PER_TOKEN)
                 case "tool_result":

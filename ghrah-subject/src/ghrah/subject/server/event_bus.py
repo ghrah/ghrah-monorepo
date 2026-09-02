@@ -16,6 +16,7 @@ from ghrah.protocol.types import (
     Message,
     payload_agent_name,
 )
+
 from ghrah.subject.server.connection_manager import ConnectionManager
 
 logger = logging.getLogger(__name__)
@@ -181,8 +182,7 @@ class EventBus:
         else:
             payload = dict(payload)
         if event.type in AGENT_SCOPED_EVENT_TYPES and (
-            not str(payload.get("project_id") or "")
-            or not str(payload.get("agent_id") or "")
+            not str(payload.get("project_id") or "") or not str(payload.get("agent_id") or "")
         ):
             self.dropped_unattributed_events += 1
             logger.warning(

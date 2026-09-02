@@ -3,10 +3,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
-
 from ghrah.context.node import ContextNode
 from ghrah.context.persistence import deserialize_node, serialize_node
+from pydantic import BaseModel, Field
 
 __all__ = ["LedgerNode", "ChainMeta", "DAGEntry"]
 

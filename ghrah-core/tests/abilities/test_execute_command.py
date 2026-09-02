@@ -172,11 +172,13 @@ class MockCommandRunner:
         env: dict[str, str] | None = None,
         stdin_data: str | None = None,
     ) -> CommandResult:
-        self.calls.append({
-            "command": command,
-            "cwd": cwd,
-            "timeout": timeout,
-        })
+        self.calls.append(
+            {
+                "command": command,
+                "cwd": cwd,
+                "timeout": timeout,
+            }
+        )
         cmd_str = " ".join(command)
         if cmd_str in self._results:
             r = self._results[cmd_str]
@@ -226,9 +228,11 @@ class TestExecuteViaRunner:
 
     @pytest.mark.asyncio
     async def test_runner_failure_result(self) -> None:
-        runner = MockCommandRunner(results={
-            "false": MockCommandRunnerResult(exit_code=1, stderr="error"),
-        })
+        runner = MockCommandRunner(
+            results={
+                "false": MockCommandRunnerResult(exit_code=1, stderr="error"),
+            }
+        )
         ability = ExecuteCommandAbility(command_runner=runner)
         context = _make_context(
             current_ability_name="execute_command",
@@ -240,9 +244,11 @@ class TestExecuteViaRunner:
 
     @pytest.mark.asyncio
     async def test_runner_timeout_result(self) -> None:
-        runner = MockCommandRunner(results={
-            "sleep 10": MockCommandRunnerResult(timed_out=True, stderr="Timed out"),
-        })
+        runner = MockCommandRunner(
+            results={
+                "sleep 10": MockCommandRunnerResult(timed_out=True, stderr="Timed out"),
+            }
+        )
         ability = ExecuteCommandAbility(command_runner=runner)
         context = _make_context(
             current_ability_name="execute_command",

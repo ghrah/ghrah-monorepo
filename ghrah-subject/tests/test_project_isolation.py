@@ -235,9 +235,7 @@ class TestValidateLocators:
         child = str(tmp_path / "parent" / "child")
         os.makedirs(child)
         with pytest.raises(ValueError, match="nest"):
-            validate_workspace_locators_non_nested(
-                ["file://" + parent, "file://" + child]
-            )
+            validate_workspace_locators_non_nested(["file://" + parent, "file://" + child])
 
     def test_same_path_raises(self, tmp_path: Path) -> None:
         a = str(tmp_path / "a")
@@ -250,9 +248,7 @@ class TestValidateLocators:
         os.makedirs(a)
         # 带尾斜杠 vs 不带应判为同一路径
         with pytest.raises(ValueError, match="nest"):
-            validate_workspace_locators_non_nested(
-                ["file://" + a, "file://" + a + "/"]
-            )
+            validate_workspace_locators_non_nested(["file://" + a, "file://" + a + "/"])
 
     def test_non_file_locator_skipped(self) -> None:
         # 非 file:// locator 不参与文件系统嵌套校验，与 file:// 共存不报错

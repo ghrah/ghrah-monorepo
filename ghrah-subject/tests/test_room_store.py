@@ -62,17 +62,13 @@ async def test_update_optimistic_lock(tmp_path: Path) -> None:
         def rename(r: RoomRecord) -> RoomRecord:
             return r.model_copy(update={"name": "renamed"})
 
-        updated = await store.update(
-            record.room_id, expected_version=None, mutator=rename
-        )
+        updated = await store.update(record.room_id, expected_version=None, mutator=rename)
         assert updated is not None
         assert updated.name == "renamed"
         assert updated.version == 2
 
         with pytest.raises(ConcurrentModificationError):
-            await store.update(
-                record.room_id, expected_version=1, mutator=rename
-            )
+            await store.update(record.room_id, expected_version=1, mutator=rename)
 
         missing = await store.update("nope", expected_version=None, mutator=rename)
         assert missing is None
@@ -110,9 +106,12 @@ async def test_append_log_allocates_monotonic_seq(tmp_path: Path) -> None:
         assert loaded is not None
         assert loaded.seq_watermark == 5
 
-        missing = await store.append_log("nope", lambda seq: make_room_log_record(
-            room_id="nope", seq=seq, author="a", author_type="agent"
-        ))
+        missing = await store.append_log(
+            "nope",
+            lambda seq: make_room_log_record(
+                room_id="nope", seq=seq, author="a", author_type="agent"
+            ),
+        )
         assert missing is None
     finally:
         await store.stop()
@@ -127,8 +126,11 @@ async def test_get_log_since_and_limit(tmp_path: Path) -> None:
             result = await store.append_log(
                 room.room_id,
                 lambda seq, i=i: make_room_log_record(
-                    room_id=room.room_id, seq=seq, author="a",
-                    author_type="agent", data={"i": i},
+                    room_id=room.room_id,
+                    seq=seq,
+                    author="a",
+                    author_type="agent",
+                    data={"i": i},
                 ),
             )
             assert result is not None

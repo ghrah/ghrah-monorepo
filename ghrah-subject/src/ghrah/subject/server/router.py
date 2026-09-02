@@ -26,6 +26,7 @@ from ghrah.protocol.types import (
     generate_request_id,
     payload_agent_name,
 )
+
 from ghrah.subject.server.connection_manager import ConnectionManager
 from ghrah.subject.server.event_bus import EventBus
 

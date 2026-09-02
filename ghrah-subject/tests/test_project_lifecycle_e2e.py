@@ -72,23 +72,13 @@ async def test_archived_project_stays_frozen_after_restart_until_restore(
         room_store = ctx.get("room_store")
         assert project["project_id"] in task_store._frozen_projects
         assert project["project_id"] in room_store._frozen_projects
-        assert task_store._known_roots.get(project["project_id"]) == project[
-            "project_root_locator"
-        ]
+        assert task_store._known_roots.get(project["project_id"]) == project["project_root_locator"]
         assert task_store._task_projects.get(task["task_id"]) == project["project_id"]
         assert room_store._room_projects.get(room["room_id"]) == project["project_id"]
-        archived_list = _data(
-            await bridge_command(ctx, "project_list", {"archived": True})
-        )
-        assert [item["project_id"] for item in archived_list["projects"]] == [
-            project["project_id"]
-        ]
-        blocked_task = await bridge_command(
-            ctx, "task_get", {"task_id": task["task_id"]}
-        )
-        blocked_room = await bridge_command(
-            ctx, "room_get", {"room_id": room["room_id"]}
-        )
+        archived_list = _data(await bridge_command(ctx, "project_list", {"archived": True}))
+        assert [item["project_id"] for item in archived_list["projects"]] == [project["project_id"]]
+        blocked_task = await bridge_command(ctx, "task_get", {"task_id": task["task_id"]})
+        blocked_room = await bridge_command(ctx, "room_get", {"room_id": room["room_id"]})
         assert blocked_task["error"] == "resource_archived"
         assert blocked_room["error"] == "project_archived"
 
@@ -104,9 +94,15 @@ async def test_archived_project_stays_frozen_after_restart_until_restore(
         )["project"]
         assert restored["archived_at"] is None
         assert restored["status"] == "stopped"
-        assert _data(
-            await bridge_command(ctx, "task_get", {"task_id": task["task_id"]})
-        )["task"]["task_id"] == task["task_id"]
-        assert _data(
-            await bridge_command(ctx, "room_get", {"room_id": room["room_id"]})
-        )["room"]["room_id"] == room["room_id"]
+        assert (
+            _data(await bridge_command(ctx, "task_get", {"task_id": task["task_id"]}))["task"][
+                "task_id"
+            ]
+            == task["task_id"]
+        )
+        assert (
+            _data(await bridge_command(ctx, "room_get", {"room_id": room["room_id"]}))["room"][
+                "room_id"
+            ]
+            == room["room_id"]
+        )

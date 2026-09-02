@@ -246,10 +246,7 @@ class TestFromEnv:
             "/srv/ghrah/projects/{project_id}",
         )
         config = SubjectConfig.from_env()
-        assert (
-            config.project.default_root_locator_template
-            == "/srv/ghrah/projects/{project_id}"
-        )
+        assert config.project.default_root_locator_template == "/srv/ghrah/projects/{project_id}"
 
     def test_from_env_sandbox_timeout_fallback_to_core(
         self, monkeypatch: pytest.MonkeyPatch

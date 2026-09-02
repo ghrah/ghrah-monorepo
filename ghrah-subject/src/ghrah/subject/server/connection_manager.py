@@ -190,17 +190,11 @@ class ConnectionManager:
 
         for session_id, subscribed_agents in self._subscriptions.items():
             agent_match = (
-                "*" in subscribed_agents
-                or agent_name is None
-                or agent_name in subscribed_agents
+                "*" in subscribed_agents or agent_name is None or agent_name in subscribed_agents
             )
 
             event_subs = self._event_subscriptions.get(session_id, set())
-            event_match = (
-                len(event_subs) == 0
-                or event_type is None
-                or event_type in event_subs
-            )
+            event_match = len(event_subs) == 0 or event_type is None or event_type in event_subs
 
             if agent_match and event_match:
                 result.append(session_id)

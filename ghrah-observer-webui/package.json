@@ -11,21 +11,13 @@
     "lint": "pnpm --filter @ghrah/observer-web lint:i18n && pnpm --filter @ghrah/observer-web lint:ui-tokens && biome check .",
     "lint:fix": "biome check . --write",
     "format": "biome format . --write",
-    "test": "vitest",
+    "test": "pnpm -r test",
     "type-check": "pnpm -r type-check"
   },
   "engines": {
-    "node": "^20.19.0 || >=22.12.0",
-    "pnpm": ">=9.0.0"
+    "node": ">=22.12.0",
+    "pnpm": ">=11.0.0"
   },
-  "packageManager": "pnpm@9.15.0",
-  "devDependencies": {
-    "@biomejs/biome": "^2.0.0",
-    "@vitejs/plugin-vue": "^5.2.0",
-    "@vue/test-utils": "^2.4.11",
-    "happy-dom": "^20.10.6",
-    "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "vue": "^3.5.0"
-  }
+  "packageManager": "pnpm@11.25.0",
+  "devDependencies": {}
 }

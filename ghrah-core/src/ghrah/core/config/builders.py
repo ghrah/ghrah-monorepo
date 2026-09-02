@@ -67,14 +67,10 @@ def build_window_from_overrides(overrides: Any) -> WindowConfig:
             else ["tool_call_fold", "truncation"]
         ),
         tool_call_max_length=(
-            overrides.tool_call_max_length
-            if overrides.tool_call_max_length is not None
-            else 500
+            overrides.tool_call_max_length if overrides.tool_call_max_length is not None else 500
         ),
         sliding_window_size=(
-            overrides.sliding_window_size
-            if overrides.sliding_window_size is not None
-            else 20
+            overrides.sliding_window_size if overrides.sliding_window_size is not None else 20
         ),
     )
 
@@ -98,8 +94,7 @@ def build_model_overrides_from_config(model: Any) -> ModelOverrides | None:
     否则返回 None（表示无覆盖）。
     """
     if not any(
-        v is not None
-        for v in [model.temperature, model.max_tokens, model.top_p, model.top_k]
+        v is not None for v in [model.temperature, model.max_tokens, model.top_p, model.top_k]
     ):
         return None
     return ModelOverrides(

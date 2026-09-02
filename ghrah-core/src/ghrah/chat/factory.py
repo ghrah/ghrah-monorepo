@@ -58,6 +58,7 @@ class ChatMessageFactory:
         blocks: list[ContentBlock] = list(content_blocks) if content_blocks else []
         if text is not None:
             from ghrah.chat.content import TextBlock
+
             blocks.append(TextBlock(text=text))
         if source is None:
             source = _ROLE_DEFAULT_SOURCE.get(role)  # ai/tool → None

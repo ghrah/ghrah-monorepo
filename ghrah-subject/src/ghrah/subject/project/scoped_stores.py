@@ -102,9 +102,7 @@ class ProjectScopedTaskStore:
         self._known_roots.pop(project_id, None)
         self._frozen_projects.discard(project_id)
         self._task_projects = {
-            task_id: owner
-            for task_id, owner in self._task_projects.items()
-            if owner != project_id
+            task_id: owner for task_id, owner in self._task_projects.items() if owner != project_id
         }
 
     async def _locate(self, task_id: str) -> TaskStore | None:
@@ -269,9 +267,7 @@ class ProjectScopedRoomStore:
         self._known_roots.pop(project_id, None)
         self._frozen_projects.discard(project_id)
         self._room_projects = {
-            room_id: owner
-            for room_id, owner in self._room_projects.items()
-            if owner != project_id
+            room_id: owner for room_id, owner in self._room_projects.items() if owner != project_id
         }
 
     async def count_project_records(self, project_id: str) -> int:

@@ -11,10 +11,10 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { createPinia, setActivePinia } from "pinia";
 
-import { MockServer, MockState, demoScenario, runScenario } from "../../mock-server/dist/index.js";
+import { demoScenario, MockServer, MockState, runScenario } from "../../mock-server/dist/index.js";
 import {
-  ObserverClient,
   connectStores,
+  ObserverClient,
   useActionChainsStore,
   useAgentsStore,
   useChatStore,

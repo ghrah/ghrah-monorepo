@@ -11,6 +11,7 @@ from typing import Any
 
 from ghrah.manifest.builtins import load_all_builtin_manifests  # type: ignore[import-untyped]
 from ghrah.manifest.types import PermissionFlags  # type: ignore[import-untyped]
+
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.manifest_store.builtins import ensure_builtins
 from ghrah.subject.manifest_store.service import handle_manifest_command

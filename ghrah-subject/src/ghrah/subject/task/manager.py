@@ -4,8 +4,6 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import ValidationError
-
 from ghrah.protocol.types import (
     TaskAssignPayload,
     TaskBlockPayload,
@@ -19,6 +17,8 @@ from ghrah.protocol.types import (
     TaskStatus,
     TaskUpdatePayload,
 )
+from pydantic import ValidationError
+
 from ghrah.subject.task.graph import TaskGraphView
 from ghrah.subject.task.models import (
     TaskRecord,
@@ -55,15 +55,11 @@ class TaskManager:
     - 不依赖 SubjectContext，纯 store + 回调，便于独立单测。
     """
 
-    def __init__(
-        self, store: TaskStore, *, on_event: OnEvent | None = None
-    ) -> None:
+    def __init__(self, store: TaskStore, *, on_event: OnEvent | None = None) -> None:
         self._store = store
         self._on_event = on_event
 
-    async def handle_command(
-        self, command: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def handle_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         handler = _HANDLERS.get(command)
         if handler is None:
             return _err(f"unknown command: {command}")
@@ -128,9 +124,7 @@ class TaskManager:
         # 拓扑校验（新任务尚未入库，图中不含自身，自指由方法内部特判覆盖）
         if record.dependencies or record.parent_id is not None:
             graph = await self._graph()
-            if graph.would_create_dependency_cycle(
-                record.task_id, record.dependencies
-            ):
+            if graph.would_create_dependency_cycle(record.task_id, record.dependencies):
                 return _err("dependency cycle detected (self-reference or loop)")
             if graph.would_create_parent_cycle(record.task_id, record.parent_id):
                 return _err("parent cycle detected (self-reference or loop)")
@@ -148,9 +142,9 @@ class TaskManager:
         # 拓扑校验（用当前全图 + 待写入的假设新值）
         new_deps = p.dependencies if p.dependencies is not None else existing.dependencies
         new_parent = p.parent_id if p.parent_id is not None else existing.parent_id
-        if (
-            p.dependencies is not None or p.parent_id is not None
-        ) and (new_deps or new_parent is not None):
+        if (p.dependencies is not None or p.parent_id is not None) and (
+            new_deps or new_parent is not None
+        ):
             graph = await self._graph()
             if graph.would_create_dependency_cycle(p.task_id, list(new_deps)):
                 return _err("dependency cycle detected (self-reference or loop)")
@@ -162,9 +156,7 @@ class TaskManager:
         if p.status is not None:
             target_status = normalize_status(p.status)
             if not can_transition(existing.status, target_status):
-                return _err(
-                    f"illegal transition: {existing.status.value} -> {target_status.value}"
-                )
+                return _err(f"illegal transition: {existing.status.value} -> {target_status.value}")
 
         def mutator(r: TaskRecord) -> TaskRecord:
             updates: dict[str, Any] = {"updated_at": _now()}
@@ -196,10 +188,7 @@ class TaskManager:
             # 状态流转 + 时间戳
             if target_status is not None:
                 updates["status"] = target_status
-                if (
-                    target_status == TaskStatus.IN_PROGRESS
-                    and r.started_at is None
-                ):
+                if target_status == TaskStatus.IN_PROGRESS and r.started_at is None:
                     updates["started_at"] = _now()
                 if is_terminal(target_status):
                     updates["completed_at"] = _now()
@@ -234,9 +223,7 @@ class TaskManager:
                 }
             )
 
-        updated = await self._store.update(
-            p.task_id, expected_version=None, mutator=mutator
-        )
+        updated = await self._store.update(p.task_id, expected_version=None, mutator=mutator)
         if updated is None:
             return _err(f"task not found: {p.task_id}")
         await self._emit("task_assigned", updated, previous_status, None)
@@ -249,9 +236,7 @@ class TaskManager:
             return _err(f"task not found: {p.task_id}")
         previous_status = existing.status
         if not can_transition(existing.status, TaskStatus.IN_PROGRESS):
-            return _err(
-                f"illegal transition: {existing.status.value} -> in_progress"
-            )
+            return _err(f"illegal transition: {existing.status.value} -> in_progress")
         # 前驱状态校验（委托 graph 给前驱集合，manager 查状态）
         graph = await self._graph()
         preds = graph.predecessors(p.task_id)
@@ -272,9 +257,7 @@ class TaskManager:
                 updates["started_at"] = _now()
             return r.model_copy(update=updates)
 
-        updated = await self._store.update(
-            p.task_id, expected_version=None, mutator=mutator
-        )
+        updated = await self._store.update(p.task_id, expected_version=None, mutator=mutator)
         if updated is None:
             return _err(f"task not found: {p.task_id}")
         await self._emit("task_started", updated, previous_status, None)
@@ -362,9 +345,7 @@ class TaskManager:
             dependents = await self._store.count_dependents(p.task_id)
             children = await self._store.count_children(p.task_id)
             if dependents > 0 or children > 0:
-                return _err(
-                    f"task has dependents ({dependents}) or children ({children})"
-                )
+                return _err(f"task has dependents ({dependents}) or children ({children})")
         await self._store.soft_delete(p.task_id)
         await self._emit("task_deleted", existing, previous_status, None)
         return _ok({"task_id": p.task_id})
@@ -385,9 +366,7 @@ class TaskManager:
             return _err(f"task not found: {task_id}")
         previous_status = existing.status
         if not can_transition(existing.status, target):
-            return _err(
-                f"illegal transition: {existing.status.value} -> {target.value}"
-            )
+            return _err(f"illegal transition: {existing.status.value} -> {target.value}")
 
         def mutator(r: TaskRecord) -> TaskRecord:
             updates: dict[str, Any] = {
@@ -399,9 +378,7 @@ class TaskManager:
                 updates["completed_at"] = _now()
             return r.model_copy(update=updates)
 
-        updated = await self._store.update(
-            task_id, expected_version=None, mutator=mutator
-        )
+        updated = await self._store.update(task_id, expected_version=None, mutator=mutator)
         if updated is None:
             return _err(f"task not found: {task_id}")
         await self._emit(event_type, updated, previous_status, reason)

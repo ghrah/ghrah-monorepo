@@ -90,6 +90,7 @@ from ghrah.agents.base import ActorAgent
 from ghrah.chat.format.openai import OpenAIFormat
 from ghrah.core.config import AgentConfig
 
+
 async def main():
     config = AgentConfig(
         name="assistant",
@@ -123,6 +124,7 @@ from ghrah.abilities.builtin.conversation import ConversationAbility
 from ghrah.agents.base import ActorAgent
 from ghrah.core.config import AgentConfig
 
+
 async def main():
     # Create Agent config (name corresponds to agentconf agent name)
     config = AgentConfig(
@@ -138,6 +140,7 @@ async def main():
     # Chat using the simplified interface
     response = await agent.chat("Hello, please introduce yourself.")
     print(f"AI: {response}")
+
 
 asyncio.run(main())
 ```
@@ -217,12 +220,12 @@ agent = ActorAgent(config)
 # Register Abilities
 agent.register_ability(ConversationAbility())
 agent.register_ability(EndTaskAbility())
-agent.register_ability(ReadFileAbility(
-    permission_checker=FSPermissionChecker(allowed_dirs=["/tmp/workspace"])
-))
-agent.register_ability(WriteFileAbility(
-    permission_checker=FSPermissionChecker(allowed_dirs=["/tmp/workspace"])
-))
+agent.register_ability(
+    ReadFileAbility(permission_checker=FSPermissionChecker(allowed_dirs=["/tmp/workspace"]))
+)
+agent.register_ability(
+    WriteFileAbility(permission_checker=FSPermissionChecker(allowed_dirs=["/tmp/workspace"]))
+)
 ```
 
 Run:

@@ -15,9 +15,7 @@ from ghrah.subject.sandbox.workspace import (
 )
 from ghrah.subject.workspace.providers.git import path_to_locator
 
-requires_git = pytest.mark.skipif(
-    shutil.which("git") is None, reason="git not available"
-)
+requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
 
 
 class TestCommandResult:
@@ -153,14 +151,13 @@ class TestExternalWorkspaceRegistration:
         finally:
             await manager.stop()
 
+
 class TestSandboxExecutorExecuteCommand:
     async def test_execute_echo(self, tmp_path):
         executor = SandboxExecutor(workspace_root=str(tmp_path))
         await executor.start()
         try:
-            result = await executor.execute_command(
-                [sys.executable, "-c", "print('hello')"]
-            )
+            result = await executor.execute_command([sys.executable, "-c", "print('hello')"])
             assert result.success is True
             assert "hello" in result.stdout
             assert result.exit_code == 0
@@ -171,9 +168,7 @@ class TestSandboxExecutorExecuteCommand:
         executor = SandboxExecutor(workspace_root=str(tmp_path))
         await executor.start()
         try:
-            result = await executor.execute_command(
-                [sys.executable, "-c", "raise SystemExit(1)"]
-            )
+            result = await executor.execute_command([sys.executable, "-c", "raise SystemExit(1)"])
             assert result.success is False
             assert result.exit_code != 0
         finally:
@@ -249,7 +244,8 @@ class TestSandboxExecutorExecuteCommand:
         try:
             result = await executor.execute_command(
                 [
-                    sys.executable, "-c",
+                    sys.executable,
+                    "-c",
                     "import sys; sys.stderr.write('err\\n'); print('out')",
                 ],
             )

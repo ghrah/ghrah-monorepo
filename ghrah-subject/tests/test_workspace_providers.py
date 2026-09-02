@@ -31,9 +31,7 @@ from ghrah.subject.workspace import (
 )
 from ghrah.subject.workspace.marker import MARKER_FILENAME, read_marker
 
-requires_git = pytest.mark.skipif(
-    shutil.which("git") is None, reason="git not available"
-)
+requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
 
 
 def _record(ws_path: str, name: str = "test-agent") -> WorkspaceRecord:

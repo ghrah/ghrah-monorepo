@@ -50,18 +50,19 @@ classDiagram
 from abc import ABC, abstractmethod
 from ghrah.abilities.base import Ability, ActionOutcome, ActionResult
 
+
 class MyAbility(Ability):
     @property
     def name(self) -> str:
         return "my_ability"
-    
+
     async def execute(self, context: AbilityExecutionContext) -> ActionResult:
         # 实现能力逻辑
         return ActionResult(
             outcome=ActionOutcome.SUCCESS,
             data={"result": "done"},
         )
-    
+
     def get_hooks(self) -> list[Hook]:
         return []  # 或返回自定义 hooks
 ```
@@ -89,8 +90,8 @@ class MyAbility(Ability):
 ```python
 @dataclass
 class ActionResult:
-    outcome: ActionOutcome       # 执行结果类型
-    data: dict[str, Any] = {}    # 结果数据
+    outcome: ActionOutcome  # 执行结果类型
+    data: dict[str, Any] = {}  # 结果数据
     next_action_hint: str | None = None  # 建议的下一个 action
 ```
 
@@ -110,13 +111,13 @@ class ActionResult:
 ```python
 @dataclass
 class AbilityExecutionContext:
-    current_ability_name: str = ""           # 当前 ability 名称
-    tool_args: dict[str, Any] = {}           # 工具调用参数
-    agent_state: dict[str, Any] = {}         # Agent 完整状态（只读）
-    context_manager: ContextManager | None   # ContextManager 引用
-    current_node_id: str | None = None       # 当前链节点 ID
-    accumulated_data: dict[str, Any] = {}    # 累积数据
-    last_action_result: ActionResult | None   # 上一次 action 结果
+    current_ability_name: str = ""  # 当前 ability 名称
+    tool_args: dict[str, Any] = {}  # 工具调用参数
+    agent_state: dict[str, Any] = {}  # Agent 完整状态（只读）
+    context_manager: ContextManager | None  # ContextManager 引用
+    current_node_id: str | None = None  # 当前链节点 ID
+    accumulated_data: dict[str, Any] = {}  # 累积数据
+    last_action_result: ActionResult | None  # 上一次 action 结果
 ```
 
 ### 状态 API
@@ -204,13 +205,14 @@ from ghrah.abilities.base import Ability, ActionOutcome, ActionResult
 from ghrah.abilities.context import AbilityExecutionContext
 from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 
+
 class WeatherAbility(Ability):
     """天气查询能力"""
-    
+
     @property
     def name(self) -> str:
         return "weather"
-    
+
     async def execute(self, context: AbilityExecutionContext) -> ActionResult:
         city = context.tool_args.get("city", "未知")
         # 模拟天气查询
@@ -219,10 +221,10 @@ class WeatherAbility(Ability):
             outcome=ActionOutcome.SUCCESS,
             data={"weather": weather_info},
         )
-    
+
     def get_hooks(self) -> list[Hook]:
         return []
-    
+
     def bind_tool(self) -> dict[str, Any]:
         return {
             "type": "function",
@@ -241,7 +243,7 @@ class WeatherAbility(Ability):
                 },
             },
         }
-    
+
     def get_default_state(self) -> dict[str, Any]:
         return {"query_count": 0}
 ```
@@ -251,11 +253,12 @@ class WeatherAbility(Ability):
 ```python
 class RateLimitHook(Hook):
     """速率限制 Hook"""
+
     hook_point = HookPoint.PRE_EXECUTE
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         return context.current_ability_name == "weather"
-    
+
     async def execute(self, context, result=None) -> HookResult:
         state = context.get_ability_state()
         count = state.get("query_count", 0)
@@ -263,9 +266,10 @@ class RateLimitHook(Hook):
             return HookResult.stop()  # 超过限制，停止循环
         return HookResult.continue_()  # 继续
 
+
 class WeatherAbility(Ability):
     # ...（同上）
-    
+
     def get_hooks(self) -> list[Hook]:
         return [RateLimitHook()]
 ```

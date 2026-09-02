@@ -36,19 +36,21 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["StudentGradeListDirectoryAbility", "StudentGradeListDirectoryInput"]
 
-DEFAULT_EXCLUDE_DIRS: frozenset[str] = frozenset({
-    ".git",
-    ".venv",
-    "node_modules",
-    "__pycache__",
-    ".idea",
-    ".vscode",
-    "dist",
-    "build",
-    ".next",
-    ".DS_Store",
-    ".eggs",
-})
+DEFAULT_EXCLUDE_DIRS: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".venv",
+        "node_modules",
+        "__pycache__",
+        ".idea",
+        ".vscode",
+        "dist",
+        "build",
+        ".next",
+        ".DS_Store",
+        ".eggs",
+    }
+)
 
 
 class StudentGradeListDirectoryInput(BaseModel):

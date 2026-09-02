@@ -93,9 +93,7 @@ class TestInstantiateResolvedAbilities:
 
     def test_execute_command_hook_injected(self) -> None:
         abilities = _resolved([AbilityRef(type="execute_command")])
-        result = instantiate_resolved_abilities(
-            abilities, workspace_root=None, command_runner=None
-        )
+        result = instantiate_resolved_abilities(abilities, workspace_root=None, command_runner=None)
         assert result[0].name == "execute_command"
         hooks = result[0].get_hooks()
         assert len(hooks) == 1
@@ -213,6 +211,7 @@ abilities:
                 if full_name in self._agents:
                     return self._agents[full_name]
                 from ghrah.manifest.errors import ManifestNotFoundError
+
                 raise ManifestNotFoundError(f"Agent manifest not found: {full_name}")
 
             def list_abilities(self, namespace: str | None = None) -> list[str]:

@@ -73,8 +73,7 @@ class ChatFormat(ABC):
         self,
         messages: list[ChatMessage],
         tools: list[dict[str, Any]] | None = None,
-    ) -> LLMResponse:
-        ...
+    ) -> LLMResponse: ...
 
     # 预留流式接口（当前不实现）
     # async def stream(

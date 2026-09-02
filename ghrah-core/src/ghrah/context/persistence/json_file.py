@@ -294,9 +294,7 @@ class JsonFileBackend(PersistenceBackend):
     async def list_agents(self) -> list[str]:
         if not self._run_dir.exists():
             return []
-        return sorted(
-            d.name for d in self._run_dir.iterdir() if d.is_dir() and any(d.iterdir())
-        )
+        return sorted(d.name for d in self._run_dir.iterdir() if d.is_dir() and any(d.iterdir()))
 
     # ----------------------------------------------------------------
     # Session 管理

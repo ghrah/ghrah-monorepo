@@ -179,8 +179,7 @@ class AbilityRegistry:
                     f"Available types: {cls.list_types()}"
                 )
             logger.debug(
-                f"Validated builtin ability: {resolved.ability_name} "
-                f"(handler={impl.handler})"
+                f"Validated builtin ability: {resolved.ability_name} (handler={impl.handler})"
             )
         elif impl.type == "python":
             if impl.module_ref:

@@ -14,9 +14,15 @@ dependencies = [
     "fastapi>=0.136.1",
     "uvicorn[standard]>=0.34.0",
 ]
+authors = [
+    {name = "chenxya", email = "chenxya@ghrah.org"},
+]
+license = "Apache-2.0"
+license-files = ["LICENSES/*"]
 
 [project.scripts]
 ghrah-subject = "ghrah.subject.app:main"
+ghrah-subject-server = "ghrah.subject.server.app:main"
 
 [project.entry-points."ghrah.subject.units"]
 # ⚠️ 内置 Unit 用 register_builtin_units() 显式注册（调试友好），此处留空。
@@ -55,4 +61,13 @@ python_version = "3.11"
 strict = true
 
 [tool.hatch.build.targets.sdist]
-exclude = [".kilo", "plans"]
+exclude = [
+    "/.python-version",
+    "/main.py",
+    "/.kilo",
+    "/plans",
+    "**/__pycache__",
+    "**/.mypy_cache",
+    "**/.pytest_cache",
+    "**/.ruff_cache",
+]

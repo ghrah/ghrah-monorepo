@@ -27,12 +27,12 @@ from ghrah.context.manager import ContextManager
 
 cm = ContextManager(
     agent_name="my-agent",
-    initial_state={"key": "value"},    # 初始状态
-    snapshot_interval=5,                # 快照间隔
-    system_prompt="你是一个助手",        # 系统提示词
-    window_manager=wm,                  # 窗口管理器（可选）
-    persistence=backend,                # 持久化后端（可选）
-    auto_persist=False,                 # 自动持久化
+    initial_state={"key": "value"},  # 初始状态
+    snapshot_interval=5,  # 快照间隔
+    system_prompt="你是一个助手",  # 系统提示词
+    window_manager=wm,  # 窗口管理器（可选）
+    persistence=backend,  # 持久化后端（可选）
+    auto_persist=False,  # 自动持久化
 )
 ```
 
@@ -107,9 +107,9 @@ chain = ActionChain(agent_name="my-agent")
 
 # 添加节点
 node = chain.add_node(
-    messages=[...],           # 消息增量
-    state_changes={...},      # 状态变更
-    action_result=result,     # action 结果
+    messages=[...],  # 消息增量
+    state_changes={...},  # 状态变更
+    action_result=result,  # action 结果
 )
 
 # 获取当前头节点
@@ -255,11 +255,11 @@ from ghrah.core.config import AgentConfig, ContextConfig
 config = AgentConfig(
     name="my-agent",
     context=ContextConfig(
-        persistence_type="json_file",      # 或 "memory"
-        persistence_root_dir="/tmp/data",   # JSON 文件存储目录
-        persistence_compress=True,          # gzip 压缩
-        snapshot_interval=5,                # 快照间隔
-        auto_persist=False,                 # 自动持久化
+        persistence_type="json_file",  # 或 "memory"
+        persistence_root_dir="/tmp/data",  # JSON 文件存储目录
+        persistence_compress=True,  # gzip 压缩
+        snapshot_interval=5,  # 快照间隔
+        auto_persist=False,  # 自动持久化
     ),
 )
 ```

@@ -130,9 +130,7 @@ class RoomFilterUnit(SubjectUnit):
             content = self._extract_content(action_result)
             if not content:
                 continue
-            await self._append_to_room(
-                room_id, agent_identity, ability_name, node_id, content
-            )
+            await self._append_to_room(room_id, agent_identity, ability_name, node_id, content)
 
     @staticmethod
     def _resolve_room_id(node: dict[str, Any]) -> str | None:

@@ -312,132 +312,152 @@ class SystemType(StrEnum):
 
 MessageType = CommandType | EventType | SystemType
 
-PERSIST_COMMANDS: frozenset[str] = frozenset({
-    CommandType.PERSIST_SAVE_NODE.value,
-    CommandType.PERSIST_LOAD_NODE.value,
-    CommandType.PERSIST_LOAD_CHAIN.value,
-    CommandType.PERSIST_SAVE_CHAIN_META.value,
-    CommandType.PERSIST_LOAD_CHAIN_META.value,
-    CommandType.PERSIST_SAVE_MESSAGES.value,
-    CommandType.PERSIST_LOAD_MESSAGES.value,
-    CommandType.PERSIST_DELETE_CHAIN.value,
-    CommandType.PERSIST_LIST_AGENTS.value,
-    CommandType.PERSIST_SAVE_SESSION.value,
-    CommandType.PERSIST_LOAD_SESSION.value,
-    CommandType.PERSIST_LIST_SESSIONS.value,
-    CommandType.PERSIST_DELETE_SESSIONS.value,
-})
+PERSIST_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.PERSIST_SAVE_NODE.value,
+        CommandType.PERSIST_LOAD_NODE.value,
+        CommandType.PERSIST_LOAD_CHAIN.value,
+        CommandType.PERSIST_SAVE_CHAIN_META.value,
+        CommandType.PERSIST_LOAD_CHAIN_META.value,
+        CommandType.PERSIST_SAVE_MESSAGES.value,
+        CommandType.PERSIST_LOAD_MESSAGES.value,
+        CommandType.PERSIST_DELETE_CHAIN.value,
+        CommandType.PERSIST_LIST_AGENTS.value,
+        CommandType.PERSIST_SAVE_SESSION.value,
+        CommandType.PERSIST_LOAD_SESSION.value,
+        CommandType.PERSIST_LIST_SESSIONS.value,
+        CommandType.PERSIST_DELETE_SESSIONS.value,
+    }
+)
 
-CORE_COMMANDS: frozenset[str] = frozenset({
-    CommandType.SPAWN_AGENT.value,
-    CommandType.TERMINATE_AGENT.value,
-    CommandType.SEND_MESSAGE.value,
-    CommandType.BROADCAST_MESSAGE.value,
-    CommandType.REGISTER_ABILITY.value,
-    CommandType.UNREGISTER_ABILITY.value,
-    CommandType.LIST_AGENTS.value,
-    CommandType.HEALTH_CHECK.value,
-    CommandType.DELEGATE.value,
-    CommandType.GET_AGENT_INFO.value,
-    CommandType.INIT_CLUSTER.value,
-    CommandType.SHUTDOWN_CLUSTER.value,
-    CommandType.CLUSTER_STATUS.value,
-    CommandType.LIST_CLUSTERS.value,
-    CommandType.SESSION_CREATE.value,
-    CommandType.SESSION_SWITCH.value,
-    CommandType.SESSION_LIST.value,
-    CommandType.SESSION_ARCHIVE.value,
-    CommandType.SESSION_DELETE.value,
-})
+CORE_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.SPAWN_AGENT.value,
+        CommandType.TERMINATE_AGENT.value,
+        CommandType.SEND_MESSAGE.value,
+        CommandType.BROADCAST_MESSAGE.value,
+        CommandType.REGISTER_ABILITY.value,
+        CommandType.UNREGISTER_ABILITY.value,
+        CommandType.LIST_AGENTS.value,
+        CommandType.HEALTH_CHECK.value,
+        CommandType.DELEGATE.value,
+        CommandType.GET_AGENT_INFO.value,
+        CommandType.INIT_CLUSTER.value,
+        CommandType.SHUTDOWN_CLUSTER.value,
+        CommandType.CLUSTER_STATUS.value,
+        CommandType.LIST_CLUSTERS.value,
+        CommandType.SESSION_CREATE.value,
+        CommandType.SESSION_SWITCH.value,
+        CommandType.SESSION_LIST.value,
+        CommandType.SESSION_ARCHIVE.value,
+        CommandType.SESSION_DELETE.value,
+    }
+)
 
-SESSION_COMMANDS: frozenset[str] = frozenset({
-    CommandType.SESSION_CREATE.value,
-    CommandType.SESSION_SWITCH.value,
-    CommandType.SESSION_LIST.value,
-    CommandType.SESSION_ARCHIVE.value,
-    CommandType.SESSION_DELETE.value,
-})
+SESSION_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.SESSION_CREATE.value,
+        CommandType.SESSION_SWITCH.value,
+        CommandType.SESSION_LIST.value,
+        CommandType.SESSION_ARCHIVE.value,
+        CommandType.SESSION_DELETE.value,
+    }
+)
 
-WORKSPACE_COMMANDS: frozenset[str] = frozenset({
-    CommandType.CREATE_WORKSPACE.value,
-    CommandType.DESTROY_WORKSPACE.value,
-    CommandType.WORKSPACE_SNAPSHOT.value,
-    CommandType.WORKSPACE_ROLLBACK.value,
-    CommandType.WORKSPACE_DIFF.value,
-    CommandType.WORKSPACE_STATUS.value,
-    CommandType.WORKSPACE_REGISTER.value,
-    CommandType.WORKSPACE_GET.value,
-    CommandType.WORKSPACE_LIST.value,
-})
+WORKSPACE_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.CREATE_WORKSPACE.value,
+        CommandType.DESTROY_WORKSPACE.value,
+        CommandType.WORKSPACE_SNAPSHOT.value,
+        CommandType.WORKSPACE_ROLLBACK.value,
+        CommandType.WORKSPACE_DIFF.value,
+        CommandType.WORKSPACE_STATUS.value,
+        CommandType.WORKSPACE_REGISTER.value,
+        CommandType.WORKSPACE_GET.value,
+        CommandType.WORKSPACE_LIST.value,
+    }
+)
 
-MANIFEST_COMMANDS: frozenset[str] = frozenset({
-    CommandType.MANIFEST_LIST_ABILITIES.value,
-    CommandType.MANIFEST_GET_ABILITY.value,
-    CommandType.MANIFEST_PUT_ABILITY.value,
-    CommandType.MANIFEST_DELETE_ABILITY.value,
-    CommandType.MANIFEST_LIST_AGENTS.value,
-    CommandType.MANIFEST_GET_AGENT.value,
-    CommandType.MANIFEST_PUT_AGENT.value,
-    CommandType.MANIFEST_DELETE_AGENT.value,
-    CommandType.MANIFEST_RESOLVE_AGENT.value,
-    CommandType.MANIFEST_VALIDATE.value,
-})
+MANIFEST_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.MANIFEST_LIST_ABILITIES.value,
+        CommandType.MANIFEST_GET_ABILITY.value,
+        CommandType.MANIFEST_PUT_ABILITY.value,
+        CommandType.MANIFEST_DELETE_ABILITY.value,
+        CommandType.MANIFEST_LIST_AGENTS.value,
+        CommandType.MANIFEST_GET_AGENT.value,
+        CommandType.MANIFEST_PUT_AGENT.value,
+        CommandType.MANIFEST_DELETE_AGENT.value,
+        CommandType.MANIFEST_RESOLVE_AGENT.value,
+        CommandType.MANIFEST_VALIDATE.value,
+    }
+)
 
-CHAIN_HISTORY_COMMANDS: frozenset[str] = frozenset({
-    CommandType.GET_CHAIN_HISTORY.value,
-})
+CHAIN_HISTORY_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.GET_CHAIN_HISTORY.value,
+    }
+)
 
-TASK_COMMANDS: frozenset[str] = frozenset({
-    CommandType.TASK_CREATE.value,
-    CommandType.TASK_UPDATE.value,
-    CommandType.TASK_ASSIGN.value,
-    CommandType.TASK_START.value,
-    CommandType.TASK_COMPLETE.value,
-    CommandType.TASK_FAIL.value,
-    CommandType.TASK_CANCEL.value,
-    CommandType.TASK_BLOCK.value,
-    CommandType.TASK_LIST.value,
-    CommandType.TASK_GET.value,
-    CommandType.TASK_DELETE.value,
-})
+TASK_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.TASK_CREATE.value,
+        CommandType.TASK_UPDATE.value,
+        CommandType.TASK_ASSIGN.value,
+        CommandType.TASK_START.value,
+        CommandType.TASK_COMPLETE.value,
+        CommandType.TASK_FAIL.value,
+        CommandType.TASK_CANCEL.value,
+        CommandType.TASK_BLOCK.value,
+        CommandType.TASK_LIST.value,
+        CommandType.TASK_GET.value,
+        CommandType.TASK_DELETE.value,
+    }
+)
 
-PROJECT_COMMANDS: frozenset[str] = frozenset({
-    CommandType.PROJECT_CREATE.value,
-    CommandType.PROJECT_UPDATE.value,
-    CommandType.PROJECT_LIST.value,
-    CommandType.PROJECT_GET.value,
-    CommandType.PROJECT_ARCHIVE.value,
-    CommandType.PROJECT_RESTORE.value,
-    CommandType.PROJECT_DELETE.value,
-    CommandType.PROJECT_ADD_AGENT.value,
-    CommandType.PROJECT_REMOVE_AGENT.value,
-    CommandType.PROJECT_LINK_TASK.value,
-    CommandType.PROJECT_UNLINK_TASK.value,
-    CommandType.PROJECT_SET_RECOVERY.value,
-    CommandType.PROJECT_PAUSE.value,
-    CommandType.PROJECT_RESUME.value,
-    CommandType.PROJECT_STOP.value,
-})
+PROJECT_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.PROJECT_CREATE.value,
+        CommandType.PROJECT_UPDATE.value,
+        CommandType.PROJECT_LIST.value,
+        CommandType.PROJECT_GET.value,
+        CommandType.PROJECT_ARCHIVE.value,
+        CommandType.PROJECT_RESTORE.value,
+        CommandType.PROJECT_DELETE.value,
+        CommandType.PROJECT_ADD_AGENT.value,
+        CommandType.PROJECT_REMOVE_AGENT.value,
+        CommandType.PROJECT_LINK_TASK.value,
+        CommandType.PROJECT_UNLINK_TASK.value,
+        CommandType.PROJECT_SET_RECOVERY.value,
+        CommandType.PROJECT_PAUSE.value,
+        CommandType.PROJECT_RESUME.value,
+        CommandType.PROJECT_STOP.value,
+    }
+)
 
-ROOM_COMMANDS: frozenset[str] = frozenset({
-    CommandType.ROOM_CREATE.value,
-    CommandType.ROOM_LIST.value,
-    CommandType.ROOM_GET.value,
-    CommandType.ROOM_UPDATE.value,
-    CommandType.ROOM_ARCHIVE.value,
-    CommandType.ROOM_RESTORE.value,
-    CommandType.ROOM_DELETE.value,
-    CommandType.ROOM_JOIN.value,
-    CommandType.ROOM_LEAVE.value,
-    CommandType.ROOM_GET_MEMBERS.value,
-    CommandType.ROOM_GET_LOG.value,
-    CommandType.ROOM_SEND.value,
-})
+ROOM_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.ROOM_CREATE.value,
+        CommandType.ROOM_LIST.value,
+        CommandType.ROOM_GET.value,
+        CommandType.ROOM_UPDATE.value,
+        CommandType.ROOM_ARCHIVE.value,
+        CommandType.ROOM_RESTORE.value,
+        CommandType.ROOM_DELETE.value,
+        CommandType.ROOM_JOIN.value,
+        CommandType.ROOM_LEAVE.value,
+        CommandType.ROOM_GET_MEMBERS.value,
+        CommandType.ROOM_GET_LOG.value,
+        CommandType.ROOM_SEND.value,
+    }
+)
 
-RECONCILE_COMMANDS: frozenset[str] = frozenset({
-    CommandType.RECONCILE_NOW.value,
-    CommandType.RECONCILE_STATUS.value,
-})
+RECONCILE_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.RECONCILE_NOW.value,
+        CommandType.RECONCILE_STATUS.value,
+    }
+)
 
 
 # ─── Project 附属枚举 ───

@@ -72,9 +72,7 @@ class TestExtractReasoningContent:
         assert extract_reasoning_content(resp) is None
 
     def test_empty_reasoning_returns_none(self) -> None:
-        resp = LLMResponse(
-            content_blocks=[ReasoningBlock(reasoning=""), TextBlock(text="answer")]
-        )
+        resp = LLMResponse(content_blocks=[ReasoningBlock(reasoning=""), TextBlock(text="answer")])
         assert extract_reasoning_content(resp) is None
 
     def test_empty_content_blocks_returns_none(self) -> None:

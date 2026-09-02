@@ -42,15 +42,11 @@ class PermissionFlags(BaseModel):
             net_access=overrides.net_access or self.net_access,
             shell_access=overrides.shell_access or self.shell_access,
             allowed_paths=(
-                overrides.allowed_paths
-                if overrides.allowed_paths
-                else self.allowed_paths
+                overrides.allowed_paths if overrides.allowed_paths else self.allowed_paths
             ),
             denied_paths=self.denied_paths + overrides.denied_paths,
             allowed_commands=(
-                overrides.allowed_commands
-                if overrides.allowed_commands
-                else self.allowed_commands
+                overrides.allowed_commands if overrides.allowed_commands else self.allowed_commands
             ),
             denied_commands=self.denied_commands + overrides.denied_commands,
         )

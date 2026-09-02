@@ -157,9 +157,10 @@ class TestManifestStoreAbilityCRUD:
 
     def test_list_abilities_by_namespace(self, store: ManifestStore) -> None:
         store.put_ability("ghrah.fs.read_file", VALID_ABILITY_YAML)
-        store.put_ability("my_project.my_ability", VALID_ABILITY_YAML.replace(
-            "ghrah.fs", "my_project"
-        ).replace("read_file", "my_ability"))
+        store.put_ability(
+            "my_project.my_ability",
+            VALID_ABILITY_YAML.replace("ghrah.fs", "my_project").replace("read_file", "my_ability"),
+        )
         result = store.list_abilities(namespace="ghrah.fs")
         assert result == ["ghrah.fs.read_file"]
 
@@ -185,9 +186,7 @@ class TestManifestStoreAbilityCRUD:
 
     def test_put_ability_overwrite(self, store: ManifestStore) -> None:
         store.put_ability("ghrah.fs.read_file", VALID_ABILITY_YAML)
-        modified = VALID_ABILITY_YAML.replace(
-            "Read file contents", "Read file contents v2"
-        )
+        modified = VALID_ABILITY_YAML.replace("Read file contents", "Read file contents v2")
         store.put_ability("ghrah.fs.read_file", modified, overwrite=True)
         manifest = store.get_ability("ghrah.fs.read_file")
         assert manifest.metadata.description == "Read file contents v2"
@@ -259,9 +258,7 @@ class TestManifestStoreAgentCRUD:
 
     def test_put_agent_overwrite(self, store: ManifestStore) -> None:
         store.put_agent("my_project.dev_agent", VALID_AGENT_YAML)
-        modified = VALID_AGENT_YAML.replace(
-            "You are a dev agent.", "You are a dev agent v2."
-        )
+        modified = VALID_AGENT_YAML.replace("You are a dev agent.", "You are a dev agent v2.")
         store.put_agent("my_project.dev_agent", modified, overwrite=True)
         manifest = store.get_agent("my_project.dev_agent")
         assert manifest.system_prompt == "You are a dev agent v2."
@@ -332,8 +329,9 @@ class TestManifestStoreValidateManifest:
     def test_validate_invalid_type(self, store: ManifestStore) -> None:
         is_valid, errors = store.validate_manifest(INVALID_MANIFEST_TYPE)
         assert is_valid is False
-        assert any("Unknown" in e or "unknown" in e.lower() or "missing" in e.lower()
-                    for e in errors)
+        assert any(
+            "Unknown" in e or "unknown" in e.lower() or "missing" in e.lower() for e in errors
+        )
 
     def test_validate_invalid_yaml_syntax(self, store: ManifestStore) -> None:
         is_valid, errors = store.validate_manifest(":::invalid{{yaml")
@@ -408,9 +406,7 @@ class TestManifestStoreListingEmpty:
 class TestManifestServiceCommand:
     def test_list_abilities(self, store: ManifestStore) -> None:
         store.put_ability("ghrah.fs.read_file", VALID_ABILITY_YAML)
-        result = handle_manifest_command(
-            "manifest_list_abilities", {}, store
-        )
+        result = handle_manifest_command("manifest_list_abilities", {}, store)
         assert result["success"] is True
         assert "ghrah.fs.read_file" in [a["full_name"] for a in result["data"]["abilities"]]
 
@@ -469,9 +465,7 @@ class TestManifestServiceCommand:
             {"full_name": "ghrah.fs.read_file", "content": VALID_ABILITY_YAML},
             store,
         )
-        modified = VALID_ABILITY_YAML.replace(
-            "Read file contents", "Read file contents v2"
-        )
+        modified = VALID_ABILITY_YAML.replace("Read file contents", "Read file contents v2")
         result = handle_manifest_command(
             "manifest_put_ability",
             {
@@ -494,9 +488,7 @@ class TestManifestServiceCommand:
 
     def test_list_agents(self, store: ManifestStore) -> None:
         store.put_agent("my_project.dev_agent", VALID_AGENT_YAML)
-        result = handle_manifest_command(
-            "manifest_list_agents", {}, store
-        )
+        result = handle_manifest_command("manifest_list_agents", {}, store)
         assert result["success"] is True
         assert "my_project.dev_agent" in [a["full_name"] for a in result["data"]["agents"]]
 
@@ -549,9 +541,7 @@ class TestManifestServiceCommand:
         assert result["data"]["valid"] is False
 
     def test_unknown_command(self, store: ManifestStore) -> None:
-        result = handle_manifest_command(
-            "manifest_unknown", {}, store
-        )
+        result = handle_manifest_command("manifest_unknown", {}, store)
         assert result["success"] is False
         assert "Unknown" in result["error"]
 

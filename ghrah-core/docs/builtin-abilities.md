@@ -419,11 +419,11 @@ ability = ExecuteCommandAbility(command_runner=sandbox_executor)
 
 ```python
 # 子命令级分类示例
-checker.check_command("git status")   # → SAFE
-checker.check_command("git clean")    # → DANGEROUS
-checker.check_command("git commit")   # → REQUIRE_HITL
-checker.check_command("npm test")     # → SAFE
-checker.check_command("npm publish")   # → DANGEROUS
+checker.check_command("git status")  # → SAFE
+checker.check_command("git clean")  # → DANGEROUS
+checker.check_command("git commit")  # → REQUIRE_HITL
+checker.check_command("npm test")  # → SAFE
+checker.check_command("npm publish")  # → DANGEROUS
 ```
 
 分类优先级：
@@ -819,10 +819,12 @@ approval_hook = AccessApprovalHook(checker)
 agent.register_ability(ConversationAbility())
 agent.register_ability(EndTaskAbility())
 agent.register_ability(ReadFileAbility(permission_checker=checker))
-agent.register_ability(WriteFileAbility(
-    permission_checker=checker,
-    hooks=[approval_hook],
-))
+agent.register_ability(
+    WriteFileAbility(
+        permission_checker=checker,
+        hooks=[approval_hook],
+    )
+)
 ```
 
 ### 命令执行 Agent
@@ -838,10 +840,12 @@ agent.register_ability(ConversationAbility())
 agent.register_ability(EndTaskAbility())
 agent.register_ability(ReadFileAbility(permission_checker=fs_checker))
 agent.register_ability(ListDirectoryAbility(permission_checker=fs_checker))
-agent.register_ability(ExecuteCommandAbility(
-    command_checker=command_checker,
-    hooks=[command_hook],
-))
+agent.register_ability(
+    ExecuteCommandAbility(
+        command_checker=command_checker,
+        hooks=[command_hook],
+    )
+)
 ```
 
 ### 集群协作 Agent

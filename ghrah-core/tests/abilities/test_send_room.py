@@ -86,9 +86,7 @@ class TestSendAbility:
         assert set(params) == {"room_ids", "message", "targets"}
 
     async def test_no_supervisor(self) -> None:
-        ctx = AbilityExecutionContext(
-            supervisor=None, agent_name="a", tool_args={}
-        )
+        ctx = AbilityExecutionContext(supervisor=None, agent_name="a", tool_args={})
         result = await SendAbility().execute(ctx)
         assert result.outcome == ActionOutcome.FAILURE
         assert "No supervisor" in result.data["error"]
@@ -126,16 +124,21 @@ class TestSendAbility:
         assert result.outcome == ActionOutcome.SUCCESS
         # human 成员不计；跨 room 去重；targets 并入
         assert result.data["recipients"] == [
-            "architect", "frontend-dev", "tester", "extern",
+            "architect",
+            "frontend-dev",
+            "tester",
+            "extern",
         ]
         # 投递排除发送者自身
         assert result.data["delivered_to"] == ["frontend-dev", "tester", "extern"]
         # 逐 room 落账，data = {message, targets}
         assert [(c[0], c[1]) for c in bridge.append_calls] == [
-            ("r1", "architect"), ("r2", "architect"),
+            ("r1", "architect"),
+            ("r2", "architect"),
         ]
         assert bridge.append_calls[0][2] == {
-            "message": "hello", "targets": ["extern"],
+            "message": "hello",
+            "targets": ["extern"],
         }
 
     async def test_empty_targets_broadcast_semantics(self) -> None:
@@ -153,9 +156,7 @@ class TestSendAbility:
     async def test_unknown_room_fails(self) -> None:
         bridge = _FakeBridge(fail_room="missing")
         supervisor = _make_supervisor(bridge)
-        ctx = _make_context(
-            supervisor, {"room_ids": ["missing"], "message": "hi"}
-        )
+        ctx = _make_context(supervisor, {"room_ids": ["missing"], "message": "hi"})
         result = await SendAbility().execute(ctx)
         assert result.outcome == ActionOutcome.FAILURE
         assert "room not found: missing" in result.data["error"]
@@ -169,14 +170,14 @@ class TestSendAbility:
                     return {"success": False, "error": "boom"}
                 return {"success": True}
 
-        bridge = _PartialBridge(rooms={
-            "r1": [{"subject": "a", "subject_type": "agent"}],
-            "r2": [{"subject": "b", "subject_type": "agent"}],
-        })
-        supervisor = _make_supervisor(bridge)
-        ctx = _make_context(
-            supervisor, {"room_ids": ["r1", "r2"], "message": "hi"}
+        bridge = _PartialBridge(
+            rooms={
+                "r1": [{"subject": "a", "subject_type": "agent"}],
+                "r2": [{"subject": "b", "subject_type": "agent"}],
+            }
         )
+        supervisor = _make_supervisor(bridge)
+        ctx = _make_context(supervisor, {"room_ids": ["r1", "r2"], "message": "hi"})
         result = await SendAbility().execute(ctx)
         assert result.outcome == ActionOutcome.FAILURE
         assert "failed to append room log" in result.data["error"]
@@ -248,9 +249,7 @@ class TestSerialRoomBridge:
 
         serial = self._serial_router({"command/room_send": room_send})
         bridge = SerialRoomBridge(serial)  # type: ignore[arg-type]
-        result = await bridge.append_room_log(
-            "r1", author="architect", data={"message": "hi"}
-        )
+        result = await bridge.append_room_log("r1", author="architect", data={"message": "hi"})
         assert result["success"]
         # D3 契约：command/room_send + author_type 固定 agent
         name, payload = calls[0]

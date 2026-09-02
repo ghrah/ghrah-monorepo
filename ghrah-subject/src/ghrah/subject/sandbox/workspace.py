@@ -221,7 +221,9 @@ class WorkspaceManager:
             if result.subject_id != self._subject_id:
                 logger.info(
                     "Skipping orphan %s: subject_id mismatch (%s != %s)",
-                    locator, result.subject_id, self._subject_id,
+                    locator,
+                    result.subject_id,
+                    self._subject_id,
                 )
                 continue
             if result.workspace_id in seen_ids:

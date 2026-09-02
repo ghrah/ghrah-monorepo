@@ -109,9 +109,7 @@ class TestEndToEndSmoke:
 
             # list_agents
             agent_id = spawn["data"]["agent_id"]
-            listed = await bridge_command(
-                ctx, "list_agents", {"project_id": project["project_id"]}
-            )
+            listed = await bridge_command(ctx, "list_agents", {"project_id": project["project_id"]})
             assert listed["success"]
             names = [a["name"] for a in listed["data"]["agents"]]
             assert "smoke-agent" in names
@@ -132,9 +130,7 @@ class TestEndToEndSmoke:
                 ctx, "list_agents", {"project_id": project["project_id"]}
             )
             stopped = next(
-                agent
-                for agent in listed_after["data"]["agents"]
-                if agent["agent_id"] == agent_id
+                agent for agent in listed_after["data"]["agents"] if agent["agent_id"] == agent_id
             )
             assert stopped["runtime_state"] == "stopped"
 

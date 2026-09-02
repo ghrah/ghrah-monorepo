@@ -139,7 +139,7 @@ class InitProjectAbility(Ability):
 
     async def _init_frontend(self, target_path: str) -> ActionResult:
         result = subprocess.run(
-            ["pnpm", "create", "vue@latest", target_path, "--ts", "--router" ,"--pinia","--force"],
+            ["pnpm", "create", "vue@latest", target_path, "--ts", "--router", "--pinia", "--force"],
             capture_output=True,
             text=True,
         )

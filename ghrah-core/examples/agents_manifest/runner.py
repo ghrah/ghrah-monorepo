@@ -120,9 +120,7 @@ class ManifestRunner:
             config.context.persistence_root_dir = str(self._persistence_dir)
             config.context.persistence_run_id = self._session_id
 
-    def _instantiate_abilities(
-        self, resolved_abilities: list[ResolvedAbility]
-    ) -> list[Ability]:
+    def _instantiate_abilities(self, resolved_abilities: list[ResolvedAbility]) -> list[Ability]:
         abilities: list[Ability] = []
         for ra in resolved_abilities:
             ability = self._instantiate_ability(ra)
@@ -132,9 +130,7 @@ class ManifestRunner:
     def _instantiate_ability(self, ra: ResolvedAbility) -> Ability:
         handler = ra.implementation.handler
         if handler is None:
-            raise ValueError(
-                f"ResolvedAbility {ra.ability_name} has no implementation.handler"
-            )
+            raise ValueError(f"ResolvedAbility {ra.ability_name} has no implementation.handler")
 
         ability_cls = _HANDLER_TO_ABILITY.get(handler)
         if ability_cls is None:
@@ -161,9 +157,7 @@ class ManifestRunner:
     def _make_permission_checker(self, permissions: PermissionFlags) -> FSPermissionChecker:
         if not permissions.allowed_paths:
             return FSPermissionChecker(require_approval=permissions.require_hitl)
-        resolved_paths = [
-            self._apply_template_vars(p) for p in permissions.allowed_paths
-        ]
+        resolved_paths = [self._apply_template_vars(p) for p in permissions.allowed_paths]
         return FSPermissionChecker(
             allowed_paths=resolved_paths,
             require_approval=permissions.require_hitl,

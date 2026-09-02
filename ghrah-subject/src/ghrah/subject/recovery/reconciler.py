@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from ghrah.protocol.types import ProjectStatus, RecoveryAction
+
 from ghrah.subject.config import RecoveryConfig
 from ghrah.subject.recovery.desired_state import (
     DesiredStateRecord,
@@ -159,9 +160,7 @@ class ReconciliationService:
 
     async def _load_projects(self) -> list[ProjectRecord]:
         """从 ProjectManager/ProjectStore 读取恢复权威状态。"""
-        result = await self._project_mgr.handle_command(
-            "project_list", {"include_deleted": False}
-        )
+        result = await self._project_mgr.handle_command("project_list", {"include_deleted": False})
         if not result.get("success"):
             raise RuntimeError(result.get("error") or "project_list failed")
         from ghrah.subject.project.models import ProjectRecord
@@ -285,9 +284,7 @@ class ReconciliationService:
         for agent in project.agents:
             if not agent.agent_id:
                 legacy_name_counts[agent.name] = legacy_name_counts.get(agent.name, 0) + 1
-        ambiguous_legacy = {
-            name for name, count in legacy_name_counts.items() if count > 1
-        }
+        ambiguous_legacy = {name for name, count in legacy_name_counts.items() if count > 1}
         for cluster_id in project.cluster_ids:
             try:
                 handle = self._cluster_transport.get_handle(cluster_id)

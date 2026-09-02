@@ -106,9 +106,9 @@ async def test_subject_restart_restores_two_durable_agents_from_project_store(
             assert session.session_id in before[name]["session_ids"]
 
         # ProjectStore 已提交完整 durable 意图；DesiredStateStore 只是缓存。
-        stored = _data(
-            await bridge_command(first_ctx, "project_get", {"project_id": project_id})
-        )["project"]
+        stored = _data(await bridge_command(first_ctx, "project_get", {"project_id": project_id}))[
+            "project"
+        ]
         assert {a["agent_id"] for a in stored["agents"]} == {
             item["agent_id"] for item in before.values()
         }
@@ -136,9 +136,7 @@ async def test_subject_restart_restores_two_durable_agents_from_project_store(
         assert report["agents_initialized"] == 0
 
         restored_project = _data(
-            await bridge_command(
-                restarted_ctx, "project_get", {"project_id": project_id}
-            )
+            await bridge_command(restarted_ctx, "project_get", {"project_id": project_id})
         )["project"]
         assert restored_project["cluster_ids"] == [cluster_id]
         restored_task = _data(
@@ -182,9 +180,7 @@ async def test_corrupt_agent_snapshot_fails_closed_without_blocking_peer(
             await bridge_command(first_ctx, "project_create", {"name": "corruption-e2e"})
         )["project"]
         cluster_id = project["cluster_ids"][0]
-        action_db = ProjectPaths.from_locator(
-            project["project_root_locator"]
-        ).action_chain_db_path
+        action_db = ProjectPaths.from_locator(project["project_root_locator"]).action_chain_db_path
         for name in ("healthy", "corrupt"):
             added = _data(
                 await bridge_command(
@@ -221,8 +217,7 @@ async def test_corrupt_agent_snapshot_fails_closed_without_blocking_peer(
         assert report["agents_restored"] == 1
         assert report["agents_failed"] == 1
         assert any(
-            item["agent_id"] == identities["corrupt"]
-            and item["outcome"] == "failed"
+            item["agent_id"] == identities["corrupt"] and item["outcome"] == "failed"
             for item in report["agent_results"]
         )
 
@@ -230,9 +225,7 @@ async def test_corrupt_agent_snapshot_fails_closed_without_blocking_peer(
         core_registry = registry.get_handle(cluster_id)._unit.supervisor._registry
         assert core_registry.exists("healthy")
         assert not core_registry.exists("corrupt")
-        healthy_cm = _actor(
-            restarted_ctx, cluster_id, "healthy"
-        )._context_manager
+        healthy_cm = _actor(restarted_ctx, cluster_id, "healthy")._context_manager
         assert healthy_cm.get_current_state() == {"owner": "healthy"}
 
         # fail-closed：损坏快照的 meta 与旧节点均未被空白初始化覆盖。
@@ -264,14 +257,12 @@ async def test_restart_migrates_unique_legacy_name_snapshot_to_stable_uuid(
 
     async with Context() as first_ctx:
         await assemble_subject(first_ctx, config, profile="full")
-        project = _data(
-            await bridge_command(first_ctx, "project_create", {"name": "legacy-e2e"})
-        )["project"]
+        project = _data(await bridge_command(first_ctx, "project_create", {"name": "legacy-e2e"}))[
+            "project"
+        ]
         project_id = project["project_id"]
         cluster_id = project["cluster_ids"][0]
-        action_db = ProjectPaths.from_locator(
-            project["project_root_locator"]
-        ).action_chain_db_path
+        action_db = ProjectPaths.from_locator(project["project_root_locator"]).action_chain_db_path
         added = _data(
             await bridge_command(
                 first_ctx,
@@ -319,9 +310,7 @@ async def test_restart_migrates_unique_legacy_name_snapshot_to_stable_uuid(
         assert report["agents_restored"] == 1
 
         project = _data(
-            await bridge_command(
-                restarted_ctx, "project_get", {"project_id": project_id}
-            )
+            await bridge_command(restarted_ctx, "project_get", {"project_id": project_id})
         )["project"]
         migrated_agent_id = project["agents"][0]["agent_id"]
         assert len(migrated_agent_id) == 32
@@ -331,6 +320,4 @@ async def test_restart_migrates_unique_legacy_name_snapshot_to_stable_uuid(
         assert cm.chain.active_head is not None
         assert cm.chain.active_head.id == old_head_id
         assert cm.get_current_state() == {"legacy": True}
-        assert action_db.with_name(
-            f"{action_db.name}.pre-agent-id-migration.bak"
-        ).is_file()
+        assert action_db.with_name(f"{action_db.name}.pre-agent-id-migration.bak").is_file()

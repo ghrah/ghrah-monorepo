@@ -174,13 +174,9 @@ class WorkspaceUnit(SubjectUnit):
         if project.get("archived_at") or project.get("deleted_at"):
             return {"success": False, "data": None, "error": "resource_archived"}
         matches = [
-            agent
-            for agent in project.get("agents") or []
-            if agent.get("agent_id") == agent_id
+            agent for agent in project.get("agents") or [] if agent.get("agent_id") == agent_id
         ]
-        if len(matches) != 1 or (
-            agent_name and matches[0].get("name") != agent_name
-        ):
+        if len(matches) != 1 or (agent_name and matches[0].get("name") != agent_name):
             return {"success": False, "data": None, "error": "agent_project_mismatch"}
         return {
             "success": True,

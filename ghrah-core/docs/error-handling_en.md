@@ -209,7 +209,7 @@ from ghrah.core.exceptions import (
 )
 
 try:
-        response = await agent.receive(message)
+    response = await agent.receive(message)
 except AgentInitializationError as e:
     # Agent initialization failed — check agentconf
     print(f"Initialization failed, check configuration: {e}")

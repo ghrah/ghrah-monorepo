@@ -27,12 +27,12 @@ from ghrah.context.manager import ContextManager
 
 cm = ContextManager(
     agent_name="my-agent",
-    initial_state={"key": "value"},    # Initial state
-    snapshot_interval=5,                # Snapshot interval
+    initial_state={"key": "value"},  # Initial state
+    snapshot_interval=5,  # Snapshot interval
     system_prompt="You are an assistant",  # System prompt
-    window_manager=wm,                  # Window manager (optional)
-    persistence=backend,               # Persistence backend (optional)
-    auto_persist=False,                 # Auto-persist
+    window_manager=wm,  # Window manager (optional)
+    persistence=backend,  # Persistence backend (optional)
+    auto_persist=False,  # Auto-persist
 )
 ```
 
@@ -235,11 +235,11 @@ from ghrah.core.config import AgentConfig, ContextConfig
 config = AgentConfig(
     name="my-agent",
     context=ContextConfig(
-        persistence_type="json_file",      # Or "memory"
-        persistence_root_dir="/tmp/data",   # JSON file storage directory
-        persistence_compress=True,          # gzip compression
-        snapshot_interval=5,                # Snapshot interval
-        auto_persist=False,                 # Auto-persist
+        persistence_type="json_file",  # Or "memory"
+        persistence_root_dir="/tmp/data",  # JSON file storage directory
+        persistence_compress=True,  # gzip compression
+        snapshot_interval=5,  # Snapshot interval
+        auto_persist=False,  # Auto-persist
     ),
 )
 ```

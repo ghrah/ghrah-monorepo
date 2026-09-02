@@ -184,9 +184,7 @@ class TestAgentInfo:
         assert config_dict["description"] == sample_config.description
         assert config_dict["max_iterations"] == sample_config.max_iterations
 
-    def test_to_dict_serializes_context_config(
-        self, mock_handle: MagicMock
-    ) -> None:
+    def test_to_dict_serializes_context_config(self, mock_handle: MagicMock) -> None:
         """to_dict 在含 ContextConfig 时应正常序列化（ContextConfig 已纯数据）。
 
         回归 RecursionError：曾因 ContextConfig 携带运行时服务引用

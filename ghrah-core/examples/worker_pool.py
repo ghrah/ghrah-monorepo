@@ -141,10 +141,7 @@ async def main() -> None:
     # 并行执行所有 worker 任务
     worker_names = [f"solve_worker_{i}" for i in range(num_workers)]
     results = await asyncio.gather(
-        *[
-            dispatch_task(name, task)
-            for name, task in zip(worker_names, tasks)
-        ]
+        *[dispatch_task(name, task) for name, task in zip(worker_names, tasks)]
     )
 
     for name, result in zip(worker_names, results):

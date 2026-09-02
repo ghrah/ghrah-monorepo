@@ -57,15 +57,16 @@ graph TD
 from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 from ghrah.abilities.context import AbilityExecutionContext
 
+
 class MyHook(Hook):
     """自定义 Hook 示例"""
-    
+
     hook_point = HookPoint.BEFORE_ACTION  # 指定触发点
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         """判断是否触发，返回 True 时执行"""
         return context.current_ability_name == "my_ability"
-    
+
     async def execute(
         self, context: AbilityExecutionContext, result: ActionResult | None
     ) -> HookResult:
@@ -112,11 +113,12 @@ HookResult.route_to("end_task")
 ```python
 class ConversationDoneHook(Hook):
     """ConversationAbility 执行完成后终止循环"""
+
     hook_point = HookPoint.AFTER_ACTION
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         return context.current_ability_name == "conversation"
-    
+
     async def execute(self, context, result) -> HookResult:
         return HookResult.stop()  # 纯对话只需一次 LLM 调用
 ```
@@ -128,16 +130,17 @@ class ConversationDoneHook(Hook):
 ```python
 class AccessApprovalHook(Hook):
     """访问操作人工批准 Hook"""
+
     hook_point = HookPoint.PRE_EXECUTE
-    
+
     WRITE_ABILITIES = {"write_file", "edit_file", "move_file", "delete_file"}
     READ_ABILITIES = {"read_file", "list_directory"}
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         # 对读写类 Ability 触发检查
         name = context.current_ability_name
         return name in self.WRITE_ABILITIES or name in self.READ_ABILITIES
-    
+
     async def execute(self, context, result) -> HookResult:
         # 请求人工批准
         tool_args = context.tool_args or context.accumulated_data.get("tool_args", {})
@@ -173,17 +176,19 @@ class FSPermissionChecker:
 from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 from ghrah.abilities.context import AbilityExecutionContext
 
+
 class RateLimitHook(Hook):
     """限制 Ability 调用次数"""
+
     hook_point = HookPoint.BEFORE_ACTION
-    
+
     def __init__(self, max_calls: int = 10):
         self._max_calls = max_calls
         self._call_count = 0
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         return True  # 始终触发
-    
+
     async def execute(self, context, result) -> HookResult:
         self._call_count += 1
         if self._call_count >= self._max_calls:
@@ -196,13 +201,15 @@ class RateLimitHook(Hook):
 ```python
 import logging
 
+
 class LoggingHook(Hook):
     """记录每次 action 的执行"""
+
     hook_point = HookPoint.AFTER_ACTION
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         return True
-    
+
     async def execute(self, context, result) -> HookResult:
         logging.info(
             f"Ability {context.current_ability_name} executed: "
@@ -216,8 +223,9 @@ class LoggingHook(Hook):
 ```python
 class DelegateToExpertHook(Hook):
     """根据内容路由到专业 Agent"""
+
     hook_point = HookPoint.BEFORE_ACTION
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         # 检查消息内容是否包含代码相关关键词
         messages = context.context_manager.message_store.get_recent_messages(1)
@@ -225,7 +233,7 @@ class DelegateToExpertHook(Hook):
             content = messages[0].content.lower()
             return "代码" in content or "编程" in content
         return False
-    
+
     async def execute(self, context, result) -> HookResult:
         return HookResult.route_to("coder")  # 路由到编码 Agent
 ```

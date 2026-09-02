@@ -8,9 +8,10 @@ on:
       - "py/ghrah-subject@*"
       - "npm/ghrah-protocol@*"
       - "npm/ghrah-observer-core@*"
+      - "vscode/ghrah-vscode-extension@*"
 
 permissions:
-  id-token: write   # PyPI / npm trusted publishing (OIDC)
+  id-token: write
   contents: read
 
 jobs:
@@ -21,12 +22,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - name: 路由 tag → 包
+      - name: 路由并校验 tag
         id: route
+        shell: bash
         run: |
-          pkg=$(echo "${{ github.ref_name }}" | sed 's|py/\(.*\)@.*|\1|')
+          ref="${GITHUB_REF_NAME#py/}"
+          pkg="${ref%@*}"
+          version="${ref##*@}"
+          case "$pkg" in
+            ghrah-core|ghrah-protocol|ghrah-subject) ;;
+            *) echo "::error::未知 PyPI 包：$pkg"; exit 1 ;;
+          esac
+          python3 scripts/check_release_tag.py --target "py/$pkg" --version "$version"
           echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
       - run: uv build --package ${{ steps.route.outputs.pkg }} --out-dir dist
+      - run: uvx --from twine==7.0.0 twine check dist/*
       - uses: pypa/gh-action-pypi-publish@release/v1
 
   npm:
@@ -40,20 +50,29 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install
-      - name: 路由 tag → 包
+      - run: pnpm install --frozen-lockfile
+      - name: 路由并校验 tag
         id: route
+        shell: bash
         run: |
-          pkg=$(echo "${{ github.ref_name }}" | sed 's|npm/ghrah-\(.*\)@.*|\1|')
-          echo "pkg=$pkg" >> "$GITHUB_OUTPUT"
-      # 依赖序：protocol 先发布，observer-core 消费其 dist
+          ref="${GITHUB_REF_NAME#npm/}"
+          pkg="${ref%@*}"
+          version="${ref##*@}"
+          case "$pkg" in
+            ghrah-protocol|ghrah-observer-core) ;;
+            *) echo "::error::未知 npm 包：$pkg"; exit 1 ;;
+          esac
+          python3 scripts/check_release_tag.py --target "npm/$pkg" --version "$version"
+          echo "scope_pkg=${pkg#ghrah-}" >> "$GITHUB_OUTPUT"
       - run: pnpm --filter @ghrah/protocol build
       - run: pnpm --filter @ghrah/observer-core build
-        if: steps.route.outputs.pkg == 'observer-core'
-      - run: pnpm --filter @ghrah/${{ steps.route.outputs.pkg }} publish --no-git-checks --access public
+        if: steps.route.outputs.scope_pkg == 'observer-core'
+      - run: >-
+          pnpm --filter @ghrah/${{ steps.route.outputs.scope_pkg }} publish
+          --no-git-checks --access public --registry https://registry.npmjs.org
 
   vscode:
-    if: startsWith(github.ref_name, 'py/ghrah-subject@')
+    if: startsWith(github.ref_name, 'vscode/')
     runs-on: ubuntu-latest
     environment: vscode-marketplace
     steps:
@@ -63,9 +82,18 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install
-      - run: pnpm --filter @ghrah/protocol build
+      - run: pnpm install --frozen-lockfile
+      - name: 校验 tag
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME##*@}"
+          python3 scripts/check_release_tag.py \
+            --target vscode/ghrah-vscode-extension --version "$version"
+      - run: pnpm --dir ghrah-observer-webui/vscode-extension build
+      - run: pnpm --dir ghrah-observer-webui/vscode-extension exec vsce ls
       - name: 发布 VS Code 扩展
-        run: pnpm --dir ghrah-observer-webui/vscode-extension exec vsce publish
+        run: >-
+          pnpm --dir ghrah-observer-webui/vscode-extension exec vsce publish
+          --no-dependencies
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}

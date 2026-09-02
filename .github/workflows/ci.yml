@@ -13,11 +13,12 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: uv sync --all-packages
-      - run: uv run ruff check
+      - run: uv sync --all-packages --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
       # mypy 门禁当前仅 protocol（零错误基线）；core/subject 存量 strict 债务见 plans/todo/mypy-strict-debt.md
       - run: cd ghrah-protocol && MYPYPATH=src uv run mypy --explicit-package-bases -p ghrah.protocol
-      - run: uv run pytest ghrah-protocol ghrah-core ghrah-subject shuoxi
+      - run: uv run pytest ghrah-protocol ghrah-core ghrah-subject
 
   web:
     runs-on: ubuntu-latest
@@ -28,8 +29,9 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       # build 先于 test：observer-core / observer-web 消费 protocol 的 dist
       - run: pnpm --filter @ghrah/protocol build && pnpm --filter @ghrah/observer-core build
       - run: pnpm -r test
       - run: pnpm type-check
+      - run: pnpm lint

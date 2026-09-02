@@ -17,9 +17,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
-
 from ghrah.protocol.types import ProjectStatus, RecoveryAction
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 __all__ = [
     "PROJECT_TRANSITIONS",
@@ -182,8 +181,7 @@ PROJECT_TRANSITIONS: dict[ProjectStatus, frozenset[ProjectStatus]] = {
 
 # 文档性常量：用于在注释/校验信息中引用状态机不变量，非运行期消费。
 AGENT_TRANSITIONS_NOTE = (
-    "ACTIVE<->PAUSED, ACTIVE/PAUSED->STOPPED, ACTIVE->FAILED, "
-    "STOPPED/FAILED->ACTIVE"
+    "ACTIVE<->PAUSED, ACTIVE/PAUSED->STOPPED, ACTIVE->FAILED, STOPPED/FAILED->ACTIVE"
 )
 
 
@@ -236,9 +234,7 @@ class ProjectRecord(BaseModel):
     def _ser_dt(self, value: datetime | None) -> str | None:
         return value.isoformat() if value is not None else None
 
-    @field_validator(
-        "created_at", "updated_at", "archived_at", "deleted_at", mode="before"
-    )
+    @field_validator("created_at", "updated_at", "archived_at", "deleted_at", mode="before")
     @classmethod
     def _coerce_dt(cls, value: Any) -> Any:
         if value is None or isinstance(value, datetime):

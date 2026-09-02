@@ -148,9 +148,7 @@ class TestOptimisticLock:
         with pytest.raises(ConcurrentModificationError):
             await store.update(record.task_id, expected_version=1, mutator=_noop)
 
-    async def test_update_expected_version_none_skips_check(
-        self, store: TaskStore
-    ) -> None:
+    async def test_update_expected_version_none_skips_check(self, store: TaskStore) -> None:
         record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
 
@@ -158,9 +156,7 @@ class TestOptimisticLock:
             r.title = "T2"
             return r
 
-        updated = await store.update(
-            record.task_id, expected_version=None, mutator=_bump
-        )
+        updated = await store.update(record.task_id, expected_version=None, mutator=_bump)
         assert updated is not None
         assert updated.version == 2
 
@@ -168,10 +164,7 @@ class TestOptimisticLock:
         def _noop(r: TaskRecord) -> TaskRecord:
             return r
 
-        assert (
-            await store.update("nonexistent", expected_version=None, mutator=_noop)
-            is None
-        )
+        assert await store.update("nonexistent", expected_version=None, mutator=_noop) is None
 
     async def test_update_mutator_applied(self, store: TaskStore) -> None:
         record = make_task_record(title="T", project_id="proj-1")
@@ -187,9 +180,7 @@ class TestOptimisticLock:
         assert updated.title == "Changed"
         assert updated.status == TaskStatus.IN_PROGRESS
 
-    async def test_update_reads_raw_row_including_deleted(
-        self, store: TaskStore
-    ) -> None:
+    async def test_update_reads_raw_row_including_deleted(self, store: TaskStore) -> None:
         record = make_task_record(title="T", project_id="proj-1")
         await store.upsert(record)
         assert await store.soft_delete(record.task_id) is True
@@ -199,9 +190,7 @@ class TestOptimisticLock:
             return r
 
         # update 读 raw 行，已软删仍可更新
-        updated = await store.update(
-            record.task_id, expected_version=None, mutator=_bump
-        )
+        updated = await store.update(record.task_id, expected_version=None, mutator=_bump)
         assert updated is not None
         assert updated.title == "After delete"
         assert updated.deleted_at is not None
@@ -300,9 +289,7 @@ class TestListFilters:
 
     async def test_list_by_status(self, store: TaskStore) -> None:
         await self._seed_many(store)
-        result = await store.list(
-            status="pending", include_terminal=True
-        )
+        result = await store.list(status="pending", include_terminal=True)
         assert {r.task_id[0] for r in result} == {"a"}
 
     async def test_list_by_parent_id(self, store: TaskStore) -> None:
@@ -323,9 +310,7 @@ class TestListFilters:
 
     async def test_list_limit(self, store: TaskStore) -> None:
         for i in range(5):
-            await store.upsert(
-                _make(task_id=hex(i)[2:] * 32, title=f"T{i}")
-            )
+            await store.upsert(_make(task_id=hex(i)[2:] * 32, title=f"T{i}"))
         result = await store.list(limit=3, include_terminal=True)
         assert len(result) == 3
 
@@ -365,15 +350,11 @@ class TestCountDependents:
         assert await store.count_dependents("b" * 32) == 1
         assert await store.count_dependents("a" * 32) == 0
 
-    async def test_count_dependents_substring_no_false_positive(
-        self, store: TaskStore
-    ) -> None:
+    async def test_count_dependents_substring_no_false_positive(self, store: TaskStore) -> None:
         """task_id 互为子串时不得误判（验证门核心）。"""
         short = "abc"
         long_id = "abc123"
-        depender = _make(
-            task_id="d" * 32, title="D", dependencies=[long_id]
-        )
+        depender = _make(task_id="d" * 32, title="D", dependencies=[long_id])
         await store.upsert(depender)
         assert await store.count_dependents(short) == 0
         assert await store.count_dependents(long_id) == 1
@@ -392,23 +373,17 @@ class TestCountDependents:
 
     async def test_count_dependents_excludes_deleted(self, store: TaskStore) -> None:
         target = "t" * 32
-        depender = _make(
-            task_id="d" * 32, title="D", dependencies=[target]
-        )
+        depender = _make(task_id="d" * 32, title="D", dependencies=[target])
         await store.upsert(depender)
         assert await store.count_dependents(target) == 1
         assert await store.soft_delete(depender.task_id) is True
         assert await store.count_dependents(target) == 0
 
-    async def test_count_dependents_id_as_substring_of_another_dep(
-        self, store: TaskStore
-    ) -> None:
+    async def test_count_dependents_id_as_substring_of_another_dep(self, store: TaskStore) -> None:
         """target 是另一依赖项的子串，但仍不应误判。"""
         target = "ab"
         other = "abxy"
-        depender = _make(
-            task_id="d" * 32, title="D", dependencies=[other]
-        )
+        depender = _make(task_id="d" * 32, title="D", dependencies=[other])
         await store.upsert(depender)
         assert await store.count_dependents(target) == 0
         assert await store.count_dependents(other) == 1
@@ -417,9 +392,7 @@ class TestCountDependents:
 class TestCountChildren:
     async def test_count_children(self, store: TaskStore) -> None:
         for i in range(2):
-            await store.upsert(
-                _make(task_id=hex(i)[2:] * 32, title=f"C{i}", parent_id="p1")
-            )
+            await store.upsert(_make(task_id=hex(i)[2:] * 32, title=f"C{i}", parent_id="p1"))
         # 一个不属于 p1
         await store.upsert(_make(task_id="f" * 32, title="F", parent_id="p2"))
         assert await store.count_children("p1") == 2
@@ -484,9 +457,7 @@ class TestReopenPersistence:
 
 
 class TestProjectIdMigration:
-    async def test_migrates_old_db_without_project_id_column(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_migrates_old_db_without_project_id_column(self, tmp_path: Path) -> None:
         """旧库（无 project_id 列）经 start() 迁移后可正常读写，旧行落 sentinel。"""
         import aiosqlite
 
@@ -578,9 +549,7 @@ class TestReassignProjectId:
             _make(task_id="b" * 32, title="B", project_id="", status=TaskStatus.PENDING)
         )
 
-        migrated = await store.reassign_project_id(
-            "", "default", include_terminal=False
-        )
+        migrated = await store.reassign_project_id("", "default", include_terminal=False)
         assert migrated == 1
         got_a = await store.get("a" * 32)
         assert got_a is not None and got_a.project_id == ""  # 终态未迁移
@@ -589,9 +558,7 @@ class TestReassignProjectId:
         await store.upsert(_make(task_id="a" * 32, title="A", project_id=""))
         await store.soft_delete("a" * 32)
 
-        migrated = await store.reassign_project_id(
-            "", "default", include_deleted=False
-        )
+        migrated = await store.reassign_project_id("", "default", include_deleted=False)
         assert migrated == 0
         got_a = await store.get("a" * 32, include_deleted=True)
         assert got_a is not None and got_a.project_id == ""  # 软删未迁移

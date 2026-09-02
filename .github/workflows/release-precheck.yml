@@ -2,13 +2,9 @@ name: release-precheck
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: "版本号（如 0.2.0 / 0.2.0b1）"
-        required: true
 
-env:
-  V: ${{ inputs.version }}
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -24,51 +20,40 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      - name: 版本一致性（pyproject / package.json == 输入版本）
+      - name: 冻结安装
         run: |
-          for p in ghrah-core ghrah-protocol ghrah-subject; do
-            v=$(grep -m1 '^version' $p/pyproject.toml | cut -d'"' -f2)
-            [ "$v" = "$V" ] || { echo "::error::$p pyproject version=$v != $V"; exit 1; }
-          done
-          for p in ghrah-observer-webui/packages/protocol ghrah-observer-webui/packages/observer-core ghrah-observer-webui/vscode-extension; do
-            v=$(node -p "require('./$p/package.json').version")
-            [ "$v" = "$V" ] || { echo "::error::$p package.json version=$v != $V"; exit 1; }
-          done
+          uv sync --all-packages --frozen
+          pnpm install --frozen-lockfile
 
-      - name: 依赖下限一致性（ghrah-* 互依 >= 当前版本）
+      - name: Python 质量门禁
         run: |
-          grep -q "ghrah-protocol>=$V" ghrah-core/pyproject.toml || { echo "::error::core 依赖下限未随版本更新"; exit 1; }
-          grep -q "ghrah-core>=$V" ghrah-subject/pyproject.toml || { echo "::error::subject 依赖下限未随版本更新"; exit 1; }
-          grep -q "ghrah-protocol>=$V" ghrah-subject/pyproject.toml || { echo "::error::subject 依赖下限未随版本更新"; exit 1; }
+          uv run ruff check .
+          uv run ruff format --check .
+          cd ghrah-protocol
+          MYPYPATH=src uv run mypy --explicit-package-bases -p ghrah.protocol
+          cd ..
+          uv run pytest ghrah-protocol ghrah-core ghrah-subject
 
-      - name: 全量测试 + 类型检查
+      - name: TypeScript 质量门禁
         run: |
-          uv sync --all-packages
-          uv run ruff check
-          cd ghrah-protocol && MYPYPATH=src uv run mypy --explicit-package-bases -p ghrah.protocol && cd ..
-          uv run pytest ghrah-protocol ghrah-core ghrah-subject shuoxi
-          pnpm install
-          pnpm --filter @ghrah/protocol build && pnpm --filter @ghrah/observer-core build
+          pnpm --filter @ghrah/protocol build
+          pnpm --filter @ghrah/observer-core build
           pnpm -r test
           pnpm type-check
+          pnpm lint
 
-      - name: 三包构建 + 内容审查（无 plans/.kilo/缓存夹带）
-        run: |
-          uv build --package ghrah-core --out-dir /tmp/dist-core
-          uv build --package ghrah-protocol --out-dir /tmp/dist-protocol
-          uv build --package ghrah-subject --out-dir /tmp/dist-subject
-          for f in /tmp/dist-*/*.tar.gz; do
-            tar tzf "$f" | grep -E "\.kilo|plans/|__pycache__|\.mypy_cache" && { echo "::error::$f 夹带本地产物"; exit 1; } || true
-          done
+      - name: REUSE 许可门禁
+        run: uvx --from reuse==6.2.0 reuse lint
 
-      - name: 打六个发布 tag 并推送
-        run: |
-          for t in "v$V" "py/ghrah-core@$V" "py/ghrah-protocol@$V" "py/ghrah-subject@$V" "npm/ghrah-protocol@$V" "npm/ghrah-observer-core@$V"; do
-            git tag "$t"
-          done
-          git push origin --tags
+      - name: 构建并审计全部发布产物
+        run: uv run python scripts/release_dry_run.py --all --out-dir release-dist
 
-      - name: 创建 GitHub Release（更新日志人工维护）
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "v$V" --generate-notes
+      - name: PyPI 元数据门禁
+        run: uvx --from twine==7.0.0 twine check release-dist/python/*/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghrah-release-dry-run
+          path: release-dist/
+          if-no-files-found: error
+          retention-days: 7

@@ -50,18 +50,19 @@ classDiagram
 from abc import ABC, abstractmethod
 from ghrah.abilities.base import Ability, ActionOutcome, ActionResult
 
+
 class MyAbility(Ability):
     @property
     def name(self) -> str:
         return "my_ability"
-    
+
     async def execute(self, context: AbilityExecutionContext) -> ActionResult:
         # Implement capability logic
         return ActionResult(
             outcome=ActionOutcome.SUCCESS,
             data={"result": "done"},
         )
-    
+
     def get_hooks(self) -> list[Hook]:
         return []  # Or return custom hooks
 ```
@@ -89,8 +90,8 @@ class MyAbility(Ability):
 ```python
 @dataclass
 class ActionResult:
-    outcome: ActionOutcome       # Execution result type
-    data: dict[str, Any] = {}    # Result data
+    outcome: ActionOutcome  # Execution result type
+    data: dict[str, Any] = {}  # Result data
     next_action_hint: str | None = None  # Suggested next action
 ```
 
@@ -110,13 +111,13 @@ class ActionResult:
 ```python
 @dataclass
 class AbilityExecutionContext:
-    current_ability_name: str = ""           # Current ability name
-    tool_args: dict[str, Any] = {}           # Tool call arguments
-    agent_state: dict[str, Any] = {}         # Agent full state (read-only)
-    context_manager: ContextManager | None   # ContextManager reference
-    current_node_id: str | None = None       # Current chain node ID
-    accumulated_data: dict[str, Any] = {}    # Accumulated data
-    last_action_result: ActionResult | None   # Last action result
+    current_ability_name: str = ""  # Current ability name
+    tool_args: dict[str, Any] = {}  # Tool call arguments
+    agent_state: dict[str, Any] = {}  # Agent full state (read-only)
+    context_manager: ContextManager | None  # ContextManager reference
+    current_node_id: str | None = None  # Current chain node ID
+    accumulated_data: dict[str, Any] = {}  # Accumulated data
+    last_action_result: ActionResult | None  # Last action result
 ```
 
 ### State API
@@ -204,13 +205,14 @@ from ghrah.abilities.base import Ability, ActionOutcome, ActionResult
 from ghrah.abilities.context import AbilityExecutionContext
 from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 
+
 class WeatherAbility(Ability):
     """Weather query capability"""
-    
+
     @property
     def name(self) -> str:
         return "weather"
-    
+
     async def execute(self, context: AbilityExecutionContext) -> ActionResult:
         city = context.tool_args.get("city", "Unknown")
         weather_info = f"{city}: Sunny today, 25°C"
@@ -218,10 +220,10 @@ class WeatherAbility(Ability):
             outcome=ActionOutcome.SUCCESS,
             data={"weather": weather_info},
         )
-    
+
     def get_hooks(self) -> list[Hook]:
         return []
-    
+
     def bind_tool(self) -> dict[str, Any]:
         return {
             "type": "function",
@@ -240,7 +242,7 @@ class WeatherAbility(Ability):
                 },
             },
         }
-    
+
     def get_default_state(self) -> dict[str, Any]:
         return {"query_count": 0}
 ```
@@ -250,11 +252,12 @@ class WeatherAbility(Ability):
 ```python
 class RateLimitHook(Hook):
     """Rate limit Hook"""
+
     hook_point = HookPoint.PRE_EXECUTE
-    
+
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
         return context.current_ability_name == "weather"
-    
+
     async def execute(self, context, result=None) -> HookResult:
         state = context.get_ability_state()
         count = state.get("query_count", 0)
@@ -262,9 +265,10 @@ class RateLimitHook(Hook):
             return HookResult.stop()
         return HookResult.continue_()
 
+
 class WeatherAbility(Ability):
     # ... (same as above)
-    
+
     def get_hooks(self) -> list[Hook]:
         return [RateLimitHook()]
 ```

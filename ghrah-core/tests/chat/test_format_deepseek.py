@@ -99,9 +99,7 @@ class TestDeepSeekFormatRoundTrip:
 
     def test_user_message_no_reasoning_content(self) -> None:
         fmt = DeepSeekFormat(model="deepseek-reasoner")
-        messages = [
-            ChatMessage.user(text_or_blocks=[ReasoningBlock(reasoning="user thought")])
-        ]
+        messages = [ChatMessage.user(text_or_blocks=[ReasoningBlock(reasoning="user thought")])]
         result = fmt._format_messages(messages)
         assert "reasoning_content" not in result[0]
 

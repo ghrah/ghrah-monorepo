@@ -118,9 +118,7 @@ class ManifestResolver:
     def __init__(self, ability_store: ManifestStoreProtocol) -> None:
         self._store = ability_store
 
-    def resolve(
-        self, manifest: AgentManifest, runtime_name: str | None = None
-    ) -> ResolvedAgent:
+    def resolve(self, manifest: AgentManifest, runtime_name: str | None = None) -> ResolvedAgent:
         """将 AgentManifest 解析为 ResolvedAgent。
 
         Args:
@@ -138,9 +136,7 @@ class ManifestResolver:
         abilities = self._resolve_abilities(manifest.abilities)
         return ResolvedAgent(config=config, abilities=abilities)
 
-    def _build_config(
-        self, manifest: AgentManifest, runtime_name: str | None
-    ) -> AgentConfig:
+    def _build_config(self, manifest: AgentManifest, runtime_name: str | None) -> AgentConfig:
         """从 AgentManifest 构建 AgentConfig。"""
         name = runtime_name or manifest.metadata.name
         agent_config_name = manifest.model.agent_config_name
@@ -170,9 +166,7 @@ class ManifestResolver:
             model_overrides=model_overrides,
         )
 
-    def _resolve_abilities(
-        self, ability_refs: list[AbilityRef]
-    ) -> list[ResolvedAbility]:
+    def _resolve_abilities(self, ability_refs: list[AbilityRef]) -> list[ResolvedAbility]:
         """解析 AbilityRef 列表为 ResolvedAbility 列表。
 
         对于 ref 引用：从 store 加载 AbilityManifest，合并权限。
@@ -182,9 +176,7 @@ class ManifestResolver:
         for ref in ability_refs:
             if ref.ref:
                 ability_manifest = self._store.load_ability(ref.ref)
-                permissions = ability_manifest.metadata.permissions.merge(
-                    ref.permissions
-                )
+                permissions = ability_manifest.metadata.permissions.merge(ref.permissions)
                 r = ResolvedAbility(
                     ability_name=ability_manifest.full_name,
                     tool_schema=ability_manifest.tool,
@@ -195,12 +187,8 @@ class ManifestResolver:
             elif ref.type:
                 r = ResolvedAbility.from_builtin(ref.type)
                 if ref.permissions:
-                    r = dataclasses.replace(
-                        r, permissions=r.permissions.merge(ref.permissions)
-                    )
+                    r = dataclasses.replace(r, permissions=r.permissions.merge(ref.permissions))
             else:
-                raise ManifestValidationError(
-                    "AbilityRef must have either 'ref' or 'type'"
-                )
+                raise ManifestValidationError("AbilityRef must have either 'ref' or 'type'")
             resolved.append(r)
         return resolved

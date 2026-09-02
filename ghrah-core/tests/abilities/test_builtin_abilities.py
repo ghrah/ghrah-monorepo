@@ -376,8 +376,9 @@ class TestReadFileAbility:
         ctx = _make_context(
             accumulated_data={"tool_args": {"file_path": "/etc/passwd"}},
         )
-        checker = FSPermissionChecker(allowed_paths=["/tmp/data", "/home/user/docs"],
-                                      require_approval=False)
+        checker = FSPermissionChecker(
+            allowed_paths=["/tmp/data", "/home/user/docs"], require_approval=False
+        )
         ability = ReadFileAbility(permission_checker=checker)
         result = await ability.execute(ctx)
 
@@ -392,8 +393,9 @@ class TestReadFileAbility:
         ctx = _make_context(
             accumulated_data={"tool_args": {"file_path": "/etc/passwd"}},
         )
-        checker = FSPermissionChecker(allowed_paths=["/tmp/data", "/home/user/docs"],
-                                      require_approval=True)
+        checker = FSPermissionChecker(
+            allowed_paths=["/tmp/data", "/home/user/docs"], require_approval=True
+        )
         ability = ReadFileAbility(permission_checker=checker)
         result = await ability.execute(ctx)
 

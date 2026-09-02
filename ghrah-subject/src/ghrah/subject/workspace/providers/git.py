@@ -158,9 +158,7 @@ class GitWorkspaceProvider(VersionedWorkspaceProvider):
         await self._sandbox.execute_command(
             ["git", "config", "commit.gpgsign", "false"], cwd=ws_path
         )
-        await self._sandbox.execute_command(
-            ["git", "config", "tag.gpgsign", "false"], cwd=ws_path
-        )
+        await self._sandbox.execute_command(["git", "config", "tag.gpgsign", "false"], cwd=ws_path)
         # Windows 全局 core.autocrlf=true 会改写工作区文件行尾，污染
         # diff/rollback 语义；工作区快照按字节保真，显式关闭。
         await self._sandbox.execute_command(
@@ -174,9 +172,7 @@ class GitWorkspaceProvider(VersionedWorkspaceProvider):
             ["git", "commit", "-m", f"Initial workspace for {record.name}"], cwd=ws_path
         )
         if not commit_result.success:
-            logger.warning(
-                "Initial commit failed (may be empty): %s", commit_result.stderr
-            )
+            logger.warning("Initial commit failed (may be empty): %s", commit_result.stderr)
         logger.info("Initialized git workspace %s (%s)", record.workspace_id, ws_path)
 
     async def adopt(self, locator: str) -> AdoptResult | None:
@@ -255,14 +251,10 @@ class GitWorkspaceProvider(VersionedWorkspaceProvider):
         if not commit_result.success:
             raise SnapshotError(f"git commit failed: {commit_result.stderr}")
 
-        rev_result = await self._sandbox.execute_command(
-            ["git", "rev-parse", "HEAD"], cwd=ws_path
-        )
+        rev_result = await self._sandbox.execute_command(["git", "rev-parse", "HEAD"], cwd=ws_path)
         if not rev_result.success:
             raise SnapshotError(f"git rev-parse HEAD failed: {rev_result.stderr}")
-        logger.info(
-            "Git workspace %s snapshot: %s", record.workspace_id, rev_result.stdout.strip()
-        )
+        logger.info("Git workspace %s snapshot: %s", record.workspace_id, rev_result.stdout.strip())
         return rev_result.stdout.strip()
 
     async def diff(self, record: WorkspaceRecord, snapshot_id: str | None = None) -> str:
@@ -283,9 +275,7 @@ class GitWorkspaceProvider(VersionedWorkspaceProvider):
         if not checkout_result.success:
             raise SnapshotError(f"git checkout failed: {checkout_result.stderr}")
 
-        clean_result = await self._sandbox.execute_command(
-            ["git", "clean", "-fd"], cwd=ws_path
-        )
+        clean_result = await self._sandbox.execute_command(["git", "clean", "-fd"], cwd=ws_path)
         if not clean_result.success and clean_result.stderr:
             logger.warning("git clean warning: %s", clean_result.stderr)
         logger.info("Git workspace %s rolled back to %s", record.workspace_id, snapshot_id)

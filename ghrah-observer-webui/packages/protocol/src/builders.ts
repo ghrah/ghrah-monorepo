@@ -18,10 +18,7 @@ export function createCommand(
   };
 }
 
-export function createEvent(
-  eventType: EventType,
-  payload: Record<string, unknown>,
-): ServerMessage {
+export function createEvent(eventType: EventType, payload: Record<string, unknown>): ServerMessage {
   return {
     type: eventType,
     payload,

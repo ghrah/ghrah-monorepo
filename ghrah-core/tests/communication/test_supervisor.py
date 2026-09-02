@@ -236,9 +236,7 @@ class TestSupervisorPersistenceRecovery:
         assert restored_cm.chain.active_head is not None
         assert restored_cm.chain.active_head.id == committed.id
         assert restored_cm.get_current_state() == {"phase": "waiting"}
-        assert old_node_ids.issubset(
-            {node.id for node in await backend.load_chain("recoverable")}
-        )
+        assert old_node_ids.issubset({node.id for node in await backend.load_chain("recoverable")})
 
     @pytest.mark.asyncio
     async def test_restore_discards_legacy_messages_not_represented_by_chain_nodes(
@@ -267,9 +265,7 @@ class TestSupervisorPersistenceRecovery:
         await first.terminate_agent("recoverable")
 
         restarted = SupervisorActor()
-        await restarted.spawn_agent(
-            config, abilities=[], persistence_factory=lambda _: backend
-        )
+        await restarted.spawn_agent(config, abilities=[], persistence_factory=lambda _: backend)
         restored = restarted._registry.get_info("recoverable").actor_handle._context_manager
         texts = [message.text for message in restored.message_store.current_messages]
 

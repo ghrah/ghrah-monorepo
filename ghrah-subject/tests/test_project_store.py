@@ -188,12 +188,8 @@ class TestOptimisticLock:
     async def test_update_chained_versions(self, store: ProjectStore) -> None:
         record = make_project_record(name="P1")
         await store.upsert(record)
-        await store.update(
-            record.project_id, 1, lambda r: r.model_copy(update={"name": "P2"})
-        )
-        v3 = await store.update(
-            record.project_id, 2, lambda r: r.model_copy(update={"name": "P3"})
-        )
+        await store.update(record.project_id, 1, lambda r: r.model_copy(update={"name": "P2"}))
+        v3 = await store.update(record.project_id, 2, lambda r: r.model_copy(update={"name": "P3"}))
         assert v3.version == 3
         got = await store.get(record.project_id)
         assert got is not None
@@ -250,9 +246,7 @@ class TestArchiveRestoreHardDelete:
         assert await store.hard_delete(record.project_id, record.version) is True
         assert await store.get(record.project_id, include_archived=True) is None
 
-    async def test_start_migrates_legacy_deleted_row_to_archived(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_start_migrates_legacy_deleted_row_to_archived(self, tmp_path: Path) -> None:
         db_path = tmp_path / "legacy-deleted.db"
         record = _make(deleted=True)
         legacy = ProjectStore(db_path)
@@ -263,8 +257,7 @@ class TestArchiveRestoreHardDelete:
         # Simulate a pre-C1 schema version so startup executes the data migration.
         with sqlite3.connect(db_path) as db:
             db.execute(
-                "UPDATE subject_schema_versions SET version = 2 "
-                "WHERE component = 'project_store'"
+                "UPDATE subject_schema_versions SET version = 2 WHERE component = 'project_store'"
             )
 
         migrated = ProjectStore(db_path)

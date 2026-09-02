@@ -419,11 +419,11 @@ Multi-faceted commands (git, npm, pip, etc.) support sub-command level classific
 
 ```python
 # Sub-command classification examples
-checker.check_command("git status")   # → SAFE
-checker.check_command("git clean")    # → DANGEROUS
-checker.check_command("git commit")   # → REQUIRE_HITL
-checker.check_command("npm test")     # → SAFE
-checker.check_command("npm publish")   # → DANGEROUS
+checker.check_command("git status")  # → SAFE
+checker.check_command("git clean")  # → DANGEROUS
+checker.check_command("git commit")  # → REQUIRE_HITL
+checker.check_command("npm test")  # → SAFE
+checker.check_command("npm publish")  # → DANGEROUS
 ```
 
 Classification priority:
@@ -819,10 +819,12 @@ approval_hook = AccessApprovalHook(checker)
 agent.register_ability(ConversationAbility())
 agent.register_ability(EndTaskAbility())
 agent.register_ability(ReadFileAbility(permission_checker=checker))
-agent.register_ability(WriteFileAbility(
-    permission_checker=checker,
-    hooks=[approval_hook],
-))
+agent.register_ability(
+    WriteFileAbility(
+        permission_checker=checker,
+        hooks=[approval_hook],
+    )
+)
 ```
 
 ### Command Execution Agent
@@ -838,10 +840,12 @@ agent.register_ability(ConversationAbility())
 agent.register_ability(EndTaskAbility())
 agent.register_ability(ReadFileAbility(permission_checker=fs_checker))
 agent.register_ability(ListDirectoryAbility(permission_checker=fs_checker))
-agent.register_ability(ExecuteCommandAbility(
-    command_checker=command_checker,
-    hooks=[command_hook],
-))
+agent.register_ability(
+    ExecuteCommandAbility(
+        command_checker=command_checker,
+        hooks=[command_hook],
+    )
+)
 ```
 
 ### Cluster Collaboration Agent

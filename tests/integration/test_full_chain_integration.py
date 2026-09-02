@@ -118,9 +118,7 @@ class TestFullChainIntegration:
         )
         assert result is not None
 
-        event_type, event = await self.collector.wait_for(
-            "agent_spawned", timeout=30.0
-        )
+        event_type, event = await self.collector.wait_for("agent_spawned", timeout=30.0)
         assert event_type == "agent_spawned"
         payload = event.payload if hasattr(event, "payload") else event
         assert payload.get("name") == "coder"
@@ -147,9 +145,7 @@ class TestFullChainIntegration:
         )
         assert response is not None
 
-        event_type, event = await self.collector.wait_for(
-            "action_chain_updated", timeout=60.0
-        )
+        event_type, event = await self.collector.wait_for("action_chain_updated", timeout=60.0)
         assert event_type in (
             "action_chain_updated",
             "agent_response",
@@ -177,9 +173,7 @@ class TestFullChainIntegration:
             "请在 /tmp/ 下创建一个名为 hello.py 的文件，内容为 print('Hello, ghrah!')",
         )
 
-        event_type, event = await self.collector.wait_for(
-            "hitl_request", timeout=120.0
-        )
+        event_type, event = await self.collector.wait_for("hitl_request", timeout=120.0)
         assert event_type == "hitl_request"
         payload = event.payload if hasattr(event, "payload") else event
         promise_id = payload.get("promise_id")
@@ -190,9 +184,7 @@ class TestFullChainIntegration:
             approved=True,
         )
 
-        event_type, event = await self.collector.wait_for(
-            "action_chain_updated", timeout=60.0
-        )
+        event_type, event = await self.collector.wait_for("action_chain_updated", timeout=60.0)
         assert event_type in (
             "action_chain_updated",
             "ability_result",
@@ -226,7 +218,8 @@ class TestFullChainIntegration:
         )
 
         write_event_type, write_event = await self.collector.wait_for(
-            "ability_result", timeout=120.0,
+            "ability_result",
+            timeout=120.0,
             predicate=lambda e: (
                 (e.payload if hasattr(e, "payload") else e).get("ability_name") == "write_file"
             ),
@@ -242,7 +235,8 @@ class TestFullChainIntegration:
         )
 
         read_event_type, read_event = await self.collector.wait_for(
-            "ability_result", timeout=60.0,
+            "ability_result",
+            timeout=60.0,
             predicate=lambda e: (
                 (e.payload if hasattr(e, "payload") else e).get("ability_name") == "read_file"
             ),
@@ -275,9 +269,7 @@ class TestFullChainIntegration:
             "你好。",
         )
 
-        event_type, event = await self.collector.wait_for(
-            "agent_response", timeout=60.0
-        )
+        event_type, event = await self.collector.wait_for("agent_response", timeout=60.0)
         assert event_type in (
             "agent_response",
             "action_chain_updated",

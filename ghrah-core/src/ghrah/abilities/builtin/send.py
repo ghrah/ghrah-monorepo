@@ -48,10 +48,7 @@ class SendInput(BaseModel):
     )
     targets: list[str] | None = Field(
         default=None,
-        description=(
-            "Optional extra direct targets (agent names) in addition to "
-            "the room members"
-        ),
+        description=("Optional extra direct targets (agent names) in addition to the room members"),
     )
 
 
@@ -161,9 +158,7 @@ class SendAbility(Ability):
         )
 
     @staticmethod
-    async def _deliver(
-        supervisor: Any, target: str, content: str, sender: str
-    ) -> None:
+    async def _deliver(supervisor: Any, target: str, content: str, sender: str) -> None:
         try:
             await supervisor.send(target=target, content=content, sender=sender)
         except Exception as e:

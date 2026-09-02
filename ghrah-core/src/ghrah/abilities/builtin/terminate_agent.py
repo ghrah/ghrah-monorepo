@@ -55,10 +55,7 @@ class TerminateAgentAbility(Ability):
         }
 
     def to_prompt_description(self) -> str:
-        return (
-            "terminate_agent(agent_name: str) -> dict: "
-            "Terminate an agent in the cluster"
-        )
+        return "terminate_agent(agent_name: str) -> dict: Terminate an agent in the cluster"
 
     def get_hooks(self) -> list[Hook]:
         return []

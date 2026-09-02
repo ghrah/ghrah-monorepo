@@ -24,8 +24,8 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
-
 from ghrah.protocol.types import ProjectStatus
+
 from ghrah.subject.project.models import ProjectRecord
 
 logger = logging.getLogger(__name__)
@@ -311,9 +311,7 @@ class ProjectStore:
         """清除 archived_at；恢复后保持 stopped，不自动启动运行资源。"""
 
         def _restore(record: ProjectRecord) -> ProjectRecord:
-            return record.model_copy(
-                update={"archived_at": None, "status": ProjectStatus.STOPPED}
-            )
+            return record.model_copy(update={"archived_at": None, "status": ProjectStatus.STOPPED})
 
         return await self.update(project_id, expected_version, _restore)
 
@@ -345,9 +343,7 @@ class ProjectStore:
         """创建事务补偿：硬删除尚未对外提交的 ProjectRecord。"""
         async with self._lock:
             db = self._require_db()
-            await db.execute(
-                "DELETE FROM subject_projects WHERE project_id = ?", (project_id,)
-            )
+            await db.execute("DELETE FROM subject_projects WHERE project_id = ?", (project_id,))
 
     # ─── 读取 ───
 

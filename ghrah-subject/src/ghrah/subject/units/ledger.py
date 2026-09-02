@@ -16,6 +16,7 @@ from typing import Any
 
 from ghrah.context.persistence import serialize_node  # type: ignore[import-untyped]
 from ghrah.protocol.types import GetChainHistoryPayload
+
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.ledger.chain import ActionChainLedger
 from ghrah.subject.project.paths import ProjectPaths
@@ -172,9 +173,7 @@ class LedgerUnit(SubjectUnit):
         if not project:
             raise ValueError(f"project not found: {project_id}")
         matches = [
-            agent
-            for agent in project.get("agents") or []
-            if agent.get("agent_id") == agent_id
+            agent for agent in project.get("agents") or [] if agent.get("agent_id") == agent_id
         ]
         if len(matches) != 1:
             raise ValueError("agent_project_mismatch")

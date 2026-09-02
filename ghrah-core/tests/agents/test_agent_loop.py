@@ -559,8 +559,7 @@ class TestDriveLoop:
 
         assert route_hook._call_count >= 1
         assert (
-            agent._iteration_state.pending_route == "step2"
-            or agent._iteration_state.iteration >= 1
+            agent._iteration_state.pending_route == "step2" or agent._iteration_state.iteration >= 1
         )
 
     @pytest.mark.asyncio
@@ -744,8 +743,7 @@ class TestReceiveIntegration:
         reply2 = await agent.receive(msg2)
         assert reply2.content == "Response 2"
         assert [
-            message.role
-            for message in agent._context_manager.message_store.current_messages
+            message.role for message in agent._context_manager.message_store.current_messages
         ] == ["user", "ai", "user", "ai"]
 
     @pytest.mark.asyncio
@@ -804,9 +802,7 @@ class TestReceiveIntegration:
         agent._event_publisher = publisher
 
         await agent.receive(_make_message("one"))
-        agent._llm.generate.return_value = LLMResponse(
-            content_blocks=[TextBlock(text="second")]
-        )
+        agent._llm.generate.return_value = LLMResponse(content_blocks=[TextBlock(text="second")])
         await agent.receive(_make_message("two"))
 
         chain_events = [
@@ -873,17 +869,9 @@ class TestReceiveIntegration:
             if call.args[0].event_type == CoreEventType.ACTION_CHAIN_UPDATED
         ]
         assert len(chain_events) == 2
-        assert any(
-            message["role"] == "user"
-            for message in chain_events[0].node["messages_delta"]
-        )
-        assert all(
-            message["role"] != "user"
-            for message in chain_events[1].node["messages_delta"]
-        )
-        assert [
-            event.node["metadata"]["delivery_context"] for event in chain_events
-        ] == [
+        assert any(message["role"] == "user" for message in chain_events[0].node["messages_delta"])
+        assert all(message["role"] != "user" for message in chain_events[1].node["messages_delta"])
+        assert [event.node["metadata"]["delivery_context"] for event in chain_events] == [
             {
                 "room_id": "room-1",
                 "project_id": "project-1",
@@ -1378,9 +1366,7 @@ class TestMessageQueue:
         隐式清掉这些字段，必须在 reset() 中显式重置，否则状态泄漏到下一轮
         （例如 list_sessions() 的 iteration_count 报告旧值）。
         """
-        agent = _create_agent(
-            AgentConfig(name="test-agent", max_iterations=7)
-        )
+        agent = _create_agent(AgentConfig(name="test-agent", max_iterations=7))
         # 污染驱动循环状态
         agent._iteration_state.iteration = 3
         agent._iteration_state.pending_route = "step2"

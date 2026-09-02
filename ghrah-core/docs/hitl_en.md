@@ -18,8 +18,8 @@ Core principles:
 ```python
 from ghrah.core.hitl import HITLResult
 
-result = HITLResult(approved=True)             # Approved
-result = HITLResult(approved=False)            # Rejected
+result = HITLResult(approved=True)  # Approved
+result = HITLResult(approved=False)  # Rejected
 result = HITLResult(approved=True, result={"modified_args": ...})  # Approved with modifications
 ```
 
@@ -134,12 +134,13 @@ from ghrah.abilities.builtin import ReadFileAbility, WriteFileAbility, FSPermiss
 
 permission_checker = FSPermissionChecker(
     denied_paths=["/etc/shadow", "/etc/passwd"],  # Priority: deny list takes precedence
-    allowed_paths=["/tmp/workspace"],              # Whitelist directories: auto-approve
-    workspace_root="/home/user/project",           # Workspace root directory
+    allowed_paths=["/tmp/workspace"],  # Whitelist directories: auto-approve
+    workspace_root="/home/user/project",  # Workspace root directory
 )
 
 # AccessApprovalHook covers read_file, list_directory, write_file, edit_file, move_file, delete_file
 from ghrah.abilities.builtin.fs_permissions import AccessApprovalHook
+
 hook = AccessApprovalHook(permission_checker)
 ```
 
@@ -163,8 +164,10 @@ from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 from ghrah.abilities.context import AbilityExecutionContext
 from ghrah.abilities.base import ActionResult
 
+
 class DangerousOperationHook(Hook):
     """Dangerous operation approval Hook"""
+
     hook_point = HookPoint.PRE_EXECUTE
 
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
@@ -176,6 +179,7 @@ class DangerousOperationHook(Hook):
         return HookResult.hitl(
             message=f"Dangerous operation {context.current_ability_name} requires human approval"
         )
+
 
 # Register with Agent
 agent._ability_executor.update_hooks([DangerousOperationHook()])

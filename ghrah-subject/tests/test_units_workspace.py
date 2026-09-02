@@ -41,9 +41,7 @@ def _mount(ctx: Context, config: SubjectConfig) -> tuple[WorkspaceUnit, Fiber]:
 
 
 class _ProjectManagerStub:
-    async def handle_command(
-        self, command: str, payload: dict[str, object]
-    ) -> dict[str, object]:
+    async def handle_command(self, command: str, payload: dict[str, object]) -> dict[str, object]:
         assert command == "project_get"
         return {
             "success": True,

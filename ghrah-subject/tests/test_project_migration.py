@@ -37,9 +37,7 @@ def _seed_chain_db(path: Path) -> None:
 def _project(tmp_path: Path, project_id: str, agent_name: str):
     paths = ProjectPaths.from_locator(path_to_locator(str(tmp_path / project_id)))
     paths.initialize(project_id)
-    return make_project_record(
-        name=project_id, project_root_locator=paths.root_locator
-    ).model_copy(
+    return make_project_record(name=project_id, project_root_locator=paths.root_locator).model_copy(
         update={
             "project_id": project_id,
             "agents": [AgentSpec(name=agent_name, cluster_id=f"cluster-{project_id}")],
@@ -80,9 +78,7 @@ async def test_action_chains_split_by_unique_agent_and_are_idempotent(
         (alice, "alice", "bob"),
         (bob, "bob", "alice"),
     ):
-        target_path = ProjectPaths.from_locator(
-            project.project_root_locator
-        ).action_chain_db_path
+        target_path = ProjectPaths.from_locator(project.project_root_locator).action_chain_db_path
         target = sqlite3.connect(target_path)
         try:
             names = {row[0] for row in target.execute("SELECT agent_name FROM agents")}
@@ -101,9 +97,7 @@ async def test_action_chain_dry_run_reports_ambiguous_ownership(tmp_path: Path) 
     first = _project(tmp_path, "project-a", "alice")
     second = _project(tmp_path, "project-b", "alice")
 
-    report = await migrate_legacy_action_chains(
-        legacy, [first, second], dry_run=True
-    )
+    report = await migrate_legacy_action_chains(legacy, [first, second], dry_run=True)
 
     assert report.ambiguous_agents == ["alice"]
     assert report.total_rows == 0
@@ -114,9 +108,7 @@ async def test_project_agent_id_migration_rekeys_all_checkpoint_tables(
     tmp_path: Path,
 ) -> None:
     project = _project(tmp_path, "project-a", "alice")
-    action_db = ProjectPaths.from_locator(
-        project.project_root_locator
-    ).action_chain_db_path
+    action_db = ProjectPaths.from_locator(project.project_root_locator).action_chain_db_path
     _seed_chain_db(action_db)
 
     report = await migrate_project_agent_ids(project)
@@ -127,9 +119,7 @@ async def test_project_agent_id_migration_rekeys_all_checkpoint_tables(
     assert Path(report.backup_path or "").is_file()
     with sqlite3.connect(action_db) as db:
         for table in ("agents", "sessions", "nodes", "chain_meta", "messages"):
-            values = {
-                row[0] for row in db.execute(f"SELECT agent_name FROM {table}")
-            }
+            values = {row[0] for row in db.execute(f"SELECT agent_name FROM {table}")}
             assert agent_id in values
             assert "alice" not in values
             assert "bob" in values
@@ -165,15 +155,9 @@ async def test_project_agent_id_migration_rekeys_legacy_checkpoint_for_new_durab
     project = _project(tmp_path, "project-a", "alice")
     stable_id = "0123456789abcdef0123456789abcdef"
     project = project.model_copy(
-        update={
-            "agents": [
-                project.agents[0].model_copy(update={"agent_id": stable_id})
-            ]
-        }
+        update={"agents": [project.agents[0].model_copy(update={"agent_id": stable_id})]}
     )
-    action_db = ProjectPaths.from_locator(
-        project.project_root_locator
-    ).action_chain_db_path
+    action_db = ProjectPaths.from_locator(project.project_root_locator).action_chain_db_path
     _seed_chain_db(action_db)
 
     report = await migrate_project_agent_ids(project)
@@ -183,8 +167,6 @@ async def test_project_agent_id_migration_rekeys_legacy_checkpoint_for_new_durab
     assert report.migrated_rows == 5
     with sqlite3.connect(action_db) as db:
         for table in ("agents", "sessions", "nodes", "chain_meta", "messages"):
-            values = {
-                row[0] for row in db.execute(f"SELECT agent_name FROM {table}")
-            }
+            values = {row[0] for row in db.execute(f"SELECT agent_name FROM {table}")}
             assert stable_id in values
             assert "alice" not in values

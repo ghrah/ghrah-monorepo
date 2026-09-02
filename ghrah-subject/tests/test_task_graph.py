@@ -27,18 +27,14 @@ def _task(
 class TestAdjacency:
     def test_predecessors(self) -> None:
         # a 依赖 b, c
-        graph = TaskGraphView(
-            [_task("a", dependencies=["b", "c"]), _task("b"), _task("c")]
-        )
+        graph = TaskGraphView([_task("a", dependencies=["b", "c"]), _task("b"), _task("c")])
         assert graph.predecessors("a") == {"b", "c"}
         assert graph.predecessors("b") == set()
         assert graph.predecessors("c") == set()
 
     def test_dependents_of(self) -> None:
         # a 依赖 b, c -> b 和 c 的 dependents 都含 a
-        graph = TaskGraphView(
-            [_task("a", dependencies=["b", "c"]), _task("b"), _task("c")]
-        )
+        graph = TaskGraphView([_task("a", dependencies=["b", "c"]), _task("b"), _task("c")])
         assert graph.dependents_of("b") == {"a"}
         assert graph.dependents_of("c") == {"a"}
         assert graph.dependents_of("a") == set()

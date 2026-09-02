@@ -1,7 +1,22 @@
 {
   "name": "@ghrah/observer-core",
   "version": "0.2.0-alpha.0",
+  "description": "Framework-agnostic observer client, projections, and Pinia stores for ghrah",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ghrah/ghrah-monorepo.git",
+    "directory": "ghrah-observer-webui/packages/observer-core"
+  },
+  "homepage": "https://github.com/ghrah/ghrah-monorepo#readme",
+  "bugs": "https://github.com/ghrah/ghrah-monorepo/issues",
   "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -11,7 +26,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",

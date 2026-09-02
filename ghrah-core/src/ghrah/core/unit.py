@@ -33,29 +33,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from typing import Any, cast
 
-from ghrah.abilities.context import AbilityExecutionContext
-from ghrah.communication.errors import RegistryError
-from ghrah.communication.supervisor import SupervisorActor
-from ghrah.core.ability_protocol import AbilityProtocol
-from ghrah.core.config.builders import (
-    build_context_from_dict,
-    build_model_overrides_from_dict,
-    build_window_from_dict,
-)
-from ghrah.core.event_publisher import EventPublisher
-from ghrah.core.events import (
-    ActionChainUpdatedEvent,
-    AgentErrorEvent,
-    AgentResponseEvent,
-    CoreEvent,
-    CoreEventType,
-    HITLRequestEvent,
-    SessionArchivedEvent,
-    SessionCreatedEvent,
-    SessionDeletedEvent,
-    SessionSwitchedEvent,
-)
-from ghrah.core.room_protocol import SerialRoomBridge
 from ghrah.protocol.types import (
     AGENT_SCOPED_EVENT_TYPES,
     AbilityResultPayload,
@@ -79,6 +56,30 @@ from ghrah.protocol.types import (
     UnregisterAbilityPayload,
     generate_request_id,
 )
+
+from ghrah.abilities.context import AbilityExecutionContext
+from ghrah.communication.errors import RegistryError
+from ghrah.communication.supervisor import SupervisorActor
+from ghrah.core.ability_protocol import AbilityProtocol
+from ghrah.core.config.builders import (
+    build_context_from_dict,
+    build_model_overrides_from_dict,
+    build_window_from_dict,
+)
+from ghrah.core.event_publisher import EventPublisher
+from ghrah.core.events import (
+    ActionChainUpdatedEvent,
+    AgentErrorEvent,
+    AgentResponseEvent,
+    CoreEvent,
+    CoreEventType,
+    HITLRequestEvent,
+    SessionArchivedEvent,
+    SessionCreatedEvent,
+    SessionDeletedEvent,
+    SessionSwitchedEvent,
+)
+from ghrah.core.room_protocol import SerialRoomBridge
 from ghrah.types.config_types import AgentConfig
 from ghrah.types.results import ActionOutcome
 
@@ -301,9 +302,7 @@ class UnitEventPublisher(EventPublisher):
         payload["project_id"] = self._project_id
         payload["cluster_id"] = self._cluster_id
         payload["agent_id"] = (
-            self._agent_id_resolver(event.agent_name)
-            if self._agent_id_resolver is not None
-            else ""
+            self._agent_id_resolver(event.agent_name) if self._agent_id_resolver is not None else ""
         )
         # Agent 作用域事件缺失归属（project_id/agent_id 任一为空）时跳过发布：
         # 不以空值污染下游 Project 分桶，也不猜测归属（如 shutdown 后解析失败）。
@@ -311,8 +310,7 @@ class UnitEventPublisher(EventPublisher):
             not payload["project_id"] or not payload["agent_id"]
         ):
             logger.warning(
-                "Dropped unattributed core event '%s' for agent '%s' "
-                "(missing project_id/agent_id)",
+                "Dropped unattributed core event '%s' for agent '%s' (missing project_id/agent_id)",
                 event_type,
                 event.agent_name,
             )
@@ -526,9 +524,7 @@ class CoreUnit:
         # Room bridge（send 工具回路）：宿主 ctx 有 serial 时桥接 Subject RoomUnit
         # （duck-typed；standalone 场景无 serial → bridge 为 None，send 工具明确报错）
         serial = getattr(ctx, "serial", None)
-        room_bridge = (
-            SerialRoomBridge(serial) if callable(serial) else None
-        )
+        room_bridge = SerialRoomBridge(serial) if callable(serial) else None
 
         supervisor = SupervisorActor(
             default_timeout=self._config.default_timeout,

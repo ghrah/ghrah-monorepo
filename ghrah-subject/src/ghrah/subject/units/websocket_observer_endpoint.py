@@ -11,8 +11,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from fastapi import FastAPI, WebSocket
-
 from ghrah.protocol.types import EventType, Message
+
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.runtime.ouroboros_bridge import bridge_command
 from ghrah.subject.runtime.service_keys import OBSERVER_ENDPOINT, OBSERVER_EVENT_BUS

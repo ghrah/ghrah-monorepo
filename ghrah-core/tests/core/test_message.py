@@ -51,9 +51,7 @@ class TestMessage:
             {"type": "reasoning", "reasoning": "让我想想..."},
             {"type": "text", "text": "好的代码如下"},
         ]
-        reply = Message.create_reply(
-            original, "好的代码如下", content_blocks=blocks
-        )
+        reply = Message.create_reply(original, "好的代码如下", content_blocks=blocks)
         assert reply.content == "好的代码如下"
         assert reply.content_blocks == blocks
         assert reply.content_blocks[0]["type"] == "reasoning"

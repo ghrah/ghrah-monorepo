@@ -27,6 +27,7 @@ from ghrah.context.persistence import serialize_node  # type: ignore[import-unty
 from ghrah.context.persistence.sqlite_backend import (  # type: ignore[import-untyped]
     SqliteBackend,
 )
+
 from ghrah.subject.ledger.models import ChainMeta, DAGEntry, LedgerNode
 
 logger = logging.getLogger(__name__)

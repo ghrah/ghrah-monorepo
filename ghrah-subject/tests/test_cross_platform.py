@@ -27,9 +27,7 @@ from ghrah.subject.workspace.providers.git import (
     path_to_locator,
 )
 
-requires_git = pytest.mark.skipif(
-    shutil.which("git") is None, reason="git not available"
-)
+requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
 requires_posix = pytest.mark.skipif(os.name != "posix", reason="POSIX only")
 requires_windows = pytest.mark.skipif(os.name != "nt", reason="Windows only")
 
@@ -127,9 +125,7 @@ class TestAtomicWriteText:
         assert calls["n"] == 3
         assert target.read_text(encoding="utf-8") == "new"
 
-    def test_failure_cleans_tmp(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_failure_cleans_tmp(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         def broken_replace(_src, _dst):  # noqa: ANN001
             raise PermissionError("permanently locked")
 
@@ -279,9 +275,7 @@ class TestGitInitAutocrlf:
                 name="agent", provider_type="git", locator=path_to_locator(ws_path)
             )
             await provider.init(record)
-            result = await sandbox.execute_command(
-                ["git", "config", "core.autocrlf"], cwd=ws_path
-            )
+            result = await sandbox.execute_command(["git", "config", "core.autocrlf"], cwd=ws_path)
             assert result.success is True
             assert result.stdout.strip() == "false"
         finally:

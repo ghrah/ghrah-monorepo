@@ -209,7 +209,7 @@ from ghrah.core.exceptions import (
 )
 
 try:
-        response = await agent.receive(message)
+    response = await agent.receive(message)
 except AgentInitializationError as e:
     # Agent 初始化失败 — 检查 agentconf 配置
     print(f"初始化失败，请检查配置: {e}")

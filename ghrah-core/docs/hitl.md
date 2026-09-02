@@ -18,8 +18,8 @@ HITL（Human-in-the-Loop）是 ghrah 中人机协作审批机制的核心组件�
 ```python
 from ghrah.core.hitl import HITLResult
 
-result = HITLResult(approved=True)             # 批准
-result = HITLResult(approved=False)            # 拒绝
+result = HITLResult(approved=True)  # 批准
+result = HITLResult(approved=False)  # 拒绝
 result = HITLResult(approved=True, result={"modified_args": ...})  # 批准并附带修改
 ```
 
@@ -134,8 +134,8 @@ from ghrah.abilities.builtin import ReadFileAbility, WriteFileAbility, FSPermiss
 
 permission_checker = FSPermissionChecker(
     denied_paths=["/etc/shadow", "/etc/passwd"],  # 优先：黑名单路径直接拒绝
-    allowed_paths=["/tmp/workspace"],              # 白名单目录：直接通过
-    workspace_root="/home/user/project",           # 工作区根目录
+    allowed_paths=["/tmp/workspace"],  # 白名单目录：直接通过
+    workspace_root="/home/user/project",  # 工作区根目录
 )
 
 ability = WriteFileAbility(permission_checker=permission_checker)
@@ -159,8 +159,10 @@ from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 from ghrah.abilities.context import AbilityExecutionContext
 from ghrah.abilities.base import ActionResult
 
+
 class DangerousOperationHook(Hook):
     """危险操作审批 Hook"""
+
     hook_point = HookPoint.PRE_EXECUTE
 
     async def should_trigger(self, context: AbilityExecutionContext) -> bool:
@@ -169,9 +171,8 @@ class DangerousOperationHook(Hook):
     async def execute(
         self, context: AbilityExecutionContext, result: ActionResult | None
     ) -> HookResult:
-        return HookResult.hitl(
-            message=f"危险操作 {context.current_ability_name} 需要人工审批"
-        )
+        return HookResult.hitl(message=f"危险操作 {context.current_ability_name} 需要人工审批")
+
 
 # 注册到 Agent
 agent._ability_executor.update_hooks([DangerousOperationHook()])

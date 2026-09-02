@@ -206,15 +206,11 @@ async def test_same_agent_name_chain_history_isolated_by_project_root(
     projects = {
         "project-a": {
             "agent_id": "agent-a-id",
-            "paths": ProjectPaths.from_locator(
-                (tmp_path / "project-a-root").as_uri()
-            ),
+            "paths": ProjectPaths.from_locator((tmp_path / "project-a-root").as_uri()),
         },
         "project-b": {
             "agent_id": "agent-b-id",
-            "paths": ProjectPaths.from_locator(
-                (tmp_path / "project-b-root").as_uri()
-            ),
+            "paths": ProjectPaths.from_locator((tmp_path / "project-b-root").as_uri()),
         },
     }
     expected_node_ids: dict[str, list[str]] = {}

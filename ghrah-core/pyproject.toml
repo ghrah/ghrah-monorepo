@@ -52,4 +52,13 @@ python_version = "3.11"
 strict = true
 
 [tool.hatch.build.targets.sdist]
-exclude = [".kilo", "plans"]
+exclude = [
+    "/.env*",
+    "/build.sh",
+    "/.kilo",
+    "/plans",
+    "**/__pycache__",
+    "**/.mypy_cache",
+    "**/.pytest_cache",
+    "**/.ruff_cache",
+]

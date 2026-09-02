@@ -145,6 +145,7 @@ class SqliteBackend(PersistenceBackend):
         db_path: SQLite 数据库文件路径，默认为 ~/.ghrah/data/ghrah.db
         run_id: 运行 ID，默认自动生成（格式：run_{ISO8601}）
     """
+
     def __init__(
         self,
         db_path: str | Path | None = None,

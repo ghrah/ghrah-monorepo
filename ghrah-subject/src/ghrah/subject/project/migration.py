@@ -113,9 +113,7 @@ def _migrate_sync(
     try:
         if not _table_exists(source, "agents"):
             return report
-        available = {
-            row[0] for row in source.execute("SELECT agent_name FROM agents").fetchall()
-        }
+        available = {row[0] for row in source.execute("SELECT agent_name FROM agents").fetchall()}
         candidates = {
             agent.name
             for project in projects
@@ -146,8 +144,7 @@ def _migrate_sync(
             run_ids = [
                 row[0]
                 for row in source.execute(
-                    f"SELECT DISTINCT run_id FROM agents "
-                    f"WHERE agent_name IN ({placeholders})",
+                    f"SELECT DISTINCT run_id FROM agents WHERE agent_name IN ({placeholders})",
                     tuple(names),
                 ).fetchall()
             ]
@@ -156,8 +153,7 @@ def _migrate_sync(
                 for table in _AGENT_TABLES:
                     if _table_exists(source, table):
                         count += source.execute(
-                            f"SELECT COUNT(*) FROM {table} "
-                            f"WHERE agent_name IN ({placeholders})",
+                            f"SELECT COUNT(*) FROM {table} WHERE agent_name IN ({placeholders})",
                             tuple(names),
                         ).fetchone()[0]
                 report.migrated_rows[project.project_id] = count
@@ -247,9 +243,7 @@ def _migrate_project_agent_ids_sync(
     try:
         if not _table_exists(db, "agents"):
             return report
-        available = {
-            str(row[0]) for row in db.execute("SELECT agent_name FROM agents").fetchall()
-        }
+        available = {str(row[0]) for row in db.execute("SELECT agent_name FROM agents").fetchall()}
         to_rekey = {
             name: agent_id
             for (_cluster_id, name), agent_id in target_ids.items()
@@ -301,9 +295,7 @@ async def migrate_project_agent_ids(
 def _backup_sync(source_path: Path) -> Path | None:
     if not source_path.is_file():
         return None
-    backup_path = source_path.with_name(
-        f"{source_path.name}.pre-project-migration.bak"
-    )
+    backup_path = source_path.with_name(f"{source_path.name}.pre-project-migration.bak")
     if backup_path.exists():
         return backup_path
     source = sqlite3.connect(source_path)
@@ -333,9 +325,7 @@ async def migration_completed(db_path: str | Path, key: str) -> bool:
     def _check() -> bool:
         with sqlite3.connect(str(db_path)) as db:
             db.execute(_MARKER_TABLE_SQL)
-            row = db.execute(
-                "SELECT 1 FROM migration_markers WHERE key = ?", (key,)
-            ).fetchone()
+            row = db.execute("SELECT 1 FROM migration_markers WHERE key = ?", (key,)).fetchone()
             return row is not None
 
     return await asyncio.to_thread(_check)
@@ -349,8 +339,7 @@ async def mark_migration_completed(db_path: str | Path, key: str) -> None:
         with sqlite3.connect(str(db_path)) as db:
             db.execute(_MARKER_TABLE_SQL)
             db.execute(
-                "INSERT OR IGNORE INTO migration_markers (key, completed_at) "
-                "VALUES (?, ?)",
+                "INSERT OR IGNORE INTO migration_markers (key, completed_at) VALUES (?, ?)",
                 (key, datetime.now(UTC).isoformat()),
             )
             db.commit()

@@ -62,15 +62,10 @@ def _load_raw(raw: str, format: str) -> dict[str, Any]:
         raise ValueError(f"Unsupported format: {format!r}")
 
 
-def _validate_model(
-    data: dict[str, Any], model_cls: type[BaseModel]
-) -> tuple[bool, list[str]]:
+def _validate_model(data: dict[str, Any], model_cls: type[BaseModel]) -> tuple[bool, list[str]]:
     try:
         model_cls.model_validate(data)
         return True, []
     except PydanticValidationError as exc:
-        errors = [
-            f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
-            for e in exc.errors()
-        ]
+        errors = [f"{'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors()]
         return False, errors

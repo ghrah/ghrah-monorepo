@@ -56,9 +56,7 @@ class FakeProjectMgr:
         self._projects = [self._bootstrap_project]
         return self._bootstrap_project
 
-    async def adopt_existing_agents(
-        self, project_id: str, cluster_id: str
-    ) -> list[AgentSpec]:
+    async def adopt_existing_agents(self, project_id: str, cluster_id: str) -> list[AgentSpec]:
         self.adopt_called = True
         return self._agents
 
@@ -137,9 +135,7 @@ class FakeTaskStore:
     def __init__(self) -> None:
         self.reassign_calls: list[tuple[str, str]] = []
 
-    async def reassign_project_id(
-        self, old_id: str, new_id: str, **kwargs: Any
-    ) -> int:
+    async def reassign_project_id(self, old_id: str, new_id: str, **kwargs: Any) -> int:
         self.reassign_calls.append((old_id, new_id))
         return 3
 
@@ -304,9 +300,9 @@ class TestReconcile:
         assert [a.name for a in rebuilt.projects[0].agents] == ["fresh"]
 
     async def test_paused_project_does_not_mount_cluster(self) -> None:
-        project = _desired_project(
-            agents=[AgentSpec(name="paused", cluster_id="c1")]
-        ).model_copy(update={"status": ProjectStatus.PAUSED})
+        project = _desired_project(agents=[AgentSpec(name="paused", cluster_id="c1")]).model_copy(
+            update={"status": ProjectStatus.PAUSED}
+        )
         svc, (_, _, cluster_transport, _) = _make_service(
             projects=[project],
             workspace_records=[_WS1],
@@ -370,9 +366,7 @@ class TestReconcile:
             recovery=RecoveryAction.DROP,
         )
         record = DesiredStateRecord(subject_id="default", projects=[project])
-        svc, (_, _, _, _) = _make_service(
-            desired_record=record, workspace_records=[_WS1]
-        )
+        svc, (_, _, _, _) = _make_service(desired_record=record, workspace_records=[_WS1])
         report = await svc.reconcile()
         assert report.dropped == 1
 

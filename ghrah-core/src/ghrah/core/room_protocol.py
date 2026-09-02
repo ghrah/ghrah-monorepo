@@ -91,10 +91,7 @@ class SerialRoomBridge:
             room = (result.get("data") or {}).get("room") or {}
             rooms.append(room)
             for member in room.get("members", []):
-                if (
-                    member.get("subject_type") == "agent"
-                    and member.get("subject") not in seen
-                ):
+                if member.get("subject_type") == "agent" and member.get("subject") not in seen:
                     subject = member["subject"]
                     seen.add(subject)
                     recipients.append(subject)

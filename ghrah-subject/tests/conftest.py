@@ -37,9 +37,7 @@ import tempfile
 # Windows 上为 %LOCALAPPDATA%\Temp 绝对路径——硬编码 "/tmp" 在 Windows 语义下
 # is_absolute()=False，会被 canonical_file_locator 拒绝（计划 1787705011169 T7
 # 已清理过同类硬编码，勿重新引入）。
-_TEST_PROJECTS_TEMPLATE = os.path.join(
-    tempfile.gettempdir(), "ghrah-test-projects", "{project_id}"
-)
+_TEST_PROJECTS_TEMPLATE = os.path.join(tempfile.gettempdir(), "ghrah-test-projects", "{project_id}")
 
 # 第 1 层：from_env() 路径。注意 test_config_split 显式 delenv 后断言
 # 生产默认值，不受本覆写影响（from_env 的回退字面量独立于此）。

@@ -157,9 +157,7 @@ class ActionChain:
         if head is None and effective_branch == "main" and not self._nodes:
             raise ValueError("Chain not initialized. Call init_chain() first.")
         if head is None:
-            raise ValueError(
-                f"Branch '{effective_branch}' does not exist. Call fork() first."
-            )
+            raise ValueError(f"Branch '{effective_branch}' does not exist. Call fork() first.")
 
         node = ContextNode(
             parent_id=head.id,

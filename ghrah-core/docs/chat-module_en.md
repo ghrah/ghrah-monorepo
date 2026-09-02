@@ -74,10 +74,10 @@ restored = block_from_dict(data)  # TextBlock(text="Hello")
 from ghrah.chat.message import ChatMessage
 
 msg = ChatMessage(
-    role="user",                          # "system" | "user" | "ai" | "tool"
+    role="user",  # "system" | "user" | "ai" | "tool"
     content_blocks=[TextBlock(text="Hello")],
-    source="human",                       # Message source tracking
-    metadata={},                          # Additional metadata
+    source="human",  # Message source tracking
+    metadata={},  # Additional metadata
 )
 ```
 
@@ -118,13 +118,13 @@ msg = ChatMessage.ai(
     tool_calls=[ToolCallBlock(id="call_1", name="read_file", arguments={})],
 )
 
-msg.text           # "Let me check the file" — concatenation of all TextBlock text
-msg.tool_calls     # [ToolCallBlock(...)] — all ToolCallBlocks
-msg.has_tool_calls # True
-msg.reasoning      # "User needs to read a file" — first ReasoningBlock's content
-msg.images         # [] — all ImageBlocks
+msg.text  # "Let me check the file" — concatenation of all TextBlock text
+msg.tool_calls  # [ToolCallBlock(...)] — all ToolCallBlocks
+msg.has_tool_calls  # True
+msg.reasoning  # "User needs to read a file" — first ReasoningBlock's content
+msg.images  # [] — all ImageBlocks
 msg.is_multimodal  # False — whether it contains images/audio/files
-msg.tool_results   # [] — all ToolResultBlocks
+msg.tool_results  # [] — all ToolResultBlocks
 ```
 
 ### source Field
@@ -157,9 +157,9 @@ response = LLMResponse(
     raw=None,
 )
 
-response.text           # "Hello"
-response.tool_calls     # [ToolCallBlock(...)]
-response.reasoning      # None
+response.text  # "Hello"
+response.tool_calls  # [ToolCallBlock(...)]
+response.reasoning  # None
 response.to_chat_message(source="gpt-4o")  # Convert to ChatMessage
 ```
 
@@ -171,15 +171,15 @@ response.to_chat_message(source="gpt-4o")  # Convert to ChatMessage
 from abc import ABC, abstractmethod
 from ghrah.chat.format import ChatFormat, LLMResponse
 
+
 class ChatFormat(ABC):
     @abstractmethod
     async def generate(
         self,
         messages: list[ChatMessage],
         tools: list[dict[str, Any]] | None = None,
-    ) -> LLMResponse:
-        ...
-    
+    ) -> LLMResponse: ...
+
     def configure_tools(self, tools: list[dict[str, Any]]) -> None:
         self._tools = tools
 ```
@@ -272,11 +272,15 @@ messages = deserialize_messages(data)
 [`response.py`](../src/ghrah/chat/response.py) provides utility functions for extracting metadata from LLMResponse:
 
 ```python
-from ghrah.chat.response import extract_token_usage, extract_reasoning_content, extract_response_metadata
+from ghrah.chat.response import (
+    extract_token_usage,
+    extract_reasoning_content,
+    extract_response_metadata,
+)
 
-token_usage = extract_token_usage(response)       # TokenUsage | None
-reasoning = extract_reasoning_content(response)   # str | None
-metadata = extract_response_metadata(response)    # dict
+token_usage = extract_token_usage(response)  # TokenUsage | None
+reasoning = extract_reasoning_content(response)  # str | None
+metadata = extract_response_metadata(response)  # dict
 ```
 
 ## Module Structure

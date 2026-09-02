@@ -69,9 +69,7 @@ async def _create(
 
 
 class TestCreate:
-    async def test_create_defaults_and_event(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_create_defaults_and_event(self, manager: tuple[TaskManager, list]) -> None:
         m, events = manager
         task = await _create(m, title="hello", agent_name="agent-a")
         assert len(task["task_id"]) == 32
@@ -92,9 +90,7 @@ class TestCreate:
         assert payload["task"]["task_id"] == task["task_id"]
         assert "version" not in payload["task"]
 
-    async def test_create_empty_title_rejected(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_create_empty_title_rejected(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         result = await m.handle_command("task_create", {"title": "   ", "project_id": "proj-1"})
         assert not result["success"]
@@ -112,15 +108,11 @@ class TestCreate:
         self, manager: tuple[TaskManager, list]
     ) -> None:
         m, _ = manager
-        result = await m.handle_command(
-            "task_create", {"title": "t", "project_id": ""}
-        )
+        result = await m.handle_command("task_create", {"title": "t", "project_id": ""})
         assert not result["success"]
         assert "project_id" in result["error"]
 
-    async def test_create_persists_project_id(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_create_persists_project_id(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         task = await _create(m, title="t", project_id="proj-42")
         assert task["project_id"] == "proj-42"
@@ -130,9 +122,7 @@ class TestCreate:
 
 
 class TestListGet:
-    async def test_list_filters_and_get(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_list_filters_and_get(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         a1 = await _create(m, title="a1", agent_name="alpha")
         a2 = await _create(m, title="a2", agent_name="alpha")
@@ -181,27 +171,19 @@ class TestListGet:
         t = await _create(m, title="t")
         await m.handle_command("task_complete", {"task_id": t["task_id"]})
         # include_terminal=False (store default-ish) -> 0
-        data = _data(
-            await m.handle_command("task_list", {"include_terminal": False})
-        )
+        data = _data(await m.handle_command("task_list", {"include_terminal": False}))
         assert data["count"] == 0
         # include_terminal=True -> 1
-        data = _data(
-            await m.handle_command("task_list", {"include_terminal": True})
-        )
+        data = _data(await m.handle_command("task_list", {"include_terminal": True}))
         assert data["count"] == 1
 
-    async def test_list_filters_by_project_id(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_list_filters_by_project_id(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         a = await _create(m, title="a", project_id="proj-1")
         b = await _create(m, title="b", project_id="proj-2")
         c = await _create(m, title="c", project_id="proj-1")
         data = _data(
-            await m.handle_command(
-                "task_list", {"project_id": "proj-1", "include_terminal": True}
-            )
+            await m.handle_command("task_list", {"project_id": "proj-1", "include_terminal": True})
         )
         assert data["count"] == 2
         ids = {t["task_id"] for t in data["tasks"]}
@@ -219,9 +201,7 @@ class TestAssign:
         m, events = manager
         t = await _create(m, title="t")
         data = _data(
-            await m.handle_command(
-                "task_assign", {"task_id": t["task_id"], "agent_name": "x"}
-            )
+            await m.handle_command("task_assign", {"task_id": t["task_id"], "agent_name": "x"})
         )
         assert data["task"]["status"] == "pending"
         assert data["task"]["agent_name"] == "x"
@@ -252,9 +232,7 @@ class TestStartDependencies:
         data = _data(await m.handle_command("task_get", {"task_id": a["task_id"]}))
         assert data["task"]["status"] == "pending"
 
-    async def test_start_after_dep_complete(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_start_after_dep_complete(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         b = await _create(m, title="b")
         a = await _create(m, title="a", dependencies=[b["task_id"]])
@@ -268,9 +246,7 @@ class TestStartDependencies:
 
 
 class TestTransitions:
-    async def test_complete_sets_completed_at(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_complete_sets_completed_at(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         t = await _create(m, title="t")
         await m.handle_command("task_start", {"task_id": t["task_id"]})
@@ -296,15 +272,11 @@ class TestTransitions:
         assert data["task"]["error"] == "boom"
         assert data["task"]["completed_at"] is not None
 
-    async def test_cancel_sets_reason_as_error(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_cancel_sets_reason_as_error(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         t = await _create(m, title="t")
         data = _data(
-            await m.handle_command(
-                "task_cancel", {"task_id": t["task_id"], "reason": "user"}
-            )
+            await m.handle_command("task_cancel", {"task_id": t["task_id"], "reason": "user"})
         )
         assert data["task"]["status"] == "canceled"
         assert data["task"]["error"] == "user"
@@ -316,29 +288,25 @@ class TestTransitions:
         m, _ = manager
         t = await _create(m, title="t")
         data = _data(
-            await m.handle_command(
-                "task_block", {"task_id": t["task_id"], "reason": "waiting"}
-            )
+            await m.handle_command("task_block", {"task_id": t["task_id"], "reason": "waiting"})
         )
         assert data["task"]["status"] == "blocked"
         assert data["task"]["error"] == "waiting"
         assert data["task"]["completed_at"] is None
 
-    async def test_started_at_not_overwritten(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_started_at_not_overwritten(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         t = await _create(m, title="t")
         await m.handle_command("task_start", {"task_id": t["task_id"]})
-        started = _data(
-            await m.handle_command("task_get", {"task_id": t["task_id"]})
-        )["task"]["started_at"]
+        started = _data(await m.handle_command("task_get", {"task_id": t["task_id"]}))["task"][
+            "started_at"
+        ]
         # block -> start again
         await m.handle_command("task_block", {"task_id": t["task_id"]})
         await m.handle_command("task_start", {"task_id": t["task_id"]})
-        started2 = _data(
-            await m.handle_command("task_get", {"task_id": t["task_id"]})
-        )["task"]["started_at"]
+        started2 = _data(await m.handle_command("task_get", {"task_id": t["task_id"]}))["task"][
+            "started_at"
+        ]
         assert started == started2
 
 
@@ -346,9 +314,7 @@ class TestTransitions:
 
 
 class TestTerminalGuard:
-    async def test_completed_cannot_start(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_completed_cannot_start(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         t = await _create(m, title="t")
         await m.handle_command("task_complete", {"task_id": t["task_id"]})
@@ -361,9 +327,7 @@ class TestTerminalGuard:
 
 
 class TestDependencyCycle:
-    async def test_create_self_reference_rejected(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_create_self_reference_rejected(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         fake = "f" * 32
         result = await m.handle_command(
@@ -372,9 +336,7 @@ class TestDependencyCycle:
         # 依赖不存在 task 会被 graph 丢弃（& self._ids），无环 → 通过
         assert result["success"]
 
-    async def test_create_self_dep_rejected(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_create_self_dep_rejected(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         # 先建一个，再 update 让它依赖自身
         t = await _create(m, title="t")
@@ -384,9 +346,7 @@ class TestDependencyCycle:
         assert not result["success"]
         assert "cycle" in result["error"]
 
-    async def test_dependency_loop_rejected(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_dependency_loop_rejected(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         a = await _create(m, title="a")
         b = await _create(m, title="b", dependencies=[a["task_id"]])
@@ -403,9 +363,7 @@ class TestDependencyCycle:
 
 
 class TestParentCycle:
-    async def test_create_self_parent_rejected(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_create_self_parent_rejected(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         # 自指 parent 在 create 时：新任务不在图中，graph.would_create_parent_cycle
         # 对 new_parent==task_id 返回 True
@@ -419,9 +377,7 @@ class TestParentCycle:
         assert not result["success"]
         assert "cycle" in result["error"]
 
-    async def test_parent_loop_rejected(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_parent_loop_rejected(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         a = await _create(m, title="a")
         b = await _create(m, title="b", parent_id=a["task_id"])
@@ -432,9 +388,7 @@ class TestParentCycle:
         assert not result["success"]
         assert "cycle" in result["error"]
 
-    async def test_legal_parent_accepted(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_legal_parent_accepted(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         a = await _create(m, title="a")
         data = _data(
@@ -471,16 +425,12 @@ class TestDelete:
         result = await m.handle_command("task_delete", {"task_id": a["task_id"]})
         assert not result["success"]
 
-    async def test_delete_force_soft_delete(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_delete_force_soft_delete(self, manager: tuple[TaskManager, list]) -> None:
         m, events = manager
         a = await _create(m, title="a")
         await _create(m, title="b", dependencies=[a["task_id"]])
         data = _data(
-            await m.handle_command(
-                "task_delete", {"task_id": a["task_id"], "force": True}
-            )
+            await m.handle_command("task_delete", {"task_id": a["task_id"], "force": True})
         )
         assert data["task_id"] == a["task_id"]
         # 删后 get 返回 not found
@@ -488,9 +438,7 @@ class TestDelete:
         assert not miss["success"]
         # list 不含
         listing = _data(
-            await m.handle_command(
-                "task_list", {"agent_name": None, "include_terminal": True}
-            )
+            await m.handle_command("task_list", {"agent_name": None, "include_terminal": True})
         )
         ids = {t["task_id"] for t in listing["tasks"]}
         assert a["task_id"] not in ids
@@ -503,9 +451,7 @@ class TestDelete:
 
 
 class TestEventPayload:
-    async def test_event_payload_shape(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_event_payload_shape(self, manager: tuple[TaskManager, list]) -> None:
         m, events = manager
         t = await _create(m, title="t", agent_name="z")
         await m.handle_command("task_start", {"task_id": t["task_id"]})
@@ -571,9 +517,7 @@ class TestOptimisticLock:
 
 
 class TestMetadataUpdate:
-    async def test_metadata_replace_and_patch(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_metadata_replace_and_patch(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         t = await _create(m, title="t", metadata={"a": 1, "b": 2})
         # patch
@@ -593,13 +537,9 @@ class TestMetadataUpdate:
         )
         assert data["task"]["metadata"] == {"x": 0}
 
-    async def test_update_nonexistent_task(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_update_nonexistent_task(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
-        result = await m.handle_command(
-            "task_update", {"task_id": "z" * 32, "title": "x"}
-        )
+        result = await m.handle_command("task_update", {"task_id": "z" * 32, "title": "x"})
         assert not result["success"]
         assert "not found" in result["error"]
 
@@ -608,9 +548,7 @@ class TestMetadataUpdate:
 
 
 class TestUnknownCommand:
-    async def test_unknown_command_rejected(
-        self, manager: tuple[TaskManager, list]
-    ) -> None:
+    async def test_unknown_command_rejected(self, manager: tuple[TaskManager, list]) -> None:
         m, _ = manager
         result = await m.handle_command("task_frob", {})
         assert not result["success"]

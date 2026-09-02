@@ -27,4 +27,11 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 [tool.hatch.build.targets.sdist]
-exclude = [".kilo", "plans"]
+exclude = [
+    "/.kilo",
+    "/plans",
+    "**/__pycache__",
+    "**/.mypy_cache",
+    "**/.pytest_cache",
+    "**/.ruff_cache",
+]

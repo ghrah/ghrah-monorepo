@@ -25,8 +25,6 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from pydantic import ValidationError
-
 from ghrah.protocol.types import (
     RoomCreatePayload,
     RoomDeletePayload,
@@ -40,6 +38,8 @@ from ghrah.protocol.types import (
     RoomSubjectType,
     RoomUpdatePayload,
 )
+from pydantic import ValidationError
+
 from ghrah.subject.project.errors import ProjectArchivedError
 from ghrah.subject.room.models import (
     RoomLogRecord,
@@ -100,9 +100,7 @@ class RoomManager:
     def store(self) -> RoomStore:
         return self._store
 
-    async def handle_command(
-        self, command: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def handle_command(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
         handler = _HANDLERS.get(command)
         if handler is None:
             return _err(f"unknown command: {command}")
@@ -192,9 +190,7 @@ class RoomManager:
 
     async def _handle_get(self, payload: dict[str, Any]) -> dict[str, Any]:
         room_id = payload.get("room_id", "")
-        existing, _project, error = await self._require_room_access(
-            room_id, allow_archived=True
-        )
+        existing, _project, error = await self._require_room_access(room_id, allow_archived=True)
         if error is not None:
             return error
         assert existing is not None
@@ -219,9 +215,7 @@ class RoomManager:
                 p.room_id, expected_version=p.expected_version, mutator=mutator
             )
         except ConcurrentModificationError:
-            return _err(
-                f"version conflict: expected {p.expected_version}"
-            )
+            return _err(f"version conflict: expected {p.expected_version}")
         if updated is None:
             return _err(f"room not found: {p.room_id}")
         await self._emit_room("room_updated", updated)
@@ -229,9 +223,7 @@ class RoomManager:
 
     async def _handle_archive(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = RoomLifecyclePayload.model_validate(payload)
-        existing, _project, error = await self._require_room_access(
-            p.room_id, allow_archived=True
-        )
+        existing, _project, error = await self._require_room_access(p.room_id, allow_archived=True)
         if error is not None:
             return error
         assert existing is not None
@@ -260,9 +252,7 @@ class RoomManager:
 
     async def _handle_restore(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = RoomLifecyclePayload.model_validate(payload)
-        existing, _project, error = await self._require_room_access(
-            p.room_id, allow_archived=True
-        )
+        existing, _project, error = await self._require_room_access(p.room_id, allow_archived=True)
         if error is not None:
             return error
         assert existing is not None
@@ -291,16 +281,12 @@ class RoomManager:
 
     async def _handle_delete(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = RoomDeletePayload.model_validate(payload)
-        existing, _project, error = await self._require_room_access(
-            p.room_id, allow_archived=True
-        )
+        existing, _project, error = await self._require_room_access(p.room_id, allow_archived=True)
         if error is not None:
             return error
         assert existing is not None
         try:
-            deleted = await self._store.delete(
-                p.room_id, expected_version=p.expected_version
-            )
+            deleted = await self._store.delete(p.room_id, expected_version=p.expected_version)
         except ConcurrentModificationError:
             return _err(f"version conflict: expected {p.expected_version}")
         if not deleted:
@@ -309,9 +295,7 @@ class RoomManager:
             "room_deleted",
             {"room_id": existing.room_id, "project_id": existing.project_id},
         )
-        return _ok(
-            {"room_id": existing.room_id, "project_id": existing.project_id}
-        )
+        return _ok({"room_id": existing.room_id, "project_id": existing.project_id})
 
     async def _handle_join(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = RoomJoinPayload.model_validate(payload)
@@ -339,13 +323,9 @@ class RoomManager:
         def mutator(r: RoomRecord) -> RoomRecord:
             if r.status == RoomStatus.ARCHIVED:
                 raise RoomArchivedError(r.room_id)
-            return r.model_copy(
-                update={"members": [*r.members, member], "updated_at": now_iso()}
-            )
+            return r.model_copy(update={"members": [*r.members, member], "updated_at": now_iso()})
 
-        updated = await self._store.update(
-            p.room_id, expected_version=None, mutator=mutator
-        )
+        updated = await self._store.update(p.room_id, expected_version=None, mutator=mutator)
         if updated is None:
             return _err(f"room not found: {p.room_id}")
         await self._emit(
@@ -373,9 +353,7 @@ class RoomManager:
                 }
             )
 
-        updated = await self._store.update(
-            p.room_id, expected_version=None, mutator=mutator
-        )
+        updated = await self._store.update(p.room_id, expected_version=None, mutator=mutator)
         if updated is None:
             return _err(f"room not found: {p.room_id}")
         await self._emit(
@@ -391,22 +369,16 @@ class RoomManager:
             return error
         assert existing is not None
         members = [m.model_dump(mode="json") for m in existing.members]
-        return _ok(
-            {"room_id": existing.room_id, "members": members, "count": len(members)}
-        )
+        return _ok({"room_id": existing.room_id, "members": members, "count": len(members)})
 
     async def _handle_get_log(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = RoomGetLogPayload.model_validate(payload)
         existing, _project, error = await self._require_room_access(p.room_id)
         if error is not None:
             return error
-        records = await self._store.get_log(
-            p.room_id, since_seq=p.since_seq, limit=p.limit
-        )
+        records = await self._store.get_log(p.room_id, since_seq=p.since_seq, limit=p.limit)
         entries = [r.to_wire() for r in records]
-        return _ok(
-            {"room_id": p.room_id, "entries": entries, "count": len(entries)}
-        )
+        return _ok({"room_id": p.room_id, "entries": entries, "count": len(entries)})
 
     async def _handle_send(self, payload: dict[str, Any]) -> dict[str, Any]:
         p = RoomSendPayload.model_validate(payload)
@@ -462,9 +434,7 @@ class RoomManager:
     @staticmethod
     def _resolve_delivery_targets(room: RoomRecord, p: RoomSendPayload) -> list[str]:
         data_targets = p.data.get("targets")
-        agent_members = [
-            m.subject for m in room.members if m.subject_type == RoomSubjectType.AGENT
-        ]
+        agent_members = [m.subject for m in room.members if m.subject_type == RoomSubjectType.AGENT]
         if isinstance(data_targets, list) and data_targets:
             member_set = set(agent_members)
             targets = [t for t in data_targets if t in member_set]
@@ -472,15 +442,11 @@ class RoomManager:
             targets = list(agent_members)
         return [t for t in targets if t != p.author]
 
-    async def _deliver_one(
-        self, target: str, room_id: str, *, sender: str, content: str
-    ) -> None:
+    async def _deliver_one(self, target: str, room_id: str, *, sender: str, content: str) -> None:
         try:
             result = await self._deliver(target, sender, content, room_id)  # type: ignore[misc]
         except Exception:
-            logger.exception(
-                "room delivery failed: target=%s sender=%s", target, sender
-            )
+            logger.exception("room delivery failed: target=%s sender=%s", target, sender)
             return
         if not result.get("success"):
             logger.warning(
@@ -494,13 +460,9 @@ class RoomManager:
     def _validate_targets(room: RoomRecord, targets: Any) -> str | None:
         if targets is None:
             return None
-        if not isinstance(targets, list) or not all(
-            isinstance(t, str) for t in targets
-        ):
+        if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
             return "invalid targets: expected string[]"
-        agent_members = {
-            m.subject for m in room.members if m.subject_type == RoomSubjectType.AGENT
-        }
+        agent_members = {m.subject for m in room.members if m.subject_type == RoomSubjectType.AGENT}
         for t in targets:
             if t not in agent_members:
                 return f"target not in room: {t}"

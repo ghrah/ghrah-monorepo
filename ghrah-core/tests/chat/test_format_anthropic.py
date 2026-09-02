@@ -149,9 +149,7 @@ class TestFormatMessagesToolUse:
 
     def test_tool_result_block(self) -> None:
         fmt = AnthropicFormat(model="claude-3-sonnet")
-        messages = [
-            ChatMessage.tool(tool_call_id="c1", content="file content", name="read")
-        ]
+        messages = [ChatMessage.tool(tool_call_id="c1", content="file content", name="read")]
         _, formatted = fmt._format_messages(messages)
         assert formatted[0]["role"] == "user"
         tool_result = formatted[0]["content"][0]
@@ -161,9 +159,7 @@ class TestFormatMessagesToolUse:
     def test_tool_result_error(self) -> None:
         fmt = AnthropicFormat(model="claude-3-sonnet")
         messages = [
-            ChatMessage.tool(
-                tool_call_id="c1", content="err", success=False, error="not found"
-            )
+            ChatMessage.tool(tool_call_id="c1", content="err", success=False, error="not found")
         ]
         _, formatted = fmt._format_messages(messages)
         tool_result = formatted[0]["content"][0]
@@ -225,9 +221,7 @@ class TestFormatTools:
 
     def test_custom_format_conversion(self) -> None:
         fmt = AnthropicFormat(model="claude-3-sonnet")
-        tools = [
-            {"name": "read", "parameters": {"type": "object"}, "description": "Read file"}
-        ]
+        tools = [{"name": "read", "parameters": {"type": "object"}, "description": "Read file"}]
         result = fmt._format_tools(tools)
         assert result[0]["name"] == "read"
         assert result[0]["input_schema"] == {"type": "object"}
@@ -236,9 +230,7 @@ class TestFormatTools:
 class TestParseResponse:
     def test_text_block(self) -> None:
         fmt = AnthropicFormat(model="claude-3-sonnet")
-        resp = _make_anthropic_response(
-            content_blocks=[SimpleNamespace(type="text", text="Hello")]
-        )
+        resp = _make_anthropic_response(content_blocks=[SimpleNamespace(type="text", text="Hello")])
         result = fmt._parse_response(resp)
         assert isinstance(result.content_blocks[0], TextBlock)
         assert result.content_blocks[0].text == "Hello"
@@ -277,9 +269,7 @@ class TestParseResponse:
         fmt = AnthropicFormat(model="claude-3-sonnet")
         resp = _make_anthropic_response(
             content_blocks=[
-                SimpleNamespace(
-                    type="tool_use", id="c1", name="read", input='{"path":"/tmp"}'
-                )
+                SimpleNamespace(type="tool_use", id="c1", name="read", input='{"path":"/tmp"}')
             ]
         )
         result = fmt._parse_response(resp)
@@ -290,9 +280,7 @@ class TestParseResponse:
         fmt = AnthropicFormat(model="claude-3-sonnet")
         resp = _make_anthropic_response(
             content_blocks=[
-                SimpleNamespace(
-                    type="tool_use", id="c1", name="read", input="not json"
-                )
+                SimpleNamespace(type="tool_use", id="c1", name="read", input="not json")
             ]
         )
         result = fmt._parse_response(resp)

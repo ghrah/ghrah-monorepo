@@ -124,9 +124,7 @@ class ProjectUnit(SubjectUnit):
             projects = await self._store.list()
             catalog_db = self._config.persistence.db_path
             # 一次性迁移以 catalog 内标记门控：二次启动不再重跑/重备份。
-            if projects and not await migration_completed(
-                catalog_db, "legacy_database_backup"
-            ):
+            if projects and not await migration_completed(catalog_db, "legacy_database_backup"):
                 await backup_legacy_database(catalog_db)
                 await mark_migration_completed(catalog_db, "legacy_database_backup")
             for project in projects:
@@ -135,13 +133,10 @@ class ProjectUnit(SubjectUnit):
                 )
                 await self._task_store.migrate_project(project.project_id)
             if not await migration_completed(catalog_db, "legacy_action_chains"):
-                report = await migrate_legacy_action_chains(
-                    self._config.core_db_path, projects
-                )
+                report = await migrate_legacy_action_chains(self._config.core_db_path, projects)
                 if report.total_rows or report.ambiguous_agents:
                     logger.info(
-                        "legacy ActionChain migration: rows=%s ambiguous_agents=%s "
-                        "backup=%s",
+                        "legacy ActionChain migration: rows=%s ambiguous_agents=%s backup=%s",
                         report.total_rows,
                         report.ambiguous_agents,
                         report.backup_path,
@@ -161,8 +156,7 @@ class ProjectUnit(SubjectUnit):
         identity_report = await migrate_project_agent_ids(project)
         if identity_report.ambiguous_names:
             logger.error(
-                "agent identity migration skipped ambiguous names: "
-                "project=%s names=%s",
+                "agent identity migration skipped ambiguous names: project=%s names=%s",
                 project.project_id,
                 identity_report.ambiguous_names,
             )

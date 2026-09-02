@@ -157,9 +157,7 @@ class TestToolSchema:
             name="read_file",
             description="Read a file",
             parameters={
-                "file_path": ToolParameter(
-                    type="string", description="Path", required=True
-                ),
+                "file_path": ToolParameter(type="string", description="Path", required=True),
                 "limit": ToolParameter(type="integer", minimum=1),
             },
         )

@@ -95,9 +95,7 @@ async def test_whitelist_hit_with_room_context_appends() -> None:
 async def test_no_room_context_not_appended() -> None:
     """G3 负例：无 room 上下文（metadata.room_id 缺失）→ 不落。"""
     unit, manager = await _unit()
-    await unit._on_chain_updated(
-        {"agent_name": "planner", "node": _node(room_id=None)}
-    )
+    await unit._on_chain_updated({"agent_name": "planner", "node": _node(room_id=None)})
     assert manager.sends == []
 
 
@@ -185,5 +183,5 @@ async def test_malformed_payload_ignored() -> None:
     await unit._on_chain_updated(None)
     await unit._on_chain_updated({})
     await unit._on_chain_updated({"agent_name": "a", "node": {"no_id": 1}})
-    await unit._on_chain_updated({"agent_name": "a", "node": _node(action_results=[])} )
+    await unit._on_chain_updated({"agent_name": "a", "node": _node(action_results=[])})
     assert manager.sends == []

@@ -5,7 +5,6 @@ import re
 from pathlib import Path
 
 import yaml
-
 from ghrah.manifest.ability import AbilityManifest
 from ghrah.manifest.agent import AgentManifest
 from ghrah.manifest.errors import (
@@ -14,6 +13,7 @@ from ghrah.manifest.errors import (
     ManifestValidationError,
 )
 from ghrah.manifest.parser import parse_ability_manifest, parse_agent_manifest, validate_manifest
+
 from ghrah.subject._fs import atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -42,13 +42,9 @@ def _validate_full_name(full_name: str) -> None:
     """校验 full_name 格式合法性。"""
     namespace, name = _full_name_to_path_parts(full_name)
     if not _NAMESPACE_PATTERN.match(namespace):
-        raise ManifestValidationError(
-            f"Invalid namespace in full_name: {namespace!r}"
-        )
+        raise ManifestValidationError(f"Invalid namespace in full_name: {namespace!r}")
     if not _NAME_PATTERN.match(name):
-        raise ManifestValidationError(
-            f"Invalid name in full_name: {name!r}"
-        )
+        raise ManifestValidationError(f"Invalid name in full_name: {name!r}")
 
 
 class ManifestStore:
@@ -94,9 +90,7 @@ class ManifestStore:
         """ManifestStoreProtocol.load_ability 委托给 get_ability。"""
         return self.get_ability(full_name)
 
-    def put_ability(
-        self, full_name: str, content: str, overwrite: bool = False
-    ) -> None:
+    def put_ability(self, full_name: str, content: str, overwrite: bool = False) -> None:
         """创建或更新 Ability Manifest（先校验后写盘）。"""
         self._put_entry(full_name, content, "abilities", overwrite)
 
@@ -133,9 +127,7 @@ class ManifestStore:
         """ManifestStoreProtocol.load_agent 委托给 get_agent。"""
         return self.get_agent(full_name)
 
-    def put_agent(
-        self, full_name: str, content: str, overwrite: bool = False
-    ) -> None:
+    def put_agent(self, full_name: str, content: str, overwrite: bool = False) -> None:
         """创建或更新 Agent Manifest（先校验后写盘）。"""
         self._put_entry(full_name, content, "agents", overwrite)
 
@@ -210,9 +202,7 @@ class ManifestStore:
 
         is_valid, errors = validate_manifest(content)
         if not is_valid:
-            raise ManifestValidationError(
-                f"Invalid manifest: {'; '.join(errors)}"
-            )
+            raise ManifestValidationError(f"Invalid manifest: {'; '.join(errors)}")
 
         data = yaml.safe_load(content)
         manifest_type = data.get("manifest", "")
@@ -242,9 +232,7 @@ class ManifestStore:
         path = self._full_name_to_path(full_name, dir_kind)
         if not path.exists():
             kind_name = "Ability" if dir_kind == "abilities" else "Agent"
-            raise ManifestNotFoundError(
-                f"{kind_name} manifest not found: {full_name}"
-            )
+            raise ManifestNotFoundError(f"{kind_name} manifest not found: {full_name}")
         path.unlink()
         kind_name = "ability" if dir_kind == "abilities" else "agent"
         logger.info("Deleted %s manifest: %s", kind_name, full_name)

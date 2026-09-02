@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from ghrah.protocol.types import SendMessagePayload
+
 from ghrah.subject.config import SubjectConfig
 from ghrah.subject.project.scoped_stores import ProjectScopedRoomStore
 from ghrah.subject.room.manager import RoomManager
@@ -62,9 +63,7 @@ class RoomUnit(SubjectUnit):
         cluster_registry = ctx.get(CORE_CLUSTER_REGISTRY.name)
 
         async def project_roots() -> dict[str, str]:
-            result = await project_manager.handle_command(
-                "project_list", {"archived": None}
-            )
+            result = await project_manager.handle_command("project_list", {"archived": None})
             projects = (result.get("data") or {}).get("projects", [])
             return {
                 p["project_id"]: p["project_root_locator"]
@@ -72,26 +71,18 @@ class RoomUnit(SubjectUnit):
                 if p.get("project_root_locator")
             }
 
-        self._store = ProjectScopedRoomStore(
-            self._config.persistence.db_path, project_roots
-        )
-        register_resource = getattr(
-            project_manager, "register_scoped_resource", None
-        )
+        self._store = ProjectScopedRoomStore(self._config.persistence.db_path, project_roots)
+        register_resource = getattr(project_manager, "register_scoped_resource", None)
         if register_resource is not None:
             register_resource(self._store, room_store=True)
 
         async def project_get(project_id: str) -> dict[str, Any] | None:
-            result = await project_manager.handle_command(
-                "project_get", {"project_id": project_id}
-            )
+            result = await project_manager.handle_command("project_get", {"project_id": project_id})
             if not result.get("success"):
                 return None
             return (result.get("data") or {}).get("project")
 
-        async def deliver(
-            target: str, sender: str, content: str, room_id: str
-        ) -> dict[str, Any]:
+        async def deliver(target: str, sender: str, content: str, room_id: str) -> dict[str, Any]:
             """按 room.project_id + agent_id 找 cluster，并直达对应 CoreUnit。"""
             if self._store is None:
                 return {"success": False, "data": None, "error": "RoomUnit not initialized"}

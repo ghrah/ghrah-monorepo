@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 # ── 全局常量 ──
 
+
 def _free_tcp_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -229,15 +230,11 @@ class EventCollector:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError(
-                    f"Timed out waiting for event_type={event_type}"
-                )
+                raise TimeoutError(f"Timed out waiting for event_type={event_type}")
             try:
                 et, msg = await asyncio.wait_for(self.events.get(), timeout=remaining)
             except TimeoutError:
-                raise TimeoutError(
-                    f"Timed out waiting for event_type={event_type}"
-                )
+                raise TimeoutError(f"Timed out waiting for event_type={event_type}")
 
             if et == event_type:
                 if predicate is None or predicate(msg):

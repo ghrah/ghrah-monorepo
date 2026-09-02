@@ -22,7 +22,11 @@ config = AgentConfig(name="my-agent", system_prompt="You are an assistant")
 agent = ActorAgent(config)
 
 # Distributed mode (enabled via ContextConfig.persistence_type="remote")
-config = AgentConfig(name="my-agent", system_prompt="You are an assistant", context=ContextConfig(persistence_type="remote"))
+config = AgentConfig(
+    name="my-agent",
+    system_prompt="You are an assistant",
+    context=ContextConfig(persistence_type="remote"),
+)
 agent = ActorAgent(config)
 ```
 
@@ -119,9 +123,9 @@ from ghrah.core.message import Message, MessageType
 
 # Create a message
 msg = Message(
-    sender="user",           # Sender
-    recipient="assistant",   # Recipient ("*" for broadcast)
-    content="Hello",         # Message content
+    sender="user",  # Sender
+    recipient="assistant",  # Recipient ("*" for broadcast)
+    content="Hello",  # Message content
     type=MessageType.CHAT,  # Message type
 )
 

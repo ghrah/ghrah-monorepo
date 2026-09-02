@@ -78,9 +78,7 @@ class BuiltinHookRegistry:
         hook_class = cls._registry.get(handler)
         if hook_class is None:
             available = list(cls._registry.keys())
-            raise KeyError(
-                f"Unknown hook handler: '{handler}'. Available handlers: {available}"
-            )
+            raise KeyError(f"Unknown hook handler: '{handler}'. Available handlers: {available}")
         return hook_class(**params)
 
     @classmethod

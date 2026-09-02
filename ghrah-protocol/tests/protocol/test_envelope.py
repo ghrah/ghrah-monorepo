@@ -242,9 +242,7 @@ class TestTypePayloadMismatch:
         """
         env = Envelope(
             type="agent_spawned",
-            payload=SpawnAgentPayload.model_validate(
-                {"project_id": "p1", "config": {"name": "x"}}
-            ),
+            payload=SpawnAgentPayload.model_validate({"project_id": "p1", "config": {"name": "x"}}),
         )
         assert env.type == "agent_spawned"
         assert isinstance(env.payload, SpawnAgentPayload)
@@ -279,9 +277,7 @@ class TestMessageAlias:
 
 class TestFactoryFunctions:
     def test_create_command_result_payload_is_model(self):
-        msg = create_command_result(
-            request_id="r1", success=True, data={"k": "v"}
-        )
+        msg = create_command_result(request_id="r1", success=True, data={"k": "v"})
         assert isinstance(msg.payload, CommandResultPayload)
         assert msg.payload.success is True
         assert msg.payload.data == {"k": "v"}
@@ -291,16 +287,12 @@ class TestFactoryFunctions:
         assert dumped["payload"]["success"] is True
 
     def test_create_command_result_with_error(self):
-        msg = create_command_result(
-            request_id="r1", success=False, error="boom"
-        )
+        msg = create_command_result(request_id="r1", success=False, error="boom")
         assert msg.payload.success is False
         assert msg.payload.error == "boom"
 
     def test_create_event_payload_is_model(self):
-        payload = AgentResponsePayload(
-            sender="a", recipient="b", content="hi"
-        )
+        payload = AgentResponsePayload(sender="a", recipient="b", content="hi")
         msg = create_event(EventType.AGENT_RESPONSE, payload)
         assert msg.payload is payload
         assert msg.type == "agent_response"
@@ -393,10 +385,7 @@ class TestEnvelopeTypeHelpers:
         assert Envelope(type="future_cmd").as_command_type() is None
 
     def test_as_event_type(self):
-        assert (
-            Envelope(type="agent_response").as_event_type()
-            == EventType.AGENT_RESPONSE
-        )
+        assert Envelope(type="agent_response").as_event_type() == EventType.AGENT_RESPONSE
         assert Envelope(type="spawn_agent").as_event_type() is None
 
     def test_as_system_type(self):
@@ -453,9 +442,7 @@ class TestHITLResponsePayloadSchema:
 
 class TestPayloadAgentName:
     def test_agent_spawned_without_agent_name_is_unfiltered(self):
-        p = AgentSpawnedPayload.model_validate(
-            {"name": "agent-x", "config": {"name": "agent-x"}}
-        )
+        p = AgentSpawnedPayload.model_validate({"name": "agent-x", "config": {"name": "agent-x"}})
         assert payload_agent_name(p) is None
 
     def test_action_chain_uses_agent_name(self):

@@ -70,9 +70,7 @@ def _agent_config_to_dict(config: AgentConfig) -> dict[str, Any]:
         "window": dataclasses.asdict(config.window) if config.window else None,
         "context": dataclasses.asdict(config.context) if config.context else None,
         "model_overrides": (
-            dataclasses.asdict(config.model_overrides)
-            if config.model_overrides
-            else None
+            dataclasses.asdict(config.model_overrides) if config.model_overrides else None
         ),
     }
 
