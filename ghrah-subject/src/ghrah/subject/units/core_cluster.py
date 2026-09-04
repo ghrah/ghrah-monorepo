@@ -49,10 +49,15 @@ _PROJECT_AGENT_COMMANDS = frozenset(
         "delegate",
         "get_agent_info",
         "session_create",
-        "session_switch",
+        "session_activate",
         "session_list",
         "session_archive",
         "session_delete",
+        "branch_create",
+        "branch_activate",
+        "branch_list",
+        "branch_archive",
+        "branch_delete",
     }
 )
 
@@ -63,10 +68,15 @@ _TARGET_FIELDS = {
     "unregister_ability": "agent_name",
     "get_agent_info": "name",
     "session_create": "agent_name",
-    "session_switch": "agent_name",
+    "session_activate": "agent_name",
     "session_list": "agent_name",
     "session_archive": "agent_name",
     "session_delete": "agent_name",
+    "branch_create": "agent_name",
+    "branch_activate": "agent_name",
+    "branch_list": "agent_name",
+    "branch_archive": "agent_name",
+    "branch_delete": "agent_name",
 }
 
 # 会挂载/复活 cluster 或向运行时投递消息的命令：Project 非 ACTIVE 时拒绝，
@@ -80,9 +90,13 @@ _RUNTIME_REVIVING_COMMANDS = frozenset(
         "register_ability",
         "unregister_ability",
         "session_create",
-        "session_switch",
+        "session_activate",
         "session_archive",
         "session_delete",
+        "branch_create",
+        "branch_activate",
+        "branch_archive",
+        "branch_delete",
     }
 )
 

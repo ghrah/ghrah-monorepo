@@ -153,7 +153,7 @@ class TestMetaContract:
         assert meta.routes.long_running_commands == frozenset()
         assert meta.routes.events == frozenset()
 
-    def test_meta_commands_exactly_17(self) -> None:
+    def test_meta_commands_exactly_22(self) -> None:
         unit = create_core_unit(CoreUnitConfig(project_id="default"))
         expected = {
             CommandType.SPAWN_AGENT.value,
@@ -169,12 +169,17 @@ class TestMetaContract:
             CommandType.EXECUTE_ABILITY.value,
             CommandType.HITL_RESPONSE.value,
             CommandType.SESSION_CREATE.value,
-            CommandType.SESSION_SWITCH.value,
+            CommandType.SESSION_ACTIVATE.value,
             CommandType.SESSION_LIST.value,
             CommandType.SESSION_ARCHIVE.value,
             CommandType.SESSION_DELETE.value,
+            CommandType.BRANCH_CREATE.value,
+            CommandType.BRANCH_ACTIVATE.value,
+            CommandType.BRANCH_LIST.value,
+            CommandType.BRANCH_ARCHIVE.value,
+            CommandType.BRANCH_DELETE.value,
         }
-        assert len(unit.meta.routes.commands) == 17
+        assert len(unit.meta.routes.commands) == 22
         assert unit.meta.routes.commands == expected
 
 
@@ -576,17 +581,27 @@ class FakePersistenceBackend:
     """PersistenceBackend duck-type stub（记录 save 调用）。"""
 
     def __init__(self, tag: str) -> None:
+        from ghrah.context.persistence import InMemoryBackend
+
         self.tag = tag
+        self._v2 = InMemoryBackend()
         self.saved: list[Any] = []
         self.meta: dict[str, tuple[dict[str, str], str, dict[str, Any]]] = {}
         self.messages: dict[str, list[Any]] = {}
         self.sessions: dict[str, Any] = {}
+        self.checkpoints: dict[str, Any] = {}
 
     async def connect(self) -> None:
         return None
 
     async def close(self) -> None:
         return None
+
+    async def load_checkpoint(self, agent_name: str) -> Any:
+        return await self._v2.load_checkpoint(agent_name)
+
+    async def apply_changes(self, changes: Any) -> None:
+        await self._v2.apply_changes(changes)
 
     async def save_node(self, node: Any) -> None:
         self.saved.append(node)
@@ -779,6 +794,7 @@ class TestForkContextContinuity:
         backend_a = SqliteBackend(db_path=tmp_path / "a.db", run_id="run-a")
         await backend_a.connect()
         from ghrah.chat.factory import ChatMessageFactory
+        from ghrah.chat.message import ChatMessage
 
         cm_a = ContextManager(
             agent_name="agent-a",
@@ -788,10 +804,9 @@ class TestForkContextContinuity:
         )
         for step in (1, 2):
             cm_a.begin_iteration()
-            cm_a.add_messages([type("M", (), {"role": "assistant", "content": f"step {step}"})()])
+            cm_a.add_messages([ChatMessage.ai(text=f"step {step}")])
             cm_a.commit_iteration(ability_names=[], action_results=[])
-        head_a = cm_a.chain.active_head
-        assert head_a is not None
+        head_a = cm_a.active_head
 
         # per-agent 注入：新 spawn agent B 用 memory fake 后端（factory 生效证明）
         backend_b = FakePersistenceBackend(tag="memory")
@@ -813,12 +828,16 @@ class TestForkContextContinuity:
         rebased = create_rebased_context(
             source_cm=cm_a, agent_name="agent-c", system_prompt="rebased"
         )
-        rebased_head = rebased.chain.active_head
-        assert rebased_head is not None
-        assert rebased_head.metadata["rebase_from_agent"] == "agent-a"
-        assert rebased_head.metadata["rebase_from_node_id"] == head_a.id
+        rebased_head = rebased.active_head
+        assert rebased_head.metadata["origin_agent_name"] == "agent-a"
+        assert rebased_head.metadata["origin_node_id"] == head_a.id
         # 继承 A 的消息（2 条 thought），过滤 system
         assert len(rebased.message_store.current_messages) >= 2
+        await rebased.wait_for_persist()
+        checkpoint = await backend_a.load_checkpoint("agent-c")
+        assert checkpoint is not None
+        assert checkpoint.sessions[0].origin_node_id == head_a.id
+        assert checkpoint.nodes[0].metadata["origin_agent_name"] == "agent-a"
         await backend_a.close()
 
     async def test_strategy_swap_via_new_config_keeps_fork_lineage(self, ctx: FakeCtx) -> None:
@@ -833,8 +852,6 @@ class TestForkContextContinuity:
         cm_old.begin_iteration()
         cm_old.add_messages([type("M", (), {"role": "assistant", "content": "legacy work"})()])
         cm_old.commit_iteration(ability_names=[], action_results=[])
-        head = cm_old.chain.active_head
-        assert head is not None
 
         # 新策略 unit（宽松）spawn agent-c，fork 自 old-agent 链头
         unit_loose = create_core_unit(
@@ -850,8 +867,7 @@ class TestForkContextContinuity:
         rebased = create_rebased_context(
             source_cm=cm_old, agent_name="new-agent-fork", system_prompt="v2"
         )
-        assert rebased.chain.active_head is not None
-        assert rebased.chain.active_head.metadata["rebase_from_agent"] == "old-agent"
+        assert rebased.active_head.metadata["origin_agent_name"] == "old-agent"
         # 新策略对新 spawn 生效（旧 unit 不受影响）
         checker_loose = unit_loose._config.require_approval_by_default
         checker_strict = unit_strict._config.require_approval_by_default
@@ -906,8 +922,7 @@ async def test_multi_agent_core_restart_restores_independent_snapshots(
         assert result["data"]["recovery_mode"] == "restored"
         assert result["data"]["incarnation_id"]
         cm = _actor_of(restarted, name)._context_manager
-        assert cm.chain.active_head is not None
-        assert cm.chain.active_head.id == heads[name]
+        assert cm.active_head.id == heads[name]
         assert cm.get_current_state() == {"waiting_at": name}
 
     listed = await restarted.handle_command("list_agents", {"project_id": "default"}, None)
@@ -966,7 +981,6 @@ async def test_same_name_agents_in_different_clusters_use_uuid_snapshot_keys(
         )
         assert result["data"]["recovery_mode"] == "restored"
         cm = _actor_of(unit, "planner")._context_manager
-        assert cm.chain.active_head is not None
-        assert cm.chain.active_head.id == heads[agent_id]
+        assert cm.active_head.id == heads[agent_id]
         assert cm.get_current_state() == {"cluster": cluster_id}
         await unit.stop()

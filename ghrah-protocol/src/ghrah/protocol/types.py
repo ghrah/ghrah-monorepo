@@ -97,10 +97,6 @@ class CommandType(StrEnum):
     PERSIST_LOAD_MESSAGES = "persist_load_messages"
     PERSIST_DELETE_CHAIN = "persist_delete_chain"
     PERSIST_LIST_AGENTS = "persist_list_agents"
-    PERSIST_SAVE_SESSION = "persist_save_session"
-    PERSIST_LOAD_SESSION = "persist_load_session"
-    PERSIST_LIST_SESSIONS = "persist_list_sessions"
-    PERSIST_DELETE_SESSIONS = "persist_delete_sessions"
 
     # ─── Workspace 管理类（Observer → Subject）───
     CREATE_WORKSPACE = "create_workspace"
@@ -116,10 +112,15 @@ class CommandType(StrEnum):
 
     # ─── Session 管理类（Observer → Subject → Core）───
     SESSION_CREATE = "session_create"
-    SESSION_SWITCH = "session_switch"
+    SESSION_ACTIVATE = "session_activate"
     SESSION_LIST = "session_list"
     SESSION_ARCHIVE = "session_archive"
     SESSION_DELETE = "session_delete"
+    BRANCH_CREATE = "branch_create"
+    BRANCH_ACTIVATE = "branch_activate"
+    BRANCH_LIST = "branch_list"
+    BRANCH_ARCHIVE = "branch_archive"
+    BRANCH_DELETE = "branch_delete"
 
     # ─── Manifest CRUD 类（Observer → Subject）───
     MANIFEST_LIST_ABILITIES = "manifest_list_abilities"
@@ -217,10 +218,15 @@ class EventType(StrEnum):
 
     # ─── Session 事件（Core → Observer）───
     SESSION_CREATED = "session_created"
-    SESSION_SWITCHED = "session_switched"
+    SESSION_ACTIVATED = "session_activated"
     SESSION_ARCHIVED = "session_archived"
     SESSION_DELETED = "session_deleted"
     SESSION_LIST_RESULT = "session_list_result"
+    BRANCH_CREATED = "branch_created"
+    BRANCH_ACTIVATED = "branch_activated"
+    BRANCH_ARCHIVED = "branch_archived"
+    BRANCH_DELETED = "branch_deleted"
+    BRANCH_LIST_RESULT = "branch_list_result"
 
     # ─── Task 事件（Subject → Observer/Core）───
     TASK_CREATED = "task_created"
@@ -273,10 +279,15 @@ AGENT_SCOPED_EVENT_TYPES: frozenset[str] = frozenset(
         EventType.ABILITY_RESULT.value,
         EventType.HITL_REQUEST.value,
         EventType.SESSION_CREATED.value,
-        EventType.SESSION_SWITCHED.value,
+        EventType.SESSION_ACTIVATED.value,
         EventType.SESSION_ARCHIVED.value,
         EventType.SESSION_DELETED.value,
         EventType.SESSION_LIST_RESULT.value,
+        EventType.BRANCH_CREATED.value,
+        EventType.BRANCH_ACTIVATED.value,
+        EventType.BRANCH_ARCHIVED.value,
+        EventType.BRANCH_DELETED.value,
+        EventType.BRANCH_LIST_RESULT.value,
     }
 )
 
@@ -323,10 +334,6 @@ PERSIST_COMMANDS: frozenset[str] = frozenset(
         CommandType.PERSIST_LOAD_MESSAGES.value,
         CommandType.PERSIST_DELETE_CHAIN.value,
         CommandType.PERSIST_LIST_AGENTS.value,
-        CommandType.PERSIST_SAVE_SESSION.value,
-        CommandType.PERSIST_LOAD_SESSION.value,
-        CommandType.PERSIST_LIST_SESSIONS.value,
-        CommandType.PERSIST_DELETE_SESSIONS.value,
     }
 )
 
@@ -347,20 +354,35 @@ CORE_COMMANDS: frozenset[str] = frozenset(
         CommandType.CLUSTER_STATUS.value,
         CommandType.LIST_CLUSTERS.value,
         CommandType.SESSION_CREATE.value,
-        CommandType.SESSION_SWITCH.value,
+        CommandType.SESSION_ACTIVATE.value,
         CommandType.SESSION_LIST.value,
         CommandType.SESSION_ARCHIVE.value,
         CommandType.SESSION_DELETE.value,
+        CommandType.BRANCH_CREATE.value,
+        CommandType.BRANCH_ACTIVATE.value,
+        CommandType.BRANCH_LIST.value,
+        CommandType.BRANCH_ARCHIVE.value,
+        CommandType.BRANCH_DELETE.value,
     }
 )
 
 SESSION_COMMANDS: frozenset[str] = frozenset(
     {
         CommandType.SESSION_CREATE.value,
-        CommandType.SESSION_SWITCH.value,
+        CommandType.SESSION_ACTIVATE.value,
         CommandType.SESSION_LIST.value,
         CommandType.SESSION_ARCHIVE.value,
         CommandType.SESSION_DELETE.value,
+    }
+)
+
+BRANCH_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.BRANCH_CREATE.value,
+        CommandType.BRANCH_ACTIVATE.value,
+        CommandType.BRANCH_LIST.value,
+        CommandType.BRANCH_ARCHIVE.value,
+        CommandType.BRANCH_DELETE.value,
     }
 )
 
@@ -1067,13 +1089,14 @@ class SessionCreatePayload(BaseModel):
     project_id: str
     agent_id: str
     agent_name: str
-    session_name: str | None = None
-    from_node_id: str | None = None
+    origin_session_id: str | None = None
+    origin_node_id: str | None = None
     system_prompt: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class SessionSwitchPayload(BaseModel):
-    """session_switch 命令载荷。"""
+class SessionActivatePayload(BaseModel):
+    """session_activate 命令载荷。"""
 
     project_id: str
     agent_id: str
@@ -1107,13 +1130,54 @@ class SessionDeletePayload(BaseModel):
     session_id: str
 
 
+class BranchCreatePayload(BaseModel):
+    """branch_create 命令载荷。"""
+
+    project_id: str
+    agent_id: str
+    agent_name: str
+    session_id: str
+    name: str
+    from_node_id: str | None = None
+    parent_branch_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BranchActivatePayload(BaseModel):
+    """branch_activate 命令载荷。"""
+
+    project_id: str
+    agent_id: str
+    agent_name: str
+    session_id: str
+    branch_id: str
+
+
+class BranchListPayload(BaseModel):
+    """branch_list 命令载荷。"""
+
+    project_id: str
+    agent_id: str
+    agent_name: str
+    session_id: str
+
+
+class BranchArchivePayload(BranchActivatePayload):
+    """branch_archive 命令载荷。"""
+
+
+class BranchDeletePayload(BranchActivatePayload):
+    """branch_delete 命令载荷。"""
+
+
 class GetChainHistoryPayload(BaseModel):
     """get_chain_history 命令载荷。"""
 
     project_id: str
     agent_id: str
     agent_name: str
-    branch_name: str = "main"
+    session_id: str
+    branch_id: str
     limit: int = -1
 
 
@@ -1123,9 +1187,9 @@ class ChainHistoryResultPayload(BaseModel):
     project_id: str
     agent_id: str
     agent_name: str
-    branch_name: str = "main"
+    session_id: str
+    branch_id: str
     nodes: list[dict[str, Any]] = Field(default_factory=list)
-    active_session_id: str = ""
 
 
 # ─── Task 命令和事件载荷模型 ───
@@ -1651,12 +1715,12 @@ class SessionInfoPayload(BaseModel):
     cluster_id: str = ""
     session_id: str
     agent_name: str
-    branch_name: str
+    root_node_id: str
+    active_branch_id: str
     state: str = "active"
-    head_node_id: str | None = None
-    # root_node_id: str | None = None
-    parent_session_id: str | None = None
-    fork_point_node_id: str | None = None
+    system_prompt: str = ""
+    origin_session_id: str | None = None
+    origin_node_id: str | None = None
     created_at: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     message_count: int = 0
@@ -1673,8 +1737,8 @@ class SessionCreatedPayload(BaseModel):
     session: SessionInfoPayload
 
 
-class SessionSwitchedPayload(BaseModel):
-    """session_switched 事件载荷。"""
+class SessionActivatedPayload(BaseModel):
+    """session_activated 事件载荷。"""
 
     project_id: str = ""
     agent_id: str = ""
@@ -1711,6 +1775,51 @@ class SessionListResultPayload(BaseModel):
     cluster_id: str = ""
     agent_name: str
     sessions: list[SessionInfoPayload]
+
+
+class BranchInfoPayload(BaseModel):
+    """Branch 信息载荷。"""
+
+    branch_id: str
+    session_id: str
+    name: str
+    head_node_id: str
+    parent_branch_id: str | None = None
+    fork_point_node_id: str | None = None
+    created_at: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class BranchEventPayload(BaseModel):
+    """Branch 创建/激活事件载荷。"""
+
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
+    agent_name: str
+    branch: BranchInfoPayload
+
+
+class BranchLifecyclePayload(BaseModel):
+    """Branch 归档/删除事件载荷。"""
+
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
+    agent_name: str
+    session_id: str
+    branch_id: str
+
+
+class BranchListResultPayload(BaseModel):
+    """branch_list_result 事件载荷。"""
+
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
+    agent_name: str
+    session_id: str
+    branches: list[BranchInfoPayload]
 
 
 # ─── Manifest 事件载荷模型 ───
@@ -1871,10 +1980,15 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     CommandType.TASK_DELETE: TaskDeletePayload,
     # Session 管理（5 个）
     CommandType.SESSION_CREATE: SessionCreatePayload,
-    CommandType.SESSION_SWITCH: SessionSwitchPayload,
+    CommandType.SESSION_ACTIVATE: SessionActivatePayload,
     CommandType.SESSION_LIST: SessionListPayload,
     CommandType.SESSION_ARCHIVE: SessionArchivePayload,
     CommandType.SESSION_DELETE: SessionDeletePayload,
+    CommandType.BRANCH_CREATE: BranchCreatePayload,
+    CommandType.BRANCH_ACTIVATE: BranchActivatePayload,
+    CommandType.BRANCH_LIST: BranchListPayload,
+    CommandType.BRANCH_ARCHIVE: BranchArchivePayload,
+    CommandType.BRANCH_DELETE: BranchDeletePayload,
     # Project 管理（15 个）
     CommandType.PROJECT_CREATE: ProjectCreatePayload,
     CommandType.PROJECT_UPDATE: ProjectUpdatePayload,
@@ -1923,10 +2037,15 @@ EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
     EventType.WORKSPACE_SNAPSHOT_CREATED: WorkspaceSnapshotCreatedPayload,
     EventType.WORKSPACE_ROLLED_BACK: WorkspaceRolledBackPayload,
     EventType.SESSION_CREATED: SessionCreatedPayload,
-    EventType.SESSION_SWITCHED: SessionSwitchedPayload,
+    EventType.SESSION_ACTIVATED: SessionActivatedPayload,
     EventType.SESSION_ARCHIVED: SessionArchivedPayload,
     EventType.SESSION_DELETED: SessionDeletedPayload,
     EventType.SESSION_LIST_RESULT: SessionListResultPayload,
+    EventType.BRANCH_CREATED: BranchEventPayload,
+    EventType.BRANCH_ACTIVATED: BranchEventPayload,
+    EventType.BRANCH_ARCHIVED: BranchLifecyclePayload,
+    EventType.BRANCH_DELETED: BranchLifecyclePayload,
+    EventType.BRANCH_LIST_RESULT: BranchListResultPayload,
     # task_* 事件（9 个）payload 模型 TaskEventPayload 已存在
     EventType.TASK_CREATED: TaskEventPayload,
     EventType.TASK_UPDATED: TaskEventPayload,

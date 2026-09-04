@@ -26,7 +26,7 @@ class LedgerNode(BaseModel):
     is_snapshot: bool = False
     action_results: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    branch_name: str = "main"
+    created_on_branch_id: str
 
     @classmethod
     def from_context_node(cls, node: ContextNode) -> LedgerNode:
@@ -46,8 +46,8 @@ class ChainMeta(BaseModel):
     model_config = {"from_attributes": True}
 
     agent_name: str
-    branches: dict[str, str] = Field(default_factory=dict)
-    current_state: dict[str, Any] = Field(default_factory=dict)
+    sessions: list[dict[str, Any]] = Field(default_factory=list)
+    branches: list[dict[str, Any]] = Field(default_factory=list)
     active_session_id: str = ""
 
 

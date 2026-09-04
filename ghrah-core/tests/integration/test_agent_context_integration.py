@@ -249,9 +249,7 @@ class TestIterationLifecycle:
 
         await agent._drive_loop()
 
-        chain = cm._chain
-        assert chain.head is not None
-        assert chain.head.ability_names == ["conversation"]
+        assert cm.active_head.ability_names == ["conversation"]
 
     @pytest.mark.asyncio
     async def test_drive_loop_captures_ability_failure(self) -> None:
@@ -275,7 +273,7 @@ class TestIterationLifecycle:
 
         await agent._drive_loop()
 
-        head = cm.chain.head
+        head = cm.active_head
         assert head is not None
         assert head.ability_names == ["failing_ability"]
         action_result = head.action_results
@@ -315,9 +313,7 @@ class TestIterationLifecycle:
 
         await agent._drive_loop()
 
-        chain = cm._chain
-        assert chain.head is not None
-        nodes = chain.get_history()
+        nodes = cm.get_history()
         assert len(nodes) >= 2
 
     @pytest.mark.asyncio
@@ -465,8 +461,7 @@ class TestFullFlow:
         assert reply.content == "mock response"
         assert ability.execute_count == 1
 
-        chain = agent._context_manager._chain
-        assert chain.head is not None
+        assert agent._context_manager.active_head is not None
 
     @pytest.mark.asyncio
     async def test_receive_without_ability_raises_error(self) -> None:

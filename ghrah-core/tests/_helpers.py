@@ -20,7 +20,8 @@ def make_node(**overrides) -> ContextNode:
         "agent_state": {"key": "value"},
         "messages_delta": [],
         "is_snapshot": True,
-        "branch_name": "main",
+        "session_id": "session-test",
+        "created_on_branch_id": "branch-main",
     }
     defaults.update(overrides)
     return ContextNode(**defaults)

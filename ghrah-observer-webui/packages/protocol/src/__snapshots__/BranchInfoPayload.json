@@ -1,0 +1,10 @@
+{
+  "branch_id": "branch-main",
+  "session_id": "session-001",
+  "name": "main",
+  "head_node_id": "node-001",
+  "parent_branch_id": null,
+  "fork_point_node_id": null,
+  "created_at": "2026-08-28T00:00:00Z",
+  "metadata": {}
+}

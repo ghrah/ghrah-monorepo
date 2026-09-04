@@ -2,7 +2,8 @@
   "project_id": "proj-001",
   "agent_id": "agent-001",
   "agent_name": "agent-1",
-  "session_name": "design",
-  "from_node_id": null,
-  "system_prompt": null
+  "origin_session_id": null,
+  "origin_node_id": null,
+  "system_prompt": null,
+  "metadata": {}
 }

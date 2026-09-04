@@ -12,12 +12,13 @@
     - 事务保证：批量操作使用显式事务
     - 序列化兼容：复用 serialization.py 中的函数
     - 连接管理：支持 async with 上下文管理器
-    - run_id：进程级运行标识（原 session_id，重命名避免与 branch session 混淆）
-    - sessions：Agent 内的 branch session 元数据
+    - run_id：进程级运行标识
+    - sessions/branches/nodes：独立 Root、Head 引用与不可变节点
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
@@ -26,17 +27,17 @@ from typing import Any
 
 import aiosqlite
 
-from ghrah.context.node import ContextNode
 from ghrah.context.persistence.backend import PersistenceBackend
+from ghrah.context.persistence.changes import ContextChanges
+from ghrah.context.persistence.checkpoint import ContextCheckpoint
 from ghrah.context.persistence.serialization import (
-    deserialize_messages,
+    deserialize_action_session,
+    deserialize_branch,
     deserialize_node,
-    deserialize_session,
-    serialize_messages,
+    serialize_action_session,
+    serialize_branch,
     serialize_node,
-    serialize_session,
 )
-from ghrah.context.session import Session
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +45,19 @@ __all__ = ["SqliteBackend"]
 
 # 节点表查询的列名列表，保持 SELECT 和 _row_to_dict 一致
 _NODE_COLUMNS = (
-    "id, parent_id, agent_name, session_id, timestamp, iteration, "
-    "branch_name, is_snapshot, ability_names, agent_state, "
+    "id, parent_id, agent_name, session_id, created_on_branch_id, timestamp, iteration, "
+    "is_snapshot, ability_names, agent_state, "
     "messages_delta, messages_snapshot, action_results, metadata"
 )
 
 # 数据库建表 DDL
 _SCHEMA_SQL = """
+CREATE TABLE context_schema (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    version   INTEGER NOT NULL
+);
+INSERT INTO context_schema (singleton, version) VALUES (1, 2);
+
 CREATE TABLE IF NOT EXISTS runs (
     run_id        TEXT PRIMARY KEY,
     created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -68,16 +75,25 @@ CREATE TABLE IF NOT EXISTS agents (
 CREATE TABLE IF NOT EXISTS sessions (
     session_id        TEXT PRIMARY KEY,
     agent_name        TEXT NOT NULL,
-    branch_name       TEXT NOT NULL DEFAULT 'main',
-    parent_node_id    TEXT,
-    parent_session_id TEXT,
-    rebase_from_agent TEXT,
-    rebase_from_node_id TEXT,
-    rebase_from_session_id TEXT,
+    root_node_id      TEXT NOT NULL,
+    active_branch_id TEXT NOT NULL,
+    origin_session_id TEXT,
+    origin_node_id   TEXT,
     system_prompt     TEXT DEFAULT '',
     created_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     metadata          TEXT DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS branches (
+    branch_id         TEXT PRIMARY KEY,
+    session_id        TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+    name              TEXT NOT NULL,
+    head_node_id      TEXT NOT NULL,
+    parent_branch_id  TEXT,
+    fork_point_node_id TEXT,
+    created_at        TEXT NOT NULL,
+    metadata          TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS nodes (
@@ -87,7 +103,7 @@ CREATE TABLE IF NOT EXISTS nodes (
     session_id        TEXT NOT NULL DEFAULT '',
     timestamp         TEXT NOT NULL,
     iteration         INTEGER NOT NULL DEFAULT 0,
-    branch_name       TEXT NOT NULL DEFAULT 'main',
+    created_on_branch_id TEXT NOT NULL,
     is_snapshot       INTEGER NOT NULL DEFAULT 0,
     ability_names     TEXT NOT NULL DEFAULT '[]',
     agent_state       TEXT NOT NULL DEFAULT '{}',
@@ -100,25 +116,18 @@ CREATE TABLE IF NOT EXISTS nodes (
 
 CREATE TABLE IF NOT EXISTS chain_meta (
     agent_name        TEXT PRIMARY KEY REFERENCES agents(agent_name),
-    branches          TEXT NOT NULL DEFAULT '{}',
     active_session_id TEXT NOT NULL DEFAULT '',
-    current_state     TEXT NOT NULL DEFAULT '{}',
     updated_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS messages (
-    agent_name    TEXT PRIMARY KEY REFERENCES agents(agent_name),
-    messages      TEXT NOT NULL DEFAULT '[]',
-    updated_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_nodes_agent ON nodes(agent_name);
 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(parent_id);
-CREATE INDEX IF NOT EXISTS idx_nodes_branch ON nodes(agent_name, branch_name);
+CREATE INDEX IF NOT EXISTS idx_nodes_branch ON nodes(session_id, created_on_branch_id);
 CREATE INDEX IF NOT EXISTS idx_nodes_iteration ON nodes(agent_name, iteration);
 CREATE INDEX IF NOT EXISTS idx_nodes_session ON nodes(session_id);
 CREATE INDEX IF NOT EXISTS idx_agents_run ON agents(run_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_agent ON sessions(agent_name);
+CREATE INDEX IF NOT EXISTS idx_branches_session ON branches(session_id);
 """
 
 
@@ -157,11 +166,18 @@ class SqliteBackend(PersistenceBackend):
         self._run_id = run_id or _generate_run_id()
         self._db: aiosqlite.Connection | None = None
         self._initialized = False
+        self._initialize_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
 
     @property
     def db_path(self) -> Path:
         """数据库文件路径。"""
         return self._db_path
+
+    @property
+    def connected(self) -> bool:
+        """连接是否已建立。"""
+        return self._db is not None
 
     @property
     def run_id(self) -> str:
@@ -186,8 +202,10 @@ class SqliteBackend(PersistenceBackend):
                 "Database not connected. Use 'async with backend:' or call connect() first."
             )
         if not self._initialized:
-            await self._initialize_schema()
-            self._initialized = True
+            async with self._initialize_lock:
+                if not self._initialized:
+                    await self._initialize_schema()
+                    self._initialized = True
         return self._db
 
     async def connect(self) -> None:
@@ -221,7 +239,23 @@ class SqliteBackend(PersistenceBackend):
     async def _initialize_schema(self) -> None:
         """初始化数据库表结构和索引。"""
         assert self._db is not None
-        await self._db.executescript(_SCHEMA_SQL)
+        cursor = await self._db.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+        existing_tables = {row["name"] for row in await cursor.fetchall()}
+        if existing_tables:
+            if "context_schema" not in existing_tables:
+                raise RuntimeError(
+                    "Legacy context database schema detected; delete it and rebuild explicitly"
+                )
+            version_cursor = await self._db.execute(
+                "SELECT version FROM context_schema WHERE singleton = 1"
+            )
+            version_row = await version_cursor.fetchone()
+            if version_row is None or version_row["version"] != 2:
+                raise RuntimeError("Unsupported context database schema; rebuild explicitly")
+        else:
+            await self._db.executescript(_SCHEMA_SQL)
         # 确保当前 run 存在
         await self._db.execute(
             "INSERT OR IGNORE INTO runs (run_id) VALUES (?)",
@@ -273,10 +307,10 @@ class SqliteBackend(PersistenceBackend):
             serialized["id"],
             serialized["parent_id"],
             serialized["agent_name"],
-            serialized.get("session_id", ""),
+            serialized["session_id"],
+            serialized["created_on_branch_id"],
             serialized["timestamp"],
             serialized["iteration"],
-            serialized["branch_name"],
             1 if serialized["is_snapshot"] else 0,
             json.dumps(serialized["ability_names"], ensure_ascii=False),
             json.dumps(serialized["agent_state"], ensure_ascii=False),
@@ -292,272 +326,162 @@ class SqliteBackend(PersistenceBackend):
     # PersistenceBackend 接口实现
     # ----------------------------------------------------------------
 
-    async def save_node(self, node: ContextNode) -> None:
-        """保存单个节点到 SQLite。
+    async def apply_changes(self, changes: ContextChanges) -> None:
+        """在单个 SQLite 事务中应用最小增量变更。"""
+        async with self._write_lock:
+            await self._apply_changes(changes)
 
-        如果节点已存在则更新（UPSERT）。
-
-        Args:
-            node: 要保存的 ContextNode
-        """
-        db = await self._ensure_db()
-        await self._ensure_agent(db, node.agent_name)
-
-        serialized = serialize_node(node)
-        await db.execute(
-            f"""
-            INSERT OR REPLACE INTO nodes (
-                {_NODE_COLUMNS}
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            self._serialize_node_params(serialized),
-        )
-        await db.commit()
-
-    async def load_node(self, node_id: str) -> ContextNode | None:
-        """从 SQLite 加载单个节点。
-
-        Args:
-            node_id: 节点 ID
-
-        Returns:
-            对应的 ContextNode，不存在则返回 None
-        """
-        db = await self._ensure_db()
-        cursor = await db.execute(
-            f"""
-            SELECT {_NODE_COLUMNS}
-            FROM nodes WHERE id = ?
-            """,
-            (node_id,),
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-
-        data = self._row_to_dict(row)
-        return deserialize_node(data)
-
-    async def load_chain(self, agent_name: str) -> list[ContextNode]:
-        """加载指定 agent 的所有节点（按 iteration 升序排列）。
-
-        Args:
-            agent_name: Agent 名称
-
-        Returns:
-            节点列表（按 iteration 升序排列）
-        """
-        db = await self._ensure_db()
-        cursor = await db.execute(
-            f"""
-            SELECT {_NODE_COLUMNS}
-            FROM nodes WHERE agent_name = ?
-            ORDER BY iteration ASC
-            """,
-            (agent_name,),
-        )
-        rows = await cursor.fetchall()
-        return [deserialize_node(self._row_to_dict(row)) for row in rows]
-
-    async def save_chain_meta(
-        self,
-        agent_name: str,
-        branches: dict[str, str],
-        current_state: dict[str, Any],
-        active_session_id: str = "",
-    ) -> None:
-        """保存链的元信息：分支映射 + 活跃 session ID + 当前状态。
-
-        Args:
-            agent_name: Agent 名称
-            branches: 分支名 → head node ID 的映射
-            current_state: 当前 Agent 状态快照
-            active_session_id: 当前活跃 session 的 ID
-        """
-        db = await self._ensure_db()
-        await self._ensure_agent(db, agent_name)
-
-        await db.execute(
-            """
-            INSERT OR REPLACE INTO chain_meta (
-                agent_name, branches, active_session_id, current_state, updated_at
-            ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """,
-            (
-                agent_name,
-                json.dumps(branches, ensure_ascii=False),
-                active_session_id,
-                json.dumps(current_state, ensure_ascii=False),
-            ),
-        )
-        await db.commit()
-
-    async def load_chain_meta(
-        self, agent_name: str
-    ) -> tuple[dict[str, str], str, dict[str, Any]] | None:
-        """加载链的元信息。
-
-        Args:
-            agent_name: Agent 名称
-
-        Returns:
-            (branches, active_session_id, current_state) 三元组，不存在则返回 None
-        """
-        db = await self._ensure_db()
-        cursor = await db.execute(
-            """
-            SELECT branches, active_session_id, current_state
-            FROM chain_meta WHERE agent_name = ?
-            """,
-            (agent_name,),
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        branches = json.loads(row["branches"])
-        active_session_id = row["active_session_id"]
-        current_state = json.loads(row["current_state"])
-        return (branches, active_session_id, current_state)
-
-    async def save_messages(self, agent_name: str, messages: list[Any]) -> None:
-        """保存当前完整消息列表。
-
-        Args:
-            agent_name: Agent 名称
-            messages: ChatMessage 列表
-        """
-        db = await self._ensure_db()
-        await self._ensure_agent(db, agent_name)
-
-        serialized = serialize_messages(messages)
-        await db.execute(
-            """
-            INSERT OR REPLACE INTO messages (agent_name, messages, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            """,
-            (
-                agent_name,
-                json.dumps(serialized, ensure_ascii=False),
-            ),
-        )
-        await db.commit()
-
-    async def load_messages(self, agent_name: str) -> list[Any]:
-        """加载消息列表。
-
-        Args:
-            agent_name: Agent 名称
-
-        Returns:
-            ChatMessage 列表，不存在则返回空列表
-        """
-        db = await self._ensure_db()
-        cursor = await db.execute(
-            "SELECT messages FROM messages WHERE agent_name = ?",
-            (agent_name,),
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            return []
-        data = json.loads(row["messages"])
-        result = deserialize_messages(data)
-        return result if result is not None else []
-
-    async def delete_chain(self, agent_name: str) -> None:
-        """删除指定 agent 的所有持久化数据。
-
-        按外键依赖顺序删除：messages → chain_meta → sessions → nodes → agents。
-
-        Args:
-            agent_name: Agent 名称
-        """
-        db = await self._ensure_db()
-        await db.execute("DELETE FROM messages WHERE agent_name = ?", (agent_name,))
-        await db.execute("DELETE FROM chain_meta WHERE agent_name = ?", (agent_name,))
-        await db.execute("DELETE FROM sessions WHERE agent_name = ?", (agent_name,))
-        await db.execute("DELETE FROM nodes WHERE agent_name = ?", (agent_name,))
-        await db.execute("DELETE FROM agents WHERE agent_name = ?", (agent_name,))
-        await db.commit()
-
-    async def replace_snapshot(
-        self,
-        *,
-        agent_name: str,
-        nodes: list[ContextNode],
-        sessions: list[Session],
-        branches: dict[str, str],
-        current_state: dict[str, Any],
-        active_session_id: str,
-        messages: list[Any],
-    ) -> None:
-        """在一个 SQLite 事务中完整替换某 Agent 的恢复 checkpoint。"""
+    async def _apply_changes(self, changes: ContextChanges) -> None:
+        """持有后端写锁时应用增量变更。"""
         db = await self._ensure_db()
         await db.execute("BEGIN IMMEDIATE")
         try:
-            await self._ensure_agent(db, agent_name)
-            await db.execute("DELETE FROM messages WHERE agent_name = ?", (agent_name,))
-            await db.execute("DELETE FROM chain_meta WHERE agent_name = ?", (agent_name,))
-            await db.execute("DELETE FROM sessions WHERE agent_name = ?", (agent_name,))
-            await db.execute("DELETE FROM nodes WHERE agent_name = ?", (agent_name,))
-
-            for node in nodes:
-                serialized = serialize_node(node)
-                await db.execute(
-                    f"""
-                    INSERT INTO nodes ({_NODE_COLUMNS})
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    self._serialize_node_params(serialized),
-                )
-
-            for session in sessions:
-                serialized_session = serialize_session(session)
+            await self._ensure_agent(db, changes.agent_name)
+            for branch_id in changes.delete_branch_ids:
+                await db.execute("DELETE FROM branches WHERE branch_id = ?", (branch_id,))
+            for session_id in changes.delete_session_ids:
+                await db.execute("DELETE FROM nodes WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM branches WHERE session_id = ?", (session_id,))
+                await db.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            for session in changes.sessions:
+                data = serialize_action_session(session)
                 await db.execute(
                     """
                     INSERT INTO sessions (
-                        session_id, agent_name, branch_name,
-                        parent_node_id, parent_session_id,
-                        rebase_from_agent, rebase_from_node_id,
-                        rebase_from_session_id, system_prompt, metadata, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        session_id, agent_name, root_node_id, active_branch_id,
+                        origin_session_id, origin_node_id, system_prompt, created_at, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        root_node_id=excluded.root_node_id,
+                        active_branch_id=excluded.active_branch_id,
+                        system_prompt=excluded.system_prompt,
+                        metadata=excluded.metadata
                     """,
                     (
-                        serialized_session["session_id"],
-                        serialized_session["agent_name"],
-                        serialized_session["branch_name"],
-                        serialized_session["parent_node_id"],
-                        serialized_session["parent_session_id"],
-                        serialized_session["rebase_from_agent"],
-                        serialized_session["rebase_from_node_id"],
-                        serialized_session["rebase_from_session_id"],
-                        serialized_session["system_prompt"],
-                        serialized_session["metadata"],
+                        data["session_id"],
+                        data["agent_name"],
+                        data["root_node_id"],
+                        data["active_branch_id"],
+                        data["origin_session_id"],
+                        data["origin_node_id"],
+                        data["system_prompt"],
+                        data["created_at"],
+                        data["metadata"],
                     ),
                 )
+            for branch in changes.branches:
+                data = serialize_branch(branch)
+                await db.execute(
+                    """
+                    INSERT INTO branches (
+                        branch_id, session_id, name, head_node_id,
+                        parent_branch_id, fork_point_node_id, created_at, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(branch_id) DO UPDATE SET
+                        name=excluded.name,
+                        head_node_id=excluded.head_node_id,
+                        metadata=excluded.metadata
+                    """,
+                    (
+                        data["branch_id"],
+                        data["session_id"],
+                        data["name"],
+                        data["head_node_id"],
+                        data["parent_branch_id"],
+                        data["fork_point_node_id"],
+                        data["created_at"],
+                        data["metadata"],
+                    ),
+                )
+            for node in sorted(changes.nodes, key=lambda item: item.iteration):
+                await db.execute(
+                    f"INSERT INTO nodes ({_NODE_COLUMNS}) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(id) DO NOTHING",
+                    self._serialize_node_params(serialize_node(node)),
+                )
+            if changes.active_session_id is not None:
+                await db.execute(
+                    """
+                    INSERT INTO chain_meta (agent_name, active_session_id) VALUES (?, ?)
+                    ON CONFLICT(agent_name) DO UPDATE SET
+                        active_session_id=excluded.active_session_id,
+                        updated_at=CURRENT_TIMESTAMP
+                    """,
+                    (changes.agent_name, changes.active_session_id),
+                )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
 
-            await db.execute(
-                """
-                INSERT INTO chain_meta (
-                    agent_name, branches, active_session_id, current_state, updated_at
-                ) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    async def load_checkpoint(self, agent_name: str) -> ContextCheckpoint | None:
+        """从 SQLite 加载 Agent 的 v2 checkpoint。"""
+        db = await self._ensure_db()
+        meta_cursor = await db.execute(
+            "SELECT active_session_id FROM chain_meta WHERE agent_name = ?", (agent_name,)
+        )
+        meta = await meta_cursor.fetchone()
+        if meta is None:
+            return None
+        session_cursor = await db.execute(
+            """
+            SELECT session_id, agent_name, root_node_id, active_branch_id,
+                   origin_session_id, origin_node_id, system_prompt, created_at, metadata
+            FROM sessions WHERE agent_name = ? ORDER BY created_at, session_id
+            """,
+            (agent_name,),
+        )
+        sessions = tuple(
+            deserialize_action_session(dict(row)) for row in await session_cursor.fetchall()
+        )
+        session_ids = [session.session_id for session in sessions]
+        if session_ids:
+            placeholders = ", ".join("?" for _ in session_ids)
+            branch_cursor = await db.execute(
+                f"""
+                SELECT branch_id, session_id, name, head_node_id,
+                       parent_branch_id, fork_point_node_id, created_at, metadata
+                FROM branches WHERE session_id IN ({placeholders})
+                ORDER BY created_at, branch_id
                 """,
-                (
-                    agent_name,
-                    json.dumps(branches, ensure_ascii=False),
-                    active_session_id,
-                    json.dumps(current_state, ensure_ascii=False),
-                ),
+                tuple(session_ids),
             )
-            await db.execute(
-                """
-                INSERT INTO messages (agent_name, messages, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
-                """,
-                (
-                    agent_name,
-                    json.dumps(serialize_messages(messages), ensure_ascii=False),
-                ),
+            branches = tuple(
+                deserialize_branch(dict(row)) for row in await branch_cursor.fetchall()
             )
+        else:
+            branches = ()
+        node_cursor = await db.execute(
+            f"SELECT {_NODE_COLUMNS} FROM nodes WHERE agent_name = ? "
+            "ORDER BY session_id, iteration, timestamp",
+            (agent_name,),
+        )
+        nodes = tuple(
+            deserialize_node(self._row_to_dict(row)) for row in await node_cursor.fetchall()
+        )
+        return ContextCheckpoint(
+            agent_name=agent_name,
+            active_session_id=meta["active_session_id"],
+            sessions=sessions,
+            branches=branches,
+            nodes=nodes,
+        )
+
+    async def delete_checkpoint(self, agent_name: str) -> None:
+        """在单个事务中删除指定 Agent 的完整 v2 checkpoint。"""
+        async with self._write_lock:
+            await self._delete_checkpoint(agent_name)
+
+    async def _delete_checkpoint(self, agent_name: str) -> None:
+        """持有后端写锁时删除 checkpoint。"""
+        db = await self._ensure_db()
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            await db.execute("DELETE FROM chain_meta WHERE agent_name = ?", (agent_name,))
+            await db.execute("DELETE FROM nodes WHERE agent_name = ?", (agent_name,))
+            await db.execute("DELETE FROM sessions WHERE agent_name = ?", (agent_name,))
+            await db.execute("DELETE FROM agents WHERE agent_name = ?", (agent_name,))
             await db.commit()
         except Exception:
             await db.rollback()
@@ -573,170 +497,6 @@ class SqliteBackend(PersistenceBackend):
         cursor = await db.execute("SELECT agent_name FROM agents ORDER BY agent_name")
         rows = await cursor.fetchall()
         return [row["agent_name"] for row in rows]
-
-    # ----------------------------------------------------------------
-    # Session 管理
-    # ----------------------------------------------------------------
-
-    async def save_session(self, session: Session) -> None:
-        """保存或更新 session 到 SQLite。
-
-        Args:
-            session: Session 实例
-        """
-        db = await self._ensure_db()
-        serialized = serialize_session(session)
-
-        await db.execute(
-            """
-            INSERT OR REPLACE INTO sessions (
-                session_id, agent_name, branch_name,
-                parent_node_id, parent_session_id,
-                rebase_from_agent, rebase_from_node_id, rebase_from_session_id,
-                system_prompt, metadata, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """,
-            (
-                serialized["session_id"],
-                serialized["agent_name"],
-                serialized["branch_name"],
-                serialized["parent_node_id"],
-                serialized["parent_session_id"],
-                serialized["rebase_from_agent"],
-                serialized["rebase_from_node_id"],
-                serialized["rebase_from_session_id"],
-                serialized["system_prompt"],
-                serialized["metadata"],
-            ),
-        )
-        await db.commit()
-
-    async def load_session(self, session_id: str) -> Session | None:
-        """按 ID 加载 session。
-
-        Args:
-            session_id: session ID
-
-        Returns:
-            Session 实例，不存在则返回 None
-        """
-        db = await self._ensure_db()
-        cursor = await db.execute(
-            """
-            SELECT session_id, agent_name, branch_name,
-                   parent_node_id, parent_session_id,
-                   rebase_from_agent, rebase_from_node_id, rebase_from_session_id,
-                   system_prompt, created_at, metadata
-            FROM sessions WHERE session_id = ?
-            """,
-            (session_id,),
-        )
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        data = {
-            "session_id": row["session_id"],
-            "agent_name": row["agent_name"],
-            "branch_name": row["branch_name"],
-            "parent_node_id": row["parent_node_id"],
-            "parent_session_id": row["parent_session_id"],
-            "rebase_from_agent": row["rebase_from_agent"],
-            "rebase_from_node_id": row["rebase_from_node_id"],
-            "rebase_from_session_id": row["rebase_from_session_id"],
-            "system_prompt": row["system_prompt"],
-            "created_at": row["created_at"],
-            "metadata": row["metadata"],
-        }
-        return deserialize_session(data)
-
-    async def list_sessions(self, agent_name: str) -> list[Session]:
-        """列出 Agent 的所有 session。
-
-        Args:
-            agent_name: Agent 名称
-
-        Returns:
-            Session 列表
-        """
-        db = await self._ensure_db()
-        cursor = await db.execute(
-            """
-            SELECT session_id, agent_name, branch_name,
-                   parent_node_id, parent_session_id,
-                   rebase_from_agent, rebase_from_node_id, rebase_from_session_id,
-                   system_prompt, created_at, metadata
-            FROM sessions WHERE agent_name = ?
-            ORDER BY created_at ASC
-            """,
-            (agent_name,),
-        )
-        rows = await cursor.fetchall()
-        sessions = []
-        for row in rows:
-            data = {
-                "session_id": row["session_id"],
-                "agent_name": row["agent_name"],
-                "branch_name": row["branch_name"],
-                "parent_node_id": row["parent_node_id"],
-                "parent_session_id": row["parent_session_id"],
-                "rebase_from_agent": row["rebase_from_agent"],
-                "rebase_from_node_id": row["rebase_from_node_id"],
-                "rebase_from_session_id": row["rebase_from_session_id"],
-                "system_prompt": row["system_prompt"],
-                "created_at": row["created_at"],
-                "metadata": row["metadata"],
-            }
-            sessions.append(deserialize_session(data))
-        return sessions
-
-    async def delete_sessions(self, agent_name: str) -> None:
-        """删除 Agent 的所有 session 数据。
-
-        Args:
-            agent_name: Agent 名称
-        """
-        db = await self._ensure_db()
-        await db.execute("DELETE FROM sessions WHERE agent_name = ?", (agent_name,))
-        await db.commit()
-
-    # ----------------------------------------------------------------
-    # 批量操作接口
-    # ----------------------------------------------------------------
-
-    async def save_nodes_batch(self, nodes: list[ContextNode]) -> None:
-        """批量保存节点，在单个事务中执行。
-
-        使用显式事务保证原子性：要么全部成功，要么全部回滚。
-
-        Args:
-            nodes: 要保存的 ContextNode 列表
-        """
-        if not nodes:
-            return
-        db = await self._ensure_db()
-
-        # 确保所有相关 agent 都存在
-        agent_names = {n.agent_name for n in nodes}
-        for agent_name in agent_names:
-            await self._ensure_agent(db, agent_name)
-
-        # 显式事务：保证批量写入的原子性
-        await db.execute("BEGIN")
-        try:
-            for node in nodes:
-                serialized = serialize_node(node)
-                await db.execute(
-                    f"""
-                    INSERT OR REPLACE INTO nodes (
-                        {_NODE_COLUMNS}
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    self._serialize_node_params(serialized),
-                )
-            await db.commit()
-        except Exception:
-            await db.rollback()
-            raise
 
     # ----------------------------------------------------------------
     # 内部辅助
@@ -758,10 +518,10 @@ class SqliteBackend(PersistenceBackend):
             "id": row["id"],
             "parent_id": row["parent_id"],
             "agent_name": row["agent_name"],
-            "session_id": row["session_id"] if "session_id" in row.keys() else "",
+            "session_id": row["session_id"],
+            "created_on_branch_id": row["created_on_branch_id"],
             "timestamp": row["timestamp"],
             "iteration": row["iteration"],
-            "branch_name": row["branch_name"],
             "is_snapshot": bool(row["is_snapshot"]),
             "ability_names": json.loads(row["ability_names"]),
             "agent_state": json.loads(row["agent_state"]),

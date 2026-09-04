@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  BRANCH_COMMANDS,
   CHAIN_HISTORY_COMMANDS,
   ClientType,
   CORE_COMMANDS,
@@ -56,10 +57,6 @@ describe("CommandType", () => {
     "persist_load_messages",
     "persist_delete_chain",
     "persist_list_agents",
-    "persist_save_session",
-    "persist_load_session",
-    "persist_list_sessions",
-    "persist_delete_sessions",
     "create_workspace",
     "destroy_workspace",
     "workspace_snapshot",
@@ -118,16 +115,21 @@ describe("CommandType", () => {
     "room_get_log",
     "room_send",
     "session_create",
-    "session_switch",
+    "session_activate",
     "session_list",
     "session_archive",
     "session_delete",
+    "branch_create",
+    "branch_activate",
+    "branch_list",
+    "branch_archive",
+    "branch_delete",
     "get_chain_history",
     "reconcile_now",
     "reconcile_status",
   ]);
 
-  it("has exactly 96 values matching Python CommandType", () => {
+  it("has exactly 100 values matching Python CommandType", () => {
     const tsValues = new Set(Object.values(CommandType));
     expect(tsValues).toEqual(PYTHON_COMMAND_VALUES);
   });
@@ -187,15 +189,20 @@ describe("EventType", () => {
     "room_member_left",
     "room_log_appended",
     "session_created",
-    "session_switched",
+    "session_activated",
     "session_archived",
     "session_deleted",
     "session_list_result",
+    "branch_created",
+    "branch_activated",
+    "branch_archived",
+    "branch_deleted",
+    "branch_list_result",
     "subject_reconciled",
     "reconcile_failed",
   ]);
 
-  it("has exactly 53 values matching Python EventType", () => {
+  it("has exactly 57 values matching Python EventType", () => {
     const tsValues = new Set(Object.values(EventType));
     expect(tsValues).toEqual(PYTHON_EVENT_VALUES);
   });
@@ -225,13 +232,9 @@ describe("PERSIST_COMMANDS", () => {
     "persist_load_messages",
     "persist_delete_chain",
     "persist_list_agents",
-    "persist_save_session",
-    "persist_load_session",
-    "persist_list_sessions",
-    "persist_delete_sessions",
   ]);
 
-  it("contains exactly 13 persist command values", () => {
+  it("contains exactly 9 persist command values", () => {
     expect(PERSIST_COMMANDS).toEqual(PYTHON_PERSIST);
   });
 });
@@ -253,13 +256,18 @@ describe("CORE_COMMANDS", () => {
     "cluster_status",
     "list_clusters",
     "session_create",
-    "session_switch",
+    "session_activate",
     "session_list",
     "session_archive",
     "session_delete",
+    "branch_create",
+    "branch_activate",
+    "branch_list",
+    "branch_archive",
+    "branch_delete",
   ]);
 
-  it("contains exactly 19 core command values", () => {
+  it("contains exactly 23 core command values", () => {
     expect(CORE_COMMANDS).toEqual(PYTHON_CORE_COMMANDS);
   });
 });
@@ -269,10 +277,24 @@ describe("SESSION_COMMANDS", () => {
     expect(SESSION_COMMANDS).toEqual(
       new Set([
         "session_create",
-        "session_switch",
+        "session_activate",
         "session_list",
         "session_archive",
         "session_delete",
+      ]),
+    );
+  });
+});
+
+describe("BRANCH_COMMANDS", () => {
+  it("contains the five Project-scoped Branch commands", () => {
+    expect(BRANCH_COMMANDS).toEqual(
+      new Set([
+        "branch_create",
+        "branch_activate",
+        "branch_list",
+        "branch_archive",
+        "branch_delete",
       ]),
     );
   });

@@ -36,6 +36,11 @@ from typing import Any, cast
 from ghrah.protocol.types import (
     AGENT_SCOPED_EVENT_TYPES,
     AbilityResultPayload,
+    BranchActivatePayload,
+    BranchArchivePayload,
+    BranchCreatePayload,
+    BranchDeletePayload,
+    BranchListPayload,
     BroadcastMessagePayload,
     CommandType,
     DelegatePayload,
@@ -46,11 +51,11 @@ from ghrah.protocol.types import (
     ListAgentsPayload,
     RegisterAbilityPayload,
     SendMessagePayload,
+    SessionActivatePayload,
     SessionArchivePayload,
     SessionCreatePayload,
     SessionDeletePayload,
     SessionListPayload,
-    SessionSwitchPayload,
     SpawnAgentPayload,
     TerminateAgentPayload,
     UnregisterAbilityPayload,
@@ -71,13 +76,17 @@ from ghrah.core.events import (
     ActionChainUpdatedEvent,
     AgentErrorEvent,
     AgentResponseEvent,
+    BranchActivatedEvent,
+    BranchArchivedEvent,
+    BranchCreatedEvent,
+    BranchDeletedEvent,
     CoreEvent,
     CoreEventType,
     HITLRequestEvent,
+    SessionActivatedEvent,
     SessionArchivedEvent,
     SessionCreatedEvent,
     SessionDeletedEvent,
-    SessionSwitchedEvent,
 )
 from ghrah.core.room_protocol import SerialRoomBridge
 from ghrah.types.config_types import AgentConfig
@@ -173,7 +182,7 @@ class _UnitMeta:
     routes: _RouteSpec
 
 
-# 17 个命令：CommandType 的 .value 字符串
+# Core 管理命令：CommandType 的 .value 字符串
 _COMMANDS: frozenset[str] = frozenset(
     {
         CommandType.SPAWN_AGENT.value,
@@ -189,10 +198,15 @@ _COMMANDS: frozenset[str] = frozenset(
         CommandType.EXECUTE_ABILITY.value,
         CommandType.HITL_RESPONSE.value,
         CommandType.SESSION_CREATE.value,
-        CommandType.SESSION_SWITCH.value,
+        CommandType.SESSION_ACTIVATE.value,
         CommandType.SESSION_LIST.value,
         CommandType.SESSION_ARCHIVE.value,
         CommandType.SESSION_DELETE.value,
+        CommandType.BRANCH_CREATE.value,
+        CommandType.BRANCH_ACTIVATE.value,
+        CommandType.BRANCH_LIST.value,
+        CommandType.BRANCH_ARCHIVE.value,
+        CommandType.BRANCH_DELETE.value,
     }
 )
 
@@ -214,9 +228,13 @@ def _core_event_to_dict(event: CoreEvent) -> tuple[str, dict[str, Any]]:
         CoreEventType.AGENT_ERROR.value: "agent_error",
         CoreEventType.AGENT_RESPONSE.value: "agent_response",
         CoreEventType.SESSION_CREATED.value: "session_created",
-        CoreEventType.SESSION_SWITCHED.value: "session_switched",
+        CoreEventType.SESSION_ACTIVATED.value: "session_activated",
         CoreEventType.SESSION_ARCHIVED.value: "session_archived",
         CoreEventType.SESSION_DELETED.value: "session_deleted",
+        CoreEventType.BRANCH_CREATED.value: "branch_created",
+        CoreEventType.BRANCH_ACTIVATED.value: "branch_activated",
+        CoreEventType.BRANCH_ARCHIVED.value: "branch_archived",
+        CoreEventType.BRANCH_DELETED.value: "branch_deleted",
     }
 
     payload: dict[str, Any] = {
@@ -246,25 +264,17 @@ def _core_event_to_dict(event: CoreEvent) -> tuple[str, dict[str, Any]]:
             payload_update["content_blocks"] = event.content_blocks
         payload.update(payload_update)
     elif isinstance(event, SessionCreatedEvent):
-        payload.update(
-            {
-                "session_id": event.session_id,
-                "branch_name": event.branch_name,
-                "parent_session_id": event.parent_session_id,
-                "fork_point_node_id": event.fork_point_node_id,
-            }
-        )
-    elif isinstance(event, SessionSwitchedEvent):
-        payload.update(
-            {
-                "session_id": event.session_id,
-                "branch_name": event.branch_name,
-            }
-        )
+        payload.update({"session": event.session})
+    elif isinstance(event, SessionActivatedEvent):
+        payload.update({"session": event.session})
     elif isinstance(event, SessionArchivedEvent):
         payload.update({"session_id": event.session_id})
     elif isinstance(event, SessionDeletedEvent):
         payload.update({"session_id": event.session_id})
+    elif isinstance(event, (BranchCreatedEvent, BranchActivatedEvent)):
+        payload.update({"branch": event.branch})
+    elif isinstance(event, (BranchArchivedEvent, BranchDeletedEvent)):
+        payload.update({"session_id": event.session_id, "branch_id": event.branch_id})
 
     event_type_str = event_type_map.get(event.event_type.value, event.event_type.value)
     return event_type_str, payload
@@ -486,10 +496,15 @@ class CoreUnit:
             CommandType.EXECUTE_ABILITY.value: self._handle_execute_ability,
             CommandType.HITL_RESPONSE.value: self._handle_hitl_response,
             CommandType.SESSION_CREATE.value: self._handle_session_create,
-            CommandType.SESSION_SWITCH.value: self._handle_session_switch,
+            CommandType.SESSION_ACTIVATE.value: self._handle_session_activate,
             CommandType.SESSION_LIST.value: self._handle_session_list,
             CommandType.SESSION_ARCHIVE.value: self._handle_session_archive,
             CommandType.SESSION_DELETE.value: self._handle_session_delete,
+            CommandType.BRANCH_CREATE.value: self._handle_branch_create,
+            CommandType.BRANCH_ACTIVATE.value: self._handle_branch_activate,
+            CommandType.BRANCH_LIST.value: self._handle_branch_list,
+            CommandType.BRANCH_ARCHIVE.value: self._handle_branch_archive,
+            CommandType.BRANCH_DELETE.value: self._handle_branch_delete,
         }
 
     @property
@@ -1095,17 +1110,20 @@ class CoreUnit:
         self._validate_agent(sp.project_id, sp.agent_id, sp.agent_name)
         data = await supervisor.create_session(
             agent_name=sp.agent_name,
-            session_name=sp.session_name,
-            from_node_id=sp.from_node_id,
+            origin_session_id=sp.origin_session_id,
+            origin_node_id=sp.origin_node_id,
             system_prompt=sp.system_prompt,
+            metadata=sp.metadata,
         )
         return self._ok(data)
 
-    async def _handle_session_switch(self, payload: dict[str, Any], cmd_ctx: Any) -> dict[str, Any]:
+    async def _handle_session_activate(
+        self, payload: dict[str, Any], cmd_ctx: Any
+    ) -> dict[str, Any]:
         supervisor = self._require_supervisor()
-        sp = SessionSwitchPayload.model_validate(payload)
+        sp = SessionActivatePayload.model_validate(payload)
         self._validate_agent(sp.project_id, sp.agent_id, sp.agent_name)
-        data = await supervisor.switch_session(agent_name=sp.agent_name, session_id=sp.session_id)
+        data = await supervisor.activate_session(agent_name=sp.agent_name, session_id=sp.session_id)
         return self._ok(data)
 
     async def _handle_session_list(self, payload: dict[str, Any], cmd_ctx: Any) -> dict[str, Any]:
@@ -1130,6 +1148,50 @@ class CoreUnit:
         self._validate_agent(sp.project_id, sp.agent_id, sp.agent_name)
         await supervisor.delete_session(agent_name=sp.agent_name, session_id=sp.session_id)
         return self._ok({"session_id": sp.session_id, "deleted": True})
+
+    async def _handle_branch_create(self, payload: dict[str, Any], cmd_ctx: Any) -> dict[str, Any]:
+        supervisor = self._require_supervisor()
+        bp = BranchCreatePayload.model_validate(payload)
+        self._validate_agent(bp.project_id, bp.agent_id, bp.agent_name)
+        data = await supervisor.create_branch(
+            agent_name=bp.agent_name,
+            session_id=bp.session_id,
+            name=bp.name,
+            from_node_id=bp.from_node_id,
+            parent_branch_id=bp.parent_branch_id,
+            metadata=bp.metadata,
+        )
+        return self._ok(data)
+
+    async def _handle_branch_activate(
+        self, payload: dict[str, Any], cmd_ctx: Any
+    ) -> dict[str, Any]:
+        supervisor = self._require_supervisor()
+        bp = BranchActivatePayload.model_validate(payload)
+        self._validate_agent(bp.project_id, bp.agent_id, bp.agent_name)
+        data = await supervisor.activate_branch(bp.agent_name, bp.session_id, bp.branch_id)
+        return self._ok(data)
+
+    async def _handle_branch_list(self, payload: dict[str, Any], cmd_ctx: Any) -> dict[str, Any]:
+        supervisor = self._require_supervisor()
+        bp = BranchListPayload.model_validate(payload)
+        self._validate_agent(bp.project_id, bp.agent_id, bp.agent_name)
+        branches = await supervisor.list_branches(bp.agent_name, bp.session_id)
+        return self._ok({"session_id": bp.session_id, "branches": branches})
+
+    async def _handle_branch_archive(self, payload: dict[str, Any], cmd_ctx: Any) -> dict[str, Any]:
+        supervisor = self._require_supervisor()
+        bp = BranchArchivePayload.model_validate(payload)
+        self._validate_agent(bp.project_id, bp.agent_id, bp.agent_name)
+        await supervisor.archive_branch(bp.agent_name, bp.session_id, bp.branch_id)
+        return self._ok({"session_id": bp.session_id, "branch_id": bp.branch_id, "archived": True})
+
+    async def _handle_branch_delete(self, payload: dict[str, Any], cmd_ctx: Any) -> dict[str, Any]:
+        supervisor = self._require_supervisor()
+        bp = BranchDeletePayload.model_validate(payload)
+        self._validate_agent(bp.project_id, bp.agent_id, bp.agent_name)
+        await supervisor.delete_branch(bp.agent_name, bp.session_id, bp.branch_id)
+        return self._ok({"session_id": bp.session_id, "branch_id": bp.branch_id, "deleted": True})
 
 
 def create_core_unit(config: CoreUnitConfig) -> CoreUnit:

@@ -21,10 +21,10 @@ from ghrah.core.events import (
     CoreEvent,
     CoreEventType,
     HITLRequestEvent,
+    SessionActivatedEvent,
     SessionArchivedEvent,
     SessionCreatedEvent,
     SessionDeletedEvent,
-    SessionSwitchedEvent,
 )
 
 
@@ -190,38 +190,27 @@ class TestSessionEventDataclasses:
         """测试 SessionCreatedEvent。"""
         event = SessionCreatedEvent(
             agent_name="test-agent",
-            session_id="sess-123",
-            branch_name="session-1",
-            parent_session_id="sess-000",
-            fork_point_node_id="node-5",
+            session={"session_id": "sess-123", "root_node_id": "node-1"},
         )
         assert event.event_type == CoreEventType.SESSION_CREATED
         assert event.agent_name == "test-agent"
-        assert event.session_id == "sess-123"
-        assert event.branch_name == "session-1"
-        assert event.parent_session_id == "sess-000"
-        assert event.fork_point_node_id == "node-5"
+        assert event.session["session_id"] == "sess-123"
 
     def test_session_created_event_defaults(self) -> None:
         """测试 SessionCreatedEvent 默认值。"""
         event = SessionCreatedEvent(agent_name="test-agent")
         assert event.event_type == CoreEventType.SESSION_CREATED
-        assert event.session_id == ""
-        assert event.branch_name == ""
-        assert event.parent_session_id is None
-        assert event.fork_point_node_id is None
+        assert event.session == {}
 
-    def test_session_switched_event(self) -> None:
-        """测试 SessionSwitchedEvent。"""
-        event = SessionSwitchedEvent(
+    def test_session_activated_event(self) -> None:
+        """测试 SessionActivatedEvent。"""
+        event = SessionActivatedEvent(
             agent_name="test-agent",
-            session_id="sess-456",
-            branch_name="session-2",
+            session={"session_id": "sess-456"},
         )
-        assert event.event_type == CoreEventType.SESSION_SWITCHED
+        assert event.event_type == CoreEventType.SESSION_ACTIVATED
         assert event.agent_name == "test-agent"
-        assert event.session_id == "sess-456"
-        assert event.branch_name == "session-2"
+        assert event.session["session_id"] == "sess-456"
 
     def test_session_archived_event(self) -> None:
         """测试 SessionArchivedEvent。"""
@@ -253,7 +242,6 @@ class TestSessionEventPublishing:
         publisher = NullEventPublisher()
         event = SessionCreatedEvent(
             agent_name="test-agent",
-            session_id="sess-001",
-            branch_name="branch-1",
+            session={"session_id": "sess-001"},
         )
         await publisher.publish(event)

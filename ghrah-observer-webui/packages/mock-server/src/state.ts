@@ -2,8 +2,15 @@ import {
   type AbilityDefinitionPayload,
   type ActionNode,
   type AgentConfigPayload,
+  BranchActivatePayloadSchema,
+  BranchArchivePayloadSchema,
+  BranchCreatePayloadSchema,
+  BranchDeletePayloadSchema,
+  type BranchInfoPayload,
+  BranchListPayloadSchema,
   CommandType,
   EventType,
+  GetChainHistoryPayloadSchema,
   type HITLRequestPayload,
   HITLResponsePayloadSchema,
   ProjectCreatePayloadSchema,
@@ -22,6 +29,12 @@ import {
   type RoomMember,
   RoomSendPayloadSchema,
   RoomUpdatePayloadSchema,
+  SessionActivatePayloadSchema,
+  SessionArchivePayloadSchema,
+  SessionCreatePayloadSchema,
+  SessionDeletePayloadSchema,
+  type SessionInfoPayload,
+  SessionListPayloadSchema,
   SpawnAgentPayloadSchema,
   TaskCreatePayloadSchema,
   TaskIdPayloadSchema,
@@ -54,6 +67,15 @@ interface AgentRecord {
   abilities: AbilityDefinitionPayload[];
 }
 
+interface AgentActionState {
+  projectId: string;
+  agentId: string;
+  activeSessionId: string;
+  sessions: Map<string, SessionInfoPayload>;
+  branches: Map<string, BranchInfoPayload>;
+  nodes: Map<string, ActionNode>;
+}
+
 export interface PendingHitl {
   payload: HITLRequestPayload;
   status: "pending" | "approved" | "rejected";
@@ -82,6 +104,7 @@ export class MockState {
   readonly roomLogs = new Map<string, RoomLogEntryPayload[]>();
   readonly tasks = new Map<string, TaskInfoPayload>();
   readonly pendingHitl = new Map<string, PendingHitl>();
+  readonly actionStates = new Map<string, AgentActionState>();
 
   /** 由 server 注入：广播事件（带 seq_id 分配与订阅过滤）。 */
   emit: EmitFn = () => {};
@@ -176,7 +199,7 @@ export class MockState {
       // Agent / Core
       case CommandType.SPAWN_AGENT:
         return this._parse(SpawnAgentPayloadSchema, rawPayload, (p) =>
-          this.spawnAgent(p.config, p.abilities ?? []),
+          this.spawnAgent(p.config, p.abilities ?? [], p.project_id),
         );
       case CommandType.TERMINATE_AGENT:
         return this._parse(TerminateAgentPayloadSchema, rawPayload, (p) =>
@@ -188,6 +211,39 @@ export class MockState {
         });
       case CommandType.HEALTH_CHECK:
         return ok({ status: "ok" });
+
+      case CommandType.SESSION_CREATE:
+        return this._parse(SessionCreatePayloadSchema, rawPayload, (p) => this._sessionCreate(p));
+      case CommandType.SESSION_ACTIVATE:
+        return this._parse(SessionActivatePayloadSchema, rawPayload, (p) =>
+          this._sessionActivate(p),
+        );
+      case CommandType.SESSION_LIST:
+        return this._parse(SessionListPayloadSchema, rawPayload, (p) => this._sessionList(p));
+      case CommandType.SESSION_ARCHIVE:
+        return this._parse(SessionArchivePayloadSchema, rawPayload, (p) =>
+          this._sessionLifecycle(p, "archived"),
+        );
+      case CommandType.SESSION_DELETE:
+        return this._parse(SessionDeletePayloadSchema, rawPayload, (p) =>
+          this._sessionLifecycle(p, "deleted"),
+        );
+      case CommandType.BRANCH_CREATE:
+        return this._parse(BranchCreatePayloadSchema, rawPayload, (p) => this._branchCreate(p));
+      case CommandType.BRANCH_ACTIVATE:
+        return this._parse(BranchActivatePayloadSchema, rawPayload, (p) => this._branchActivate(p));
+      case CommandType.BRANCH_LIST:
+        return this._parse(BranchListPayloadSchema, rawPayload, (p) => this._branchList(p));
+      case CommandType.BRANCH_ARCHIVE:
+        return this._parse(BranchArchivePayloadSchema, rawPayload, (p) =>
+          this._branchLifecycle(p, "archived"),
+        );
+      case CommandType.BRANCH_DELETE:
+        return this._parse(BranchDeletePayloadSchema, rawPayload, (p) =>
+          this._branchLifecycle(p, "deleted"),
+        );
+      case CommandType.GET_CHAIN_HISTORY:
+        return this._parse(GetChainHistoryPayloadSchema, rawPayload, (p) => this._chainHistory(p));
 
       // HITL 单路径（core 侧）：按 promise_id 匹配 pending（协议 HITLResponsePayload 无 tool_call_id 字段）
       case CommandType.HITL_RESPONSE:
@@ -436,14 +492,313 @@ export class MockState {
 
   // ─── Agent ───
 
+  private _actionState(p: {
+    project_id: string;
+    agent_id: string;
+    agent_name: string;
+  }): AgentActionState | null {
+    const state = this.actionStates.get(p.agent_name);
+    if (!state || state.projectId !== p.project_id || state.agentId !== p.agent_id) return null;
+    return state;
+  }
+
+  private _newSession(
+    state: AgentActionState,
+    agentName: string,
+    options: {
+      systemPrompt?: string | null;
+      originSessionId?: string | null;
+      originNodeId?: string | null;
+      metadata?: Record<string, unknown>;
+    } = {},
+  ): SessionInfoPayload {
+    const sessionId = uuid();
+    const branchId = uuid();
+    const rootId = uuid();
+    const origin = options.originNodeId ? state.nodes.get(options.originNodeId) : undefined;
+    const originMessages = origin ? this._messagesAt(state, origin.id) : [];
+    const root: ActionNode = {
+      id: rootId,
+      parent_id: null,
+      agent_name: agentName,
+      timestamp: isoNow(),
+      iteration: 0,
+      ability_names: ["init"],
+      agent_state: { ...(origin?.agent_state ?? {}) },
+      messages_delta: [],
+      messages_snapshot: originMessages,
+      is_snapshot: true,
+      action_results: [],
+      metadata: {},
+      session_id: sessionId,
+      created_on_branch_id: branchId,
+    };
+    const branch: BranchInfoPayload = {
+      branch_id: branchId,
+      session_id: sessionId,
+      name: "main",
+      head_node_id: rootId,
+      parent_branch_id: null,
+      fork_point_node_id: null,
+      created_at: isoNow(),
+      metadata: {},
+    };
+    const session: SessionInfoPayload = {
+      project_id: state.projectId,
+      agent_id: state.agentId,
+      cluster_id: "mock",
+      session_id: sessionId,
+      agent_name: agentName,
+      root_node_id: rootId,
+      active_branch_id: branchId,
+      state: "idle",
+      system_prompt: options.systemPrompt ?? "",
+      origin_session_id: options.originSessionId ?? null,
+      origin_node_id: options.originNodeId ?? null,
+      created_at: isoNow(),
+      metadata: options.metadata ?? {},
+      message_count: originMessages.length,
+      iteration_count: 0,
+    };
+    state.nodes.set(rootId, root);
+    state.branches.set(branchId, branch);
+    state.sessions.set(sessionId, session);
+    return session;
+  }
+
+  private _messagesAt(
+    state: AgentActionState,
+    nodeId: string,
+  ): NonNullable<ActionNode["messages_snapshot"]> {
+    const history: ActionNode[] = [];
+    let node = state.nodes.get(nodeId);
+    while (node) {
+      history.push(node);
+      node = node.parent_id ? state.nodes.get(node.parent_id) : undefined;
+    }
+    history.reverse();
+    let messages: NonNullable<ActionNode["messages_snapshot"]> = [];
+    let start = 0;
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      const item = history[index];
+      const snapshot = item.messages_snapshot;
+      if (item.is_snapshot && snapshot != null) {
+        messages = [...snapshot];
+        start = index + 1;
+        break;
+      }
+    }
+    for (const item of history.slice(start)) messages.push(...item.messages_delta);
+    return messages;
+  }
+
+  private _sessionCreate(p: {
+    project_id: string;
+    agent_id: string;
+    agent_name: string;
+    origin_session_id?: string | null;
+    origin_node_id?: string | null;
+    system_prompt?: string | null;
+    metadata?: Record<string, unknown>;
+  }): CommandOutcome {
+    const state = this._actionState(p);
+    if (!state) return fail("agent context not found");
+    if ((p.origin_session_id == null) !== (p.origin_node_id == null)) {
+      return fail("origin_session_id and origin_node_id must be set together");
+    }
+    if (p.origin_session_id && !state.sessions.has(p.origin_session_id)) {
+      return fail(`session not found: ${p.origin_session_id}`);
+    }
+    if (p.origin_node_id && state.nodes.get(p.origin_node_id)?.session_id !== p.origin_session_id) {
+      return fail(`node not found in session: ${p.origin_node_id}`);
+    }
+    const session = this._newSession(state, p.agent_name, {
+      originSessionId: p.origin_session_id,
+      originNodeId: p.origin_node_id,
+      systemPrompt: p.system_prompt,
+      metadata: p.metadata,
+    });
+    this.emit(EventType.SESSION_CREATED, { ...p, session });
+    return ok(session);
+  }
+
+  private _sessionActivate(p: {
+    project_id: string;
+    agent_id: string;
+    agent_name: string;
+    session_id: string;
+  }): CommandOutcome {
+    const state = this._actionState(p);
+    const session = state?.sessions.get(p.session_id);
+    if (!state || !session || session.metadata.deleted)
+      return fail(`session not found: ${p.session_id}`);
+    const previous = state.sessions.get(state.activeSessionId);
+    if (previous) previous.state = previous.metadata.archived ? "archived" : "idle";
+    session.state = "active";
+    state.activeSessionId = session.session_id;
+    this.emit(EventType.SESSION_ACTIVATED, { ...p, session });
+    return ok(session);
+  }
+
+  private _sessionList(p: {
+    project_id: string;
+    agent_id: string;
+    agent_name: string;
+  }): CommandOutcome {
+    const state = this._actionState(p);
+    if (!state) return fail("agent context not found");
+    return ok({ sessions: [...state.sessions.values()].filter((item) => !item.metadata.deleted) });
+  }
+
+  private _sessionLifecycle(
+    p: { project_id: string; agent_id: string; agent_name: string; session_id: string },
+    action: "archived" | "deleted",
+  ): CommandOutcome {
+    const state = this._actionState(p);
+    const session = state?.sessions.get(p.session_id);
+    if (!state || !session) return fail(`session not found: ${p.session_id}`);
+    if (state.activeSessionId === p.session_id) return fail(`cannot ${action} active session`);
+    session.metadata = { ...session.metadata, [action]: true };
+    session.state = action;
+    this.emit(action === "archived" ? EventType.SESSION_ARCHIVED : EventType.SESSION_DELETED, p);
+    return ok({ session_id: p.session_id, [action]: true });
+  }
+
+  private _branchCreate(p: {
+    project_id: string;
+    agent_id: string;
+    agent_name: string;
+    session_id: string;
+    name: string;
+    from_node_id?: string | null;
+    parent_branch_id?: string | null;
+    metadata?: Record<string, unknown>;
+  }): CommandOutcome {
+    const state = this._actionState(p);
+    const session = state?.sessions.get(p.session_id);
+    if (!state || !session) return fail(`session not found: ${p.session_id}`);
+    const parent = state.branches.get(p.parent_branch_id ?? session.active_branch_id);
+    if (!parent || parent.session_id !== p.session_id) return fail("parent branch not found");
+    const headNodeId = p.from_node_id ?? parent.head_node_id;
+    const node = state.nodes.get(headNodeId);
+    if (!node || node.session_id !== p.session_id) return fail("fork node not found");
+    const branch: BranchInfoPayload = {
+      branch_id: uuid(),
+      session_id: p.session_id,
+      name: p.name,
+      head_node_id: headNodeId,
+      parent_branch_id: parent.branch_id,
+      fork_point_node_id: headNodeId,
+      created_at: isoNow(),
+      metadata: p.metadata ?? {},
+    };
+    state.branches.set(branch.branch_id, branch);
+    this.emit(EventType.BRANCH_CREATED, { ...p, branch });
+    return ok(branch);
+  }
+
+  private _branchActivate(p: {
+    project_id: string;
+    agent_id: string;
+    agent_name: string;
+    session_id: string;
+    branch_id: string;
+  }): CommandOutcome {
+    const state = this._actionState(p);
+    const session = state?.sessions.get(p.session_id);
+    const branch = state?.branches.get(p.branch_id);
+    if (!state || !session || !branch || branch.session_id !== p.session_id) {
+      return fail(`branch not found: ${p.branch_id}`);
+    }
+    if (state.activeSessionId !== p.session_id) return fail("activate the session first");
+    if (branch.metadata.deleted) return fail("cannot activate deleted branch");
+    session.active_branch_id = branch.branch_id;
+    this.emit(EventType.BRANCH_ACTIVATED, { ...p, branch });
+    return ok(branch);
+  }
+
+  private _branchList(p: {
+    project_id: string;
+    agent_id: string;
+    agent_name: string;
+    session_id: string;
+  }): CommandOutcome {
+    const state = this._actionState(p);
+    if (!state?.sessions.has(p.session_id)) return fail(`session not found: ${p.session_id}`);
+    return ok({
+      session_id: p.session_id,
+      branches: [...state.branches.values()].filter(
+        (item) => item.session_id === p.session_id && !item.metadata.deleted,
+      ),
+    });
+  }
+
+  private _branchLifecycle(
+    p: {
+      project_id: string;
+      agent_id: string;
+      agent_name: string;
+      session_id: string;
+      branch_id: string;
+    },
+    action: "archived" | "deleted",
+  ): CommandOutcome {
+    const state = this._actionState(p);
+    const session = state?.sessions.get(p.session_id);
+    const branch = state?.branches.get(p.branch_id);
+    if (!state || !session || !branch) return fail(`branch not found: ${p.branch_id}`);
+    if (state.activeSessionId === p.session_id && session.active_branch_id === p.branch_id) {
+      return fail(`cannot ${action} active branch`);
+    }
+    branch.metadata = { ...branch.metadata, [action]: true };
+    this.emit(action === "archived" ? EventType.BRANCH_ARCHIVED : EventType.BRANCH_DELETED, p);
+    return ok({ session_id: p.session_id, branch_id: p.branch_id, [action]: true });
+  }
+
+  private _chainHistory(p: {
+    project_id: string;
+    agent_id: string;
+    agent_name: string;
+    session_id: string;
+    branch_id: string;
+    limit: number;
+  }): CommandOutcome {
+    const state = this._actionState(p);
+    const branch = state?.branches.get(p.branch_id);
+    if (!state || !branch || branch.session_id !== p.session_id) return fail("branch not found");
+    const history: ActionNode[] = [];
+    let node = state.nodes.get(branch.head_node_id);
+    while (node) {
+      history.push(node);
+      node = node.parent_id ? state.nodes.get(node.parent_id) : undefined;
+    }
+    history.reverse();
+    return ok({ ...p, nodes: p.limit > 0 ? history.slice(-p.limit) : history });
+  }
+
   spawnAgent(
     config: AgentConfigPayload,
     abilities: AbilityDefinitionPayload[] = [],
+    projectId = "",
   ): CommandOutcome {
     if (this.agents.has(config.name)) {
       return fail(`agent already exists: ${config.name}`);
     }
     this.agents.set(config.name, { name: config.name, config, abilities });
+    const actionState: AgentActionState = {
+      projectId,
+      agentId: config.agent_id ?? uuid(),
+      activeSessionId: "",
+      sessions: new Map(),
+      branches: new Map(),
+      nodes: new Map(),
+    };
+    const session = this._newSession(actionState, config.name, {
+      systemPrompt: config.system_prompt,
+    });
+    session.state = "active";
+    actionState.activeSessionId = session.session_id;
+    this.actionStates.set(config.name, actionState);
     this.emit(EventType.AGENT_SPAWNED, { name: config.name, config });
     if (this._simulateChains) this._startChainSimulation(config.name);
     return ok({ name: config.name, config });
@@ -453,6 +808,7 @@ export class MockState {
     if (!this.agents.has(name)) return fail(`agent not found: ${name}`);
     this._stopChainSimulation(name);
     this.agents.delete(name);
+    this.actionStates.delete(name);
     this.emit(EventType.AGENT_TERMINATED, { name });
     return ok({ name });
   }
@@ -466,9 +822,44 @@ export class MockState {
       }
       const iteration = (this._chainIterations.get(agentName) ?? 0) + 1;
       this._chainIterations.set(agentName, iteration);
+      const state = this.actionStates.get(agentName);
+      if (!state) return;
+      const session = state.sessions.get(state.activeSessionId);
+      if (!session) return;
+      let branch = state.branches.get(session.active_branch_id);
+      if (!branch) return;
+      if (iteration % 7 === 0) {
+        const retry: BranchInfoPayload = {
+          branch_id: uuid(),
+          session_id: session.session_id,
+          name: `retry-${Math.floor(iteration / 7)}`,
+          head_node_id: branch.head_node_id,
+          parent_branch_id: branch.branch_id,
+          fork_point_node_id: branch.head_node_id,
+          created_at: isoNow(),
+          metadata: { is_rollback: true, error: `simulated failure at iteration ${iteration}` },
+        };
+        state.branches.set(retry.branch_id, retry);
+        session.active_branch_id = retry.branch_id;
+        branch = retry;
+        this.emit(EventType.BRANCH_CREATED, {
+          project_id: state.projectId,
+          agent_id: state.agentId,
+          agent_name: agentName,
+          session_id: session.session_id,
+          branch: retry,
+        });
+        this.emit(EventType.BRANCH_ACTIVATED, {
+          project_id: state.projectId,
+          agent_id: state.agentId,
+          agent_name: agentName,
+          session_id: session.session_id,
+          branch: retry,
+        });
+      }
       const node: ActionNode = {
         id: uuid(),
-        parent_id: null,
+        parent_id: branch.head_node_id,
         agent_name: agentName,
         timestamp: isoNow(),
         iteration,
@@ -486,11 +877,19 @@ export class MockState {
         messages_snapshot: null,
         is_snapshot: false,
         action_results: [],
-        metadata: {},
-        branch_name: "main",
-        session_id: "",
+        metadata: iteration % 7 === 0 ? { retry_after_failure: true } : {},
+        session_id: session.session_id,
+        created_on_branch_id: branch.branch_id,
       };
-      this.emit(EventType.ACTION_CHAIN_UPDATED, { agent_name: agentName, node });
+      branch.head_node_id = node.id;
+      state.nodes.set(node.id, node);
+      session.iteration_count = iteration;
+      this.emit(EventType.ACTION_CHAIN_UPDATED, {
+        project_id: state.projectId,
+        agent_id: state.agentId,
+        agent_name: agentName,
+        node,
+      });
     }, this._chainIntervalMs);
     this._chainTimers.set(agentName, timer);
   }

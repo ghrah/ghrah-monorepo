@@ -37,10 +37,6 @@ export enum CommandType {
   PERSIST_LOAD_MESSAGES = "persist_load_messages",
   PERSIST_DELETE_CHAIN = "persist_delete_chain",
   PERSIST_LIST_AGENTS = "persist_list_agents",
-  PERSIST_SAVE_SESSION = "persist_save_session",
-  PERSIST_LOAD_SESSION = "persist_load_session",
-  PERSIST_LIST_SESSIONS = "persist_list_sessions",
-  PERSIST_DELETE_SESSIONS = "persist_delete_sessions",
 
   CREATE_WORKSPACE = "create_workspace",
   DESTROY_WORKSPACE = "destroy_workspace",
@@ -105,10 +101,15 @@ export enum CommandType {
   ROOM_SEND = "room_send",
 
   SESSION_CREATE = "session_create",
-  SESSION_SWITCH = "session_switch",
+  SESSION_ACTIVATE = "session_activate",
   SESSION_LIST = "session_list",
   SESSION_ARCHIVE = "session_archive",
   SESSION_DELETE = "session_delete",
+  BRANCH_CREATE = "branch_create",
+  BRANCH_ACTIVATE = "branch_activate",
+  BRANCH_LIST = "branch_list",
+  BRANCH_ARCHIVE = "branch_archive",
+  BRANCH_DELETE = "branch_delete",
 
   GET_CHAIN_HISTORY = "get_chain_history",
 
@@ -169,10 +170,15 @@ export enum EventType {
   ROOM_LOG_APPENDED = "room_log_appended",
 
   SESSION_CREATED = "session_created",
-  SESSION_SWITCHED = "session_switched",
+  SESSION_ACTIVATED = "session_activated",
   SESSION_ARCHIVED = "session_archived",
   SESSION_DELETED = "session_deleted",
   SESSION_LIST_RESULT = "session_list_result",
+  BRANCH_CREATED = "branch_created",
+  BRANCH_ACTIVATED = "branch_activated",
+  BRANCH_ARCHIVED = "branch_archived",
+  BRANCH_DELETED = "branch_deleted",
+  BRANCH_LIST_RESULT = "branch_list_result",
 
   SUBJECT_RECONCILED = "subject_reconciled",
   RECONCILE_FAILED = "reconcile_failed",
@@ -195,10 +201,6 @@ export const PERSIST_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.PERSIST_LOAD_MESSAGES,
   CommandType.PERSIST_DELETE_CHAIN,
   CommandType.PERSIST_LIST_AGENTS,
-  CommandType.PERSIST_SAVE_SESSION,
-  CommandType.PERSIST_LOAD_SESSION,
-  CommandType.PERSIST_LIST_SESSIONS,
-  CommandType.PERSIST_DELETE_SESSIONS,
 ]);
 
 export const CORE_COMMANDS: ReadonlySet<string> = new Set([
@@ -217,18 +219,31 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.CLUSTER_STATUS,
   CommandType.LIST_CLUSTERS,
   CommandType.SESSION_CREATE,
-  CommandType.SESSION_SWITCH,
+  CommandType.SESSION_ACTIVATE,
+  CommandType.SESSION_LIST,
+  CommandType.SESSION_ARCHIVE,
+  CommandType.SESSION_DELETE,
+  CommandType.BRANCH_CREATE,
+  CommandType.BRANCH_ACTIVATE,
+  CommandType.BRANCH_LIST,
+  CommandType.BRANCH_ARCHIVE,
+  CommandType.BRANCH_DELETE,
+]);
+
+export const SESSION_COMMANDS: ReadonlySet<string> = new Set([
+  CommandType.SESSION_CREATE,
+  CommandType.SESSION_ACTIVATE,
   CommandType.SESSION_LIST,
   CommandType.SESSION_ARCHIVE,
   CommandType.SESSION_DELETE,
 ]);
 
-export const SESSION_COMMANDS: ReadonlySet<string> = new Set([
-  CommandType.SESSION_CREATE,
-  CommandType.SESSION_SWITCH,
-  CommandType.SESSION_LIST,
-  CommandType.SESSION_ARCHIVE,
-  CommandType.SESSION_DELETE,
+export const BRANCH_COMMANDS: ReadonlySet<string> = new Set([
+  CommandType.BRANCH_CREATE,
+  CommandType.BRANCH_ACTIVATE,
+  CommandType.BRANCH_LIST,
+  CommandType.BRANCH_ARCHIVE,
+  CommandType.BRANCH_DELETE,
 ]);
 
 export const CHAIN_HISTORY_COMMANDS: ReadonlySet<string> = new Set([CommandType.GET_CHAIN_HISTORY]);

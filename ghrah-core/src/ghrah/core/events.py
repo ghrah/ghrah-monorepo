@@ -26,9 +26,13 @@ __all__ = [
     "AgentErrorEvent",
     "AgentResponseEvent",
     "SessionCreatedEvent",
-    "SessionSwitchedEvent",
+    "SessionActivatedEvent",
     "SessionArchivedEvent",
     "SessionDeletedEvent",
+    "BranchCreatedEvent",
+    "BranchActivatedEvent",
+    "BranchArchivedEvent",
+    "BranchDeletedEvent",
 ]
 
 
@@ -41,7 +45,7 @@ class CoreEventType(str, Enum):  # noqa: UP042
     - AGENT_ERROR ↔ EventType.AGENT_ERROR
     - AGENT_RESPONSE ↔ EventType.AGENT_RESPONSE
     - SESSION_CREATED ↔ EventType.SESSION_CREATED
-    - SESSION_SWITCHED ↔ EventType.SESSION_SWITCHED
+    - SESSION_ACTIVATED ↔ EventType.SESSION_ACTIVATED
     - SESSION_ARCHIVED ↔ EventType.SESSION_ARCHIVED
     - SESSION_DELETED ↔ EventType.SESSION_DELETED
     """
@@ -51,9 +55,13 @@ class CoreEventType(str, Enum):  # noqa: UP042
     AGENT_ERROR = "agent_error"
     AGENT_RESPONSE = "agent_response"
     SESSION_CREATED = "session_created"
-    SESSION_SWITCHED = "session_switched"
+    SESSION_ACTIVATED = "session_activated"
     SESSION_ARCHIVED = "session_archived"
     SESSION_DELETED = "session_deleted"
+    BRANCH_CREATED = "branch_created"
+    BRANCH_ACTIVATED = "branch_activated"
+    BRANCH_ARCHIVED = "branch_archived"
+    BRANCH_DELETED = "branch_deleted"
 
 
 @dataclass
@@ -143,38 +151,18 @@ class AgentResponseEvent(CoreEvent):
 
 @dataclass
 class SessionCreatedEvent(CoreEvent):
-    """Session 创建事件。
-
-    ContextManager.create_session() 完成后由 ActorAgent 发布。
-
-    Attributes:
-        session_id: 新创建的 Session ID
-        branch_name: Session 对应的分支名
-        parent_session_id: 父 Session ID（None 表示根 session）
-        fork_point_node_id: fork 起始节点 ID
-    """
+    """独立 Root Session 创建事件。"""
 
     event_type: CoreEventType = field(default=CoreEventType.SESSION_CREATED, init=False)
-    session_id: str = ""
-    branch_name: str = ""
-    parent_session_id: str | None = None
-    fork_point_node_id: str | None = None
+    session: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
-class SessionSwitchedEvent(CoreEvent):
-    """Session 切换事件。
+class SessionActivatedEvent(CoreEvent):
+    """独立 Root Session 激活事件。"""
 
-    ContextManager.switch_session() 完成后由 ActorAgent 发布。
-
-    Attributes:
-        session_id: 切换到的目标 Session ID
-        branch_name: 目标 Session 的分支名
-    """
-
-    event_type: CoreEventType = field(default=CoreEventType.SESSION_SWITCHED, init=False)
-    session_id: str = ""
-    branch_name: str = ""
+    event_type: CoreEventType = field(default=CoreEventType.SESSION_ACTIVATED, init=False)
+    session: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -199,3 +187,37 @@ class SessionDeletedEvent(CoreEvent):
 
     event_type: CoreEventType = field(default=CoreEventType.SESSION_DELETED, init=False)
     session_id: str = ""
+
+
+@dataclass
+class BranchCreatedEvent(CoreEvent):
+    """Branch 创建事件。"""
+
+    event_type: CoreEventType = field(default=CoreEventType.BRANCH_CREATED, init=False)
+    branch: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class BranchActivatedEvent(CoreEvent):
+    """Branch 激活事件。"""
+
+    event_type: CoreEventType = field(default=CoreEventType.BRANCH_ACTIVATED, init=False)
+    branch: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class BranchArchivedEvent(CoreEvent):
+    """Branch 归档事件。"""
+
+    event_type: CoreEventType = field(default=CoreEventType.BRANCH_ARCHIVED, init=False)
+    session_id: str = ""
+    branch_id: str = ""
+
+
+@dataclass
+class BranchDeletedEvent(CoreEvent):
+    """Branch 删除事件。"""
+
+    event_type: CoreEventType = field(default=CoreEventType.BRANCH_DELETED, init=False)
+    session_id: str = ""
+    branch_id: str = ""

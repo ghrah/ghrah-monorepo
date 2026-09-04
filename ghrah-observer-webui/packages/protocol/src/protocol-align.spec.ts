@@ -13,6 +13,15 @@ import {
   AgentResponsePayloadSchema,
   AgentSpawnedPayloadSchema,
   AgentTerminatedPayloadSchema,
+  BranchActivatePayloadSchema,
+  BranchArchivePayloadSchema,
+  BranchCreatePayloadSchema,
+  BranchDeletePayloadSchema,
+  BranchEventPayloadSchema,
+  BranchInfoPayloadSchema,
+  BranchLifecyclePayloadSchema,
+  BranchListPayloadSchema,
+  BranchListResultPayloadSchema,
   BroadcastMessagePayloadSchema,
   ChainHistoryResultPayloadSchema,
   ChatMessageWireSchema,
@@ -74,6 +83,8 @@ import {
   RoomSendPayloadSchema,
   RoomUpdatePayloadSchema,
   SendMessagePayloadSchema,
+  SessionActivatedPayloadSchema,
+  SessionActivatePayloadSchema,
   SessionArchivedPayloadSchema,
   SessionArchivePayloadSchema,
   SessionCreatedPayloadSchema,
@@ -83,8 +94,6 @@ import {
   SessionInfoPayloadSchema,
   SessionListPayloadSchema,
   SessionListResultPayloadSchema,
-  SessionSwitchedPayloadSchema,
-  SessionSwitchPayloadSchema,
   ShutdownClusterPayloadSchema,
   SpawnAgentPayloadSchema,
   SubscribePayloadSchema,
@@ -241,16 +250,25 @@ const PAYLOAD_SCHEMA_MAP: Record<string, import("zod").ZodTypeAny> = {
   RoomMemberEventPayload: RoomMemberEventPayloadSchema,
   RoomLogEventPayload: RoomLogEventPayloadSchema,
   SessionCreatePayload: SessionCreatePayloadSchema,
-  SessionSwitchPayload: SessionSwitchPayloadSchema,
+  SessionActivatePayload: SessionActivatePayloadSchema,
   SessionListPayload: SessionListPayloadSchema,
   SessionArchivePayload: SessionArchivePayloadSchema,
   SessionDeletePayload: SessionDeletePayloadSchema,
   SessionInfoPayload: SessionInfoPayloadSchema,
   SessionCreatedPayload: SessionCreatedPayloadSchema,
-  SessionSwitchedPayload: SessionSwitchedPayloadSchema,
+  SessionActivatedPayload: SessionActivatedPayloadSchema,
   SessionArchivedPayload: SessionArchivedPayloadSchema,
   SessionDeletedPayload: SessionDeletedPayloadSchema,
   SessionListResultPayload: SessionListResultPayloadSchema,
+  BranchCreatePayload: BranchCreatePayloadSchema,
+  BranchActivatePayload: BranchActivatePayloadSchema,
+  BranchListPayload: BranchListPayloadSchema,
+  BranchArchivePayload: BranchArchivePayloadSchema,
+  BranchDeletePayload: BranchDeletePayloadSchema,
+  BranchInfoPayload: BranchInfoPayloadSchema,
+  BranchEventPayload: BranchEventPayloadSchema,
+  BranchLifecyclePayload: BranchLifecyclePayloadSchema,
+  BranchListResultPayload: BranchListResultPayloadSchema,
 };
 
 describe("Pydantic-Zod cross-validation", () => {
@@ -371,8 +389,8 @@ describe("ActionNode typed schema alignment", () => {
       "is_snapshot",
       "action_results",
       "metadata",
-      "branch_name",
       "session_id",
+      "created_on_branch_id",
     ]);
     const extraInTs = [...tsKeys].filter((k) => !pythonKeys.has(k));
     const undeclaredExtra = extraInTs.filter((k) => !declaredTsKeys.has(k));
@@ -388,7 +406,7 @@ describe("ActionNode typed schema alignment", () => {
     expect(parsed.id).toBe("node-001");
     expect(parsed.agent_name).toBe("agent-1");
     expect(parsed.iteration).toBe(1);
-    expect(parsed.branch_name).toBe("main");
+    expect(parsed.created_on_branch_id).toBe("branch-main");
     expect(parsed.session_id).toBe("sess-001");
     expect(parsed.ability_names).toEqual(["conversation", "write_file"]);
   });

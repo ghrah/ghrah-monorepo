@@ -175,8 +175,8 @@ class SupervisorActor:
 
         - duck-typed connect：仅 SqliteBackend 等带连接语义的后端需要
           （InMemory/JsonFile 无此方法则跳过）；
-        - 已有 chain_meta：restore-first，恢复失败直接阻断 spawn；
-        - 无 chain_meta：首次 persist，初始化根节点与 agent 元数据。
+        - 已有 checkpoint：restore-first，恢复失败直接阻断 spawn；
+        - 无 checkpoint：首次 persist，初始化 Session/Root/Branch。
 
         Returns:
             ``memory`` / ``restored`` / ``initialized``。
@@ -187,8 +187,8 @@ class SupervisorActor:
             return "memory"
         if hasattr(backend, "connect"):
             await backend.connect()
-        meta = await backend.load_chain_meta(name)
-        if meta is not None:
+        checkpoint = await backend.load_checkpoint(name)
+        if checkpoint is not None:
             await cm.restore(name)
             logger.info("Supervisor restored persisted context for agent: %s", name)
             return "restored"
@@ -475,10 +475,10 @@ class SupervisorActor:
     async def create_session(
         self,
         agent_name: str,
-        session_name: str | None = None,
-        from_node_id: str | None = None,
+        origin_session_id: str | None = None,
+        origin_node_id: str | None = None,
         system_prompt: str | None = None,
-        session_metadata: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """为指定 Agent 创建新 session。
 
@@ -497,22 +497,15 @@ class SupervisorActor:
         """
         handle = await self.get_agent_handle(agent_name)
         session = await handle.create_session(
-            from_node_id=from_node_id,
+            origin_session_id=origin_session_id,
+            origin_node_id=origin_node_id,
             system_prompt=system_prompt,
-            session_name=session_name,
-            session_metadata=session_metadata,
+            metadata=metadata,
         )
-        return {
-            "session_id": session.session_id,
-            "agent_name": session.agent_name,
-            "branch_name": session.branch_name,
-            "parent_session_id": session.parent_session_id,
-            "fork_point_node_id": session.parent_node_id,
-            "created_at": session.created_at.isoformat() if session.created_at else "",
-        }
+        return handle._session_info(session)
 
-    async def switch_session(self, agent_name: str, session_id: str) -> dict[str, Any]:
-        """切换指定 Agent 的活跃 session。
+    async def activate_session(self, agent_name: str, session_id: str) -> dict[str, Any]:
+        """激活指定 Agent 的独立 Root Session。
 
         Args:
             agent_name: Agent 名称
@@ -525,12 +518,7 @@ class SupervisorActor:
             AgentNotFoundError: Agent 未注册
         """
         handle = await self.get_agent_handle(agent_name)
-        await handle.switch_session(session_id)
-        sessions = handle.list_sessions()
-        for s in sessions:
-            if s["session_id"] == session_id:
-                return s
-        return {"session_id": session_id, "agent_name": agent_name}
+        return await handle.activate_session(session_id)
 
     async def list_sessions(self, agent_name: str) -> list[dict[str, Any]]:
         """列出指定 Agent 的所有 session。
@@ -572,6 +560,47 @@ class SupervisorActor:
         """
         handle = await self.get_agent_handle(agent_name)
         await handle.delete_session(session_id)
+
+    async def create_branch(
+        self,
+        agent_name: str,
+        session_id: str,
+        name: str,
+        from_node_id: str | None = None,
+        parent_branch_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """为 Session 创建 Branch，不隐式激活。"""
+        handle = await self.get_agent_handle(agent_name)
+        return await handle.create_branch(
+            session_id=session_id,
+            name=name,
+            from_node_id=from_node_id,
+            parent_branch_id=parent_branch_id,
+            metadata=metadata,
+        )
+
+    async def activate_branch(
+        self, agent_name: str, session_id: str, branch_id: str
+    ) -> dict[str, Any]:
+        """激活当前 Session 内的 Branch。"""
+        handle = await self.get_agent_handle(agent_name)
+        return await handle.activate_branch(session_id, branch_id)
+
+    async def list_branches(self, agent_name: str, session_id: str) -> list[dict[str, Any]]:
+        """列出 Session 内 Branch。"""
+        handle = await self.get_agent_handle(agent_name)
+        return handle.list_branches(session_id)
+
+    async def archive_branch(self, agent_name: str, session_id: str, branch_id: str) -> None:
+        """归档非运行 Branch。"""
+        handle = await self.get_agent_handle(agent_name)
+        await handle.archive_branch(session_id, branch_id)
+
+    async def delete_branch(self, agent_name: str, session_id: str, branch_id: str) -> None:
+        """删除非运行 Branch。"""
+        handle = await self.get_agent_handle(agent_name)
+        await handle.delete_branch(session_id, branch_id)
 
     async def health_check(self) -> dict[str, bool]:
         """检查所有 Agent 的健康状态。

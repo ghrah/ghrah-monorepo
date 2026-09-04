@@ -56,17 +56,16 @@ class TestContextManagerLifecycle:
     def test_init_creates_root_node(self) -> None:
         """初始化后 chain 有根节点。"""
         cm = _make_cm()
-        assert cm.chain.head is not None
-        assert cm.chain.head.ability_names == ["init"]
-        assert cm.chain.head.iteration == 0
-        assert cm.chain.head.is_snapshot is True
+        assert cm.active_head.ability_names == ["init"]
+        assert cm.active_head.iteration == 0
+        assert cm.active_head.is_snapshot is True
 
     def test_init_with_initial_state(self) -> None:
         """初始状态正确传入 StateManager 和 root node。"""
         state = {"key": "value", "nested": {"a": 1}}
         cm = _make_cm(initial_state=state)
         assert cm.get_current_state() == state
-        assert cm.chain.head.agent_state == state
+        assert cm.active_head.agent_state == state
 
     def test_init_with_system_prompt(self) -> None:
         """system_prompt 正确保存。"""
@@ -194,13 +193,15 @@ class TestContextManagerIteration:
         # 再开始一次迭代，然后回滚
         cm.begin_iteration()
         cm.add_messages([ChatMessage.user(text_or_blocks="will be discarded")])
-        node = cm.rollback_iteration(ValueError("something went wrong"))
+        previous_head = cm.active_head
+        session_id = cm.active_session_id
+        branch = cm.rollback_iteration(ValueError("something went wrong"))
 
-        assert node.ability_names == ["rollback"]
-        assert node.metadata.get("is_rollback") is True
-        assert "something went wrong" in node.metadata.get("error", "")
-        assert node.branch_name.startswith("rollback-")
-        assert node.session_id != ""  # 有 session 关联
+        assert branch.metadata.get("is_rollback") is True
+        assert "something went wrong" in branch.metadata.get("error", "")
+        assert branch.name.startswith("retry-")
+        assert branch.session_id == session_id
+        assert branch.head_node_id == previous_head.id
 
     def test_rollback_preserves_state(self) -> None:
         """rollback 后状态恢复到迭代前。"""
@@ -229,20 +230,20 @@ class TestContextManagerIteration:
 
         assert cm.message_store.count == 0
 
-    def test_rollback_node_metadata(self) -> None:
-        """回滚节点 metadata 含 is_rollback=True 和 error 信息。"""
+    def test_rollback_branch_metadata(self) -> None:
+        """回滚 Branch metadata 含 is_rollback=True 和 error 信息。"""
         cm = _make_cm()
         # 先 commit 一次
         cm.begin_iteration()
         cm.commit_iteration(ability_names=["step1"])
 
         cm.begin_iteration()
-        node = cm.rollback_iteration(TypeError("bad type"))
+        branch = cm.rollback_iteration(TypeError("bad type"))
 
-        assert node.metadata["is_rollback"] is True
-        assert "bad type" in node.metadata["error"]
-        assert "rollback_from_branch" in node.metadata
-        assert "rollback_from_node_id" in node.metadata
+        assert branch.metadata["is_rollback"] is True
+        assert "bad type" in branch.metadata["error"]
+        assert "rollback_from_branch_id" in branch.metadata
+        assert "rollback_from_node_id" in branch.metadata
 
     def test_add_messages_during_iteration(self) -> None:
         """迭代中添加消息。"""
@@ -340,13 +341,14 @@ class TestContextManagerQuery:
         cm.commit_iteration(ability_names=["ability_1"])
 
         heads = cm.get_branch_heads()
-        assert "main" in heads
-        assert heads["main"].ability_names == ["ability_1"]
+        main_branch_id = cm.get_active_session().active_branch_id
+        assert main_branch_id in heads
+        assert heads[main_branch_id].ability_names == ["ability_1"]
 
     def test_get_chain_node(self) -> None:
         """按 ID 获取节点。"""
         cm = _make_cm()
-        root_id = cm.chain.head.id
+        root_id = cm.active_head.id
         node = cm.get_chain_node(root_id)
         assert node is not None
         assert node.ability_names == ["init"]
@@ -615,9 +617,9 @@ class TestContextManagerIntegration:
         cm.begin_iteration()
         cm.add_messages([ChatMessage.user(text_or_blocks="attempt 1")])
         cm.apply_state_changes({"retries": 1})
-        rollback_node = cm.rollback_iteration(RuntimeError("timeout"))
+        retry_branch = cm.rollback_iteration(RuntimeError("timeout"))
 
-        assert rollback_node.metadata["is_rollback"] is True
+        assert retry_branch.metadata["is_rollback"] is True
         assert cm.get_current_state() == {"retries": 0}
 
         # 在回滚分支上继续
@@ -707,14 +709,13 @@ class TestContextManagerIntegration:
         cm.begin_iteration()
         cm.rollback_iteration(RuntimeError("fail"))
 
-        # 回滚后，活跃分支是 rollback 分支
-        # rollback 分支的历史是：root -> rollback_node（回滚到 root 的状态）
+        # 回滚后，新 Branch 与原 Branch 共享当前 Head。
         cm.begin_iteration()
         cm.commit_iteration(ability_names=["ability_2"])
 
-        # 活跃分支的历史应该包含：root, rollback_node, ability_2
+        # 未提交的失败迭代不制造节点。
         history = cm.get_history()
         assert len(history) == 3
         assert history[0].ability_names == ["init"]
-        assert history[1].ability_names == ["rollback"]
+        assert history[1].ability_names == ["ability_1"]
         assert history[2].ability_names == ["ability_2"]

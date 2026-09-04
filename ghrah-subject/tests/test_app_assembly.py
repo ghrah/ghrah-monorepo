@@ -126,7 +126,17 @@ class TestAssembleSubject:
             # 行当场落库（非旧「首次 save_node 才登记」语义）
             ledger = ActionChainLedger(action_chain_db_path)
             await ledger.start()
-            history = await ledger.get_chain_history(spawn["data"]["agent_id"])
+            meta = await ledger.get_chain_meta(spawn["data"]["agent_id"])
+            assert meta is not None
+            session_id = meta.active_session_id
+            branch_id = next(
+                item["active_branch_id"]
+                for item in meta.sessions
+                if item["session_id"] == session_id
+            )
+            history = await ledger.get_chain_history(
+                spawn["data"]["agent_id"], session_id, branch_id
+            )
             assert len(history) == 1
             assert history[0].parent_id is None
             assert await ledger.list_agents() == [spawn["data"]["agent_id"]]

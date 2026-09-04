@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import Callable
 from typing import Any
 
@@ -58,9 +57,7 @@ def create_rebased_context(
     """
     # 1. 确定源节点
     if source_node_id is None:
-        source_node = source_cm.chain.active_head
-        if source_node is None:
-            raise ValueError("Source chain has no head node.")
+        source_node = source_cm.active_head
         source_node_id = source_node.id
     else:
         source_node = source_cm.chain.checkout(source_node_id)
@@ -95,40 +92,15 @@ def create_rebased_context(
         persistence=source_cm.persistence,
         auto_persist=source_cm.auto_persist,
         message_factory=source_cm.message_factory,
+        initial_messages=source_messages,
+        origin_session_id=source_cm.get_active_session().session_id,
+        origin_node_id=source_node_id,
+        session_metadata={"origin_agent_name": source_cm.agent_name},
+        root_metadata={
+            "origin_agent_name": source_cm.agent_name,
+            "origin_node_id": source_node_id,
+        },
     )
-
-    # 5. 继承消息到子 CM
-    if source_messages:
-        child_cm.message_store.extend(source_messages)
-
-    # 6. 更新链头节点 metadata，记录 rebase 来源
-    head_node = child_cm.chain.head
-    if head_node is not None:
-        rebased_head = dataclasses.replace(
-            head_node,
-            metadata={
-                **head_node.metadata,
-                "rebase_from_agent": source_cm.agent_name,
-                "rebase_from_node_id": source_node_id,
-            },
-        )
-        child_cm.chain.replace_node(rebased_head)
-
-    # 7. 更新根 session metadata，记录 rebase 来源
-    source_session = source_cm.get_active_session()
-    root_session = child_cm.get_active_session()
-    updated_session = dataclasses.replace(
-        root_session,
-        rebase_from_agent=source_cm.agent_name,
-        rebase_from_node_id=source_node_id,
-        rebase_from_session_id=source_session.session_id if source_session else None,
-        system_prompt=system_prompt,
-    )
-    child_cm.replace_session(updated_session)
-
-    # 8. 持久化根节点（如果 auto_persist 开启）
-    if child_cm.auto_persist and child_cm.persistence is not None:
-        child_cm.persist_node(child_cm.chain.head)
 
     return child_cm
 
