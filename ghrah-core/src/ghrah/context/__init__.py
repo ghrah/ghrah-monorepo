@@ -13,7 +13,6 @@ Phase 1 公共 API：
 - MessageStore: 运行时消息存储
 - StateManager: 事务性状态管理器
 - ContextManager: 上下文管理器门面类
-- Session: 迭代会话数据模型
 - create_rebased_context: 跨 Agent 上下文继承工厂函数
 - WindowStrategy: 窗口策略接口
 - WindowManager: 窗口管理器
@@ -31,6 +30,8 @@ Phase 1 公共 API：
 - serialize_messages / deserialize_messages: 消息序列化工具
 """
 
+from ghrah.context.action_session import ActionSession
+from ghrah.context.branch import ActionBranch
 from ghrah.context.chain import ActionChain
 from ghrah.context.iteration_state import IterationState
 from ghrah.context.manager import ContextManager
@@ -42,20 +43,25 @@ from ghrah.context.persistence import (
     PersistenceBackend,
     deserialize_action_result,
     deserialize_action_results,
+    deserialize_action_session,
+    deserialize_branch,
     deserialize_messages,
     deserialize_node,
     serialize_action_result,
     serialize_action_results,
+    serialize_action_session,
+    serialize_branch,
     serialize_messages,
     serialize_node,
 )
 from ghrah.context.rebase import create_rebased_context
-from ghrah.context.session import Session
+from ghrah.context.session_runtime import SessionRuntime
 from ghrah.context.state import StateManager
 from ghrah.context.strategies.llm_summary import LLMSummaryStrategy
 from ghrah.context.strategies.sliding_window import SlidingWindowStrategy
 from ghrah.context.strategies.tool_call_fold import ToolCallFoldStrategy
 from ghrah.context.strategies.truncation import TruncationStrategy
+from ghrah.context.topology import validate_session_topology
 from ghrah.context.window import (
     WindowManager,
     WindowStrategy,
@@ -65,12 +71,15 @@ from ghrah.context.window import (
 
 __all__ = [
     "ContextNode",
+    "ActionSession",
+    "ActionBranch",
+    "SessionRuntime",
+    "validate_session_topology",
     "ActionChain",
     "MessageStore",
     "StateManager",
     "ContextManager",
     "IterationState",
-    "Session",
     "create_rebased_context",
     "WindowStrategy",
     "WindowManager",
@@ -85,6 +94,10 @@ __all__ = [
     "JsonFileBackend",
     "serialize_node",
     "deserialize_node",
+    "serialize_action_session",
+    "deserialize_action_session",
+    "serialize_branch",
+    "deserialize_branch",
     "serialize_action_result",
     "deserialize_action_result",
     "serialize_action_results",

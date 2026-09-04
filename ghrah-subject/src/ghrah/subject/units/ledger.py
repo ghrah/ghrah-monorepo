@@ -122,7 +122,8 @@ class LedgerUnit(SubjectUnit):
             agent_name = request.agent_name
             agent_id = request.agent_id
             project_id = request.project_id
-            branch_name = request.branch_name
+            session_id = request.session_id
+            branch_id = request.branch_id
             limit = request.limit
             persistence_key = await self._resolve_persistence_key(
                 agent_name, project_id=project_id, agent_id=agent_id
@@ -130,7 +131,8 @@ class LedgerUnit(SubjectUnit):
             ledger = await self._ledger_for_project(project_id)
             nodes = await ledger.get_chain_history(
                 persistence_key,
-                branch=branch_name,
+                session_id=session_id,
+                branch_id=branch_id,
                 limit=limit,
             )
             serialized = [serialize_node(node) for node in nodes]
@@ -144,7 +146,8 @@ class LedgerUnit(SubjectUnit):
                     "project_id": project_id,
                     "agent_name": agent_name,
                     "agent_id": persistence_key,
-                    "branch_name": branch_name,
+                    "session_id": session_id,
+                    "branch_id": branch_id,
                     "nodes": serialized,
                     "active_session_id": active_session_id,
                 },

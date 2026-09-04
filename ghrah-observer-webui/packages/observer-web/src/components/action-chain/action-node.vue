@@ -48,11 +48,7 @@ const timeStr = computed(() => {
 });
 const summary = computed(() => {
   const iter = props.node.iteration ?? 0;
-  const branch =
-    props.node.branch_name && props.node.branch_name !== "main"
-      ? ` [${props.node.branch_name}]`
-      : "";
-  return `${timeStr.value} iter=${iter} | abilities=[${abilitySummary.value}] | state_keys=[${stateKeys.value.join(",")}]${branch}`;
+  return `${timeStr.value} iter=${iter} | abilities=[${abilitySummary.value}] | state_keys=[${stateKeys.value.join(",")}]`;
 });
 
 const hasDetails = computed(() => visibleBlocks.value.length > 0 || actionResults.value.length > 0);

@@ -7,7 +7,7 @@
 核心组件：
 - PersistenceBackend ABC：统一持久化接口
 - InMemoryBackend：纯内存实现（零依赖默认选项）
-- JsonFileBackend：基于 JSON 文件的持久化后端（支持 gzip 压缩）
+- JsonFileBackend：基于追加式 JSON 变更记录的持久化后端
 - SqliteBackend：基于 SQLite 的持久化后端（WAL 模式，支持并发读）
 - create_persistence()：根据 ContextConfig 创建持久化后端实例的工厂函数
 - 序列化/反序列化工具函数：处理 ContextNode ↔ dict 转换
@@ -16,7 +16,7 @@
 - 所有后端方法为 async，支持 IO 密集型存储（文件、数据库等）
 - 序列化使用 ChatMessage.to_dict() / ChatMessage.from_dict()
 - InMemoryBackend 直接存储 ContextNode 对象，无需序列化开销
-- JsonFileBackend 将节点打包存储在单个文件中，支持 gzip 压缩
+- JsonFileBackend 每个变更集写一条小型原子记录，支持 gzip 压缩
 - SqliteBackend 使用 aiosqlite 异步操作，WAL 模式支持并发读写
 """
 
@@ -25,19 +25,23 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ghrah.context.persistence.backend import PersistenceBackend
+from ghrah.context.persistence.changes import ContextChanges
+from ghrah.context.persistence.checkpoint import ContextCheckpoint
 from ghrah.context.persistence.json_file import JsonFileBackend
 from ghrah.context.persistence.memory import InMemoryBackend
 from ghrah.context.persistence.serialization import (
     deserialize_action_result,
     deserialize_action_results,
+    deserialize_action_session,
+    deserialize_branch,
     deserialize_messages,
     deserialize_node,
-    deserialize_session,
     serialize_action_result,
     serialize_action_results,
+    serialize_action_session,
+    serialize_branch,
     serialize_messages,
     serialize_node,
-    serialize_session,
 )
 from ghrah.context.persistence.sqlite_backend import SqliteBackend
 
@@ -106,6 +110,8 @@ def create_persistence(
 
 __all__ = [
     "PersistenceBackend",
+    "ContextCheckpoint",
+    "ContextChanges",
     "InMemoryBackend",
     "JsonFileBackend",
     "SqliteBackend",
@@ -113,8 +119,10 @@ __all__ = [
     "create_persistence",
     "serialize_node",
     "deserialize_node",
-    "serialize_session",
-    "deserialize_session",
+    "serialize_action_session",
+    "deserialize_action_session",
+    "serialize_branch",
+    "deserialize_branch",
     "serialize_action_result",
     "deserialize_action_result",
     "serialize_action_results",

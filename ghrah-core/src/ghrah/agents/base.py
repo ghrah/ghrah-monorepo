@@ -49,9 +49,10 @@ from ghrah.abilities.hook_store import HookListView, HookStore
 from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 from ghrah.chat.content import ContentBlock, block_to_dict, blocks_from_dicts
 from ghrah.chat.message import ChatMessage
+from ghrah.context.action_session import ActionSession
+from ghrah.context.branch import ActionBranch
 from ghrah.context.iteration_state import IterationState
 from ghrah.context.manager import ContextManager
-from ghrah.context.session import Session
 from ghrah.core.ability_protocol import AbilityProtocol, ExecutorProtocol
 from ghrah.core.event_publisher import (
     EventPublisher,
@@ -61,10 +62,14 @@ from ghrah.core.events import (
     ActionChainUpdatedEvent,
     AgentErrorEvent,
     AgentResponseEvent,
+    BranchActivatedEvent,
+    BranchArchivedEvent,
+    BranchCreatedEvent,
+    BranchDeletedEvent,
+    SessionActivatedEvent,
     SessionArchivedEvent,
     SessionCreatedEvent,
     SessionDeletedEvent,
-    SessionSwitchedEvent,
 )
 from ghrah.core.exceptions import (
     AgentError,
@@ -933,103 +938,142 @@ class ActorAgent:
 
     async def create_session(
         self,
-        from_node_id: str | None = None,
+        origin_session_id: str | None = None,
+        origin_node_id: str | None = None,
         system_prompt: str | None = None,
-        session_name: str | None = None,
-        session_metadata: dict[str, Any] | None = None,
-    ) -> Session:
-        """创建新 session 并发布事件。
-
-        委托给 ContextManager.create_session() 完成实际创建，
-        然后发布 SessionCreatedEvent。
-
-        Args:
-            from_node_id: fork 起始节点 ID
-            system_prompt: 新 session 的系统提示词
-            session_name: 人类可读的分支名
-            session_metadata: 扩展元数据
-
-        Returns:
-            新创建的 Session 实例
-        """
+        metadata: dict[str, Any] | None = None,
+    ) -> ActionSession:
+        """创建独立 Root Session 并发布事件。"""
         session = self._context_manager.create_session(
-            from_node_id=from_node_id,
+            origin_session_id=origin_session_id,
+            origin_node_id=origin_node_id,
             system_prompt=system_prompt,
-            session_name=session_name,
-            session_metadata=session_metadata,
+            metadata=metadata,
         )
-
         await self._event_publisher.publish(
             SessionCreatedEvent(
                 agent_name=self.config.name,
-                session_id=session.session_id,
-                branch_name=session.branch_name,
-                parent_session_id=session.parent_session_id,
-                fork_point_node_id=session.parent_node_id,
+                session=self._session_info(session),
             )
         )
-
-        logger.info(
-            f"ActorAgent[{self.config.name}] created session "
-            f"id={session.session_id} branch={session.branch_name}"
-        )
+        logger.info("ActorAgent[%s] created session id=%s", self.config.name, session.session_id)
         return session
 
-    async def switch_session(self, session_id: str) -> None:
-        """切换到指定 session 并发布事件。
-
-        委托给 ContextManager.switch_session() 完成实际切换，
-        然后发布 SessionSwitchedEvent。
-
-        Args:
-            session_id: 目标 session ID
-
-        Raises:
-            ValueError: session 不存在
-        """
-        self._context_manager.switch_session(session_id)
-
+    async def activate_session(self, session_id: str) -> dict[str, Any]:
+        """激活独立 Root Session 并完整恢复运行上下文。"""
+        self._context_manager.activate_session(session_id)
         session = self._context_manager.get_active_session()
+        info = self._session_info(session)
         await self._event_publisher.publish(
-            SessionSwitchedEvent(
+            SessionActivatedEvent(
                 agent_name=self.config.name,
-                session_id=session.session_id,
-                branch_name=session.branch_name,
+                session=info,
             )
         )
-
-        logger.info(
-            f"ActorAgent[{self.config.name}] switched to session "
-            f"id={session.session_id} branch={session.branch_name}"
-        )
+        logger.info("ActorAgent[%s] activated session id=%s", self.config.name, session_id)
+        return info
 
     def list_sessions(self) -> list[dict[str, Any]]:
-        """列出所有 session 的信息。
+        """列出独立 Root Session。"""
+        return [self._session_info(session) for session in self._context_manager.list_sessions()]
 
-        Returns:
-            Session 信息字典列表，每个包含 session_id、branch_name、state 等
-        """
-        sessions = self._context_manager.list_sessions()
-        result = []
-        for session in sessions:
-            is_active = session.session_id == self._context_manager.active_session_id
-            head_node = self._context_manager.get_branch_head(session.branch_name)
-            result.append(
-                {
-                    "session_id": session.session_id,
-                    "agent_name": session.agent_name,
-                    "branch_name": session.branch_name,
-                    "state": "active" if is_active else "idle",
-                    "head_node_id": head_node.id if head_node else None,
-                    "parent_session_id": session.parent_session_id,
-                    "fork_point_node_id": session.parent_node_id,
-                    "created_at": session.created_at.isoformat() if session.created_at else "",
-                    "metadata": session.metadata,
-                    "message_count": self._context_manager.message_count,
-                    "iteration_count": self._iteration_state.iteration,
-                }
+    def _session_info(self, session: ActionSession) -> dict[str, Any]:
+        """将 Session 领域对象转换为稳定 wire 结构。"""
+        history = self._context_manager.get_history(session_id=session.session_id)
+        return {
+            "session_id": session.session_id,
+            "agent_name": session.agent_name,
+            "root_node_id": session.root_node_id,
+            "active_branch_id": session.active_branch_id,
+            "state": (
+                "active"
+                if session.session_id == self._context_manager.active_session_id
+                else "archived"
+                if session.metadata.get("archived")
+                else "idle"
+            ),
+            "system_prompt": session.system_prompt,
+            "origin_session_id": session.origin_session_id,
+            "origin_node_id": session.origin_node_id,
+            "created_at": session.created_at.isoformat(),
+            "metadata": session.metadata,
+            "message_count": len(self._context_manager.get_messages(session_id=session.session_id)),
+            "iteration_count": max((node.iteration for node in history), default=0),
+        }
+
+    @staticmethod
+    def _branch_info(branch: ActionBranch) -> dict[str, Any]:
+        """将 Branch 领域对象转换为稳定 wire 结构。"""
+        return {
+            "branch_id": branch.branch_id,
+            "session_id": branch.session_id,
+            "name": branch.name,
+            "head_node_id": branch.head_node_id,
+            "parent_branch_id": branch.parent_branch_id,
+            "fork_point_node_id": branch.fork_point_node_id,
+            "created_at": branch.created_at.isoformat(),
+            "metadata": branch.metadata,
+        }
+
+    async def create_branch(
+        self,
+        session_id: str,
+        name: str,
+        from_node_id: str | None = None,
+        parent_branch_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """创建同 Session Branch，不隐式激活。"""
+        branch = self._context_manager.create_branch(
+            session_id=session_id,
+            name=name,
+            from_node_id=from_node_id,
+            parent_branch_id=parent_branch_id,
+            metadata=metadata,
+        )
+        info = self._branch_info(branch)
+        await self._event_publisher.publish(
+            BranchCreatedEvent(agent_name=self.config.name, branch=info)
+        )
+        return info
+
+    async def activate_branch(self, session_id: str, branch_id: str) -> dict[str, Any]:
+        """激活当前 Session 的 Branch。"""
+        self._context_manager.activate_branch(session_id, branch_id)
+        branch = next(
+            item
+            for item in self._context_manager.list_branches(session_id)
+            if item.branch_id == branch_id
+        )
+        info = self._branch_info(branch)
+        await self._event_publisher.publish(
+            BranchActivatedEvent(agent_name=self.config.name, branch=info)
+        )
+        return info
+
+    def list_branches(self, session_id: str) -> list[dict[str, Any]]:
+        """列出 Session 内 Branch。"""
+        return [
+            self._branch_info(branch) for branch in self._context_manager.list_branches(session_id)
+        ]
+
+    async def archive_branch(self, session_id: str, branch_id: str) -> None:
+        """归档非运行 Branch。"""
+        self._context_manager.archive_branch(session_id, branch_id)
+        await self._event_publisher.publish(
+            BranchArchivedEvent(
+                agent_name=self.config.name, session_id=session_id, branch_id=branch_id
             )
-        return result
+        )
+
+    async def delete_branch(self, session_id: str, branch_id: str) -> None:
+        """删除非运行 Branch（保留 provenance 墓碑）。"""
+        self._context_manager.delete_branch(session_id, branch_id)
+        await self._event_publisher.publish(
+            BranchDeletedEvent(
+                agent_name=self.config.name, session_id=session_id, branch_id=branch_id
+            )
+        )
 
     async def archive_session(self, session_id: str) -> None:
         """归档指定 session 并发布事件。

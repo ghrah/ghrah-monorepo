@@ -184,6 +184,27 @@ class TestEndToEndSmoke:
                     "config": {"name": "ledger-smoke", "system_prompt": "test"},
                 },
             )
+            sessions = await bridge_command(
+                ctx,
+                "session_list",
+                {
+                    "project_id": project["project_id"],
+                    "agent_id": spawned["data"]["agent_id"],
+                    "agent_name": "ledger-smoke",
+                },
+            )
+            session = sessions["data"]["sessions"][0]
+            branches = await bridge_command(
+                ctx,
+                "branch_list",
+                {
+                    "project_id": project["project_id"],
+                    "agent_id": spawned["data"]["agent_id"],
+                    "agent_name": "ledger-smoke",
+                    "session_id": session["session_id"],
+                },
+            )
+            branch = branches["data"]["branches"][0]
             # 经 Observer 命令路径查 chain_history（ledger unit 路由）
             result = await bridge_command(
                 ctx,
@@ -192,6 +213,8 @@ class TestEndToEndSmoke:
                     "project_id": project["project_id"],
                     "agent_id": spawned["data"]["agent_id"],
                     "agent_name": "ledger-smoke",
+                    "session_id": session["session_id"],
+                    "branch_id": branch["branch_id"],
                 },
             )
             assert result["success"]
@@ -207,7 +230,7 @@ class TestEndToEndSmoke:
             assert result["success"]
 
     async def test_session_lifecycle_via_observer_path(self, tmp_path: Path) -> None:
-        """session_create/list 经 Observer 命令路径直达 CoreUnit（Fork 基础面）。"""
+        """session_create/list 经 Observer 命令路径管理独立 Root。"""
         async with _stack(tmp_path) as ctx:
             project = await _default_project(ctx)
             spawned = await bridge_command(
@@ -225,7 +248,6 @@ class TestEndToEndSmoke:
                     "project_id": project["project_id"],
                     "agent_id": spawned["data"]["agent_id"],
                     "agent_name": "sess-agent",
-                    "session_name": "fork-1",
                 },
             )
             assert create["success"], create.get("error")

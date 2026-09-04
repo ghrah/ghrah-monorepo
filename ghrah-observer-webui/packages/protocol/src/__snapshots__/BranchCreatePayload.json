@@ -1,0 +1,10 @@
+{
+  "project_id": "proj-001",
+  "agent_id": "agent-001",
+  "agent_name": "agent-1",
+  "session_id": "session-001",
+  "name": "retry-1",
+  "from_node_id": "node-001",
+  "parent_branch_id": "branch-main",
+  "metadata": {}
+}

@@ -160,14 +160,20 @@ export class ObserverClient extends ServerClient {
 
   async getChainHistory(
     agentName: string,
+    projectId: string,
+    agentId: string,
+    sessionId: string,
+    branchId: string,
     limit?: number,
-    projectId?: string,
-    agentId?: string,
   ): Promise<CommandResultPayload> {
-    const payload: Record<string, unknown> = { agent_name: agentName };
+    const payload: Record<string, unknown> = {
+      agent_name: agentName,
+      project_id: projectId,
+      agent_id: agentId,
+      session_id: sessionId,
+      branch_id: branchId,
+    };
     if (limit != null) payload["limit"] = limit;
-    if (projectId != null) payload["project_id"] = projectId;
-    if (agentId != null) payload["agent_id"] = agentId;
 
     const msg: ServerMessage = {
       type: CommandType.GET_CHAIN_HISTORY,
@@ -176,6 +182,186 @@ export class ObserverClient extends ServerClient {
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 30_000);
+  }
+
+  async listSessions(
+    agentName: string,
+    projectId: string,
+    agentId: string,
+  ): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.SESSION_LIST, agentName, projectId, agentId, {});
+  }
+
+  async createSession(
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    options: {
+      originSessionId?: string;
+      originNodeId?: string;
+      systemPrompt?: string;
+      metadata?: Record<string, unknown>;
+    } = {},
+  ): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.SESSION_CREATE, agentName, projectId, agentId, {
+      origin_session_id: options.originSessionId,
+      origin_node_id: options.originNodeId,
+      system_prompt: options.systemPrompt,
+      metadata: options.metadata ?? {},
+    });
+  }
+
+  async activateSession(
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    sessionId: string,
+  ): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.SESSION_ACTIVATE, agentName, projectId, agentId, {
+      session_id: sessionId,
+    });
+  }
+
+  async archiveSession(
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    sessionId: string,
+  ): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.SESSION_ARCHIVE, agentName, projectId, agentId, {
+      session_id: sessionId,
+    });
+  }
+
+  async deleteSession(
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    sessionId: string,
+  ): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.SESSION_DELETE, agentName, projectId, agentId, {
+      session_id: sessionId,
+    });
+  }
+
+  async listBranches(
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    sessionId: string,
+  ): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.BRANCH_LIST, agentName, projectId, agentId, {
+      session_id: sessionId,
+    });
+  }
+
+  async createBranch(
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    sessionId: string,
+    name: string,
+    options: {
+      fromNodeId?: string;
+      parentBranchId?: string;
+      metadata?: Record<string, unknown>;
+    } = {},
+  ): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.BRANCH_CREATE, agentName, projectId, agentId, {
+      session_id: sessionId,
+      name,
+      from_node_id: options.fromNodeId,
+      parent_branch_id: options.parentBranchId,
+      metadata: options.metadata ?? {},
+    });
+  }
+
+  async activateBranch(
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    sessionId: string,
+    branchId: string,
+  ): Promise<CommandResultPayload> {
+    return this._branchLifecycleRequest(
+      CommandType.BRANCH_ACTIVATE,
+      agentName,
+      projectId,
+      agentId,
+      sessionId,
+      branchId,
+    );
+  }
+
+  async archiveBranch(
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    sessionId: string,
+    branchId: string,
+  ): Promise<CommandResultPayload> {
+    return this._branchLifecycleRequest(
+      CommandType.BRANCH_ARCHIVE,
+      agentName,
+      projectId,
+      agentId,
+      sessionId,
+      branchId,
+    );
+  }
+
+  async deleteBranch(
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    sessionId: string,
+    branchId: string,
+  ): Promise<CommandResultPayload> {
+    return this._branchLifecycleRequest(
+      CommandType.BRANCH_DELETE,
+      agentName,
+      projectId,
+      agentId,
+      sessionId,
+      branchId,
+    );
+  }
+
+  private _branchLifecycleRequest(
+    command: CommandType,
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    sessionId: string,
+    branchId: string,
+  ): Promise<CommandResultPayload> {
+    return this._agentContextRequest(command, agentName, projectId, agentId, {
+      session_id: sessionId,
+      branch_id: branchId,
+    });
+  }
+
+  private _agentContextRequest(
+    command: CommandType,
+    agentName: string,
+    projectId: string,
+    agentId: string,
+    extra: Record<string, unknown>,
+  ): Promise<CommandResultPayload> {
+    return this.request(
+      {
+        type: command,
+        payload: {
+          project_id: projectId,
+          agent_id: agentId,
+          agent_name: agentName,
+          ...extra,
+        },
+        request_id: generateRequestId(),
+        client_type: ClientType.OBSERVER,
+      },
+      30_000,
+    );
   }
 
   async initCluster(

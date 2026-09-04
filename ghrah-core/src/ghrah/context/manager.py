@@ -4,7 +4,7 @@
 
 """ContextManager：上下文管理器门面类。
 
-整合 ActionChain + StateManager + MessageStore + Session 管理，
+整合 SessionRuntime + StateManager + MessageStore，
 为 ActorAgent 提供统一的上下文管理接口。
 
 核心职责：
@@ -12,7 +12,8 @@
 - 消息+状态协调：commit 时自动计算 delta、定期存储 snapshot、管理 state 事务
 - 上下文构建：build_execution_context 供 Ability/Hook 使用
 - 子 Agent 继承：fork_for_sub_agent 创建独立但继承的上下文
-- Session 管理：create_session / switch_session / list_sessions
+- Session 管理：create_session / activate_session / list_sessions
+- Branch 管理：create_branch / activate_branch / list_branches
 - 持久化：persist/restore 异步保存和恢复完整链式状态
 """
 
@@ -24,11 +25,13 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from ghrah.context.action_session import ActionSession
+from ghrah.context.branch import ActionBranch
 from ghrah.context.chain import ActionChain
 from ghrah.context.message_store import MessageStore
 from ghrah.context.node import ContextNode
-from ghrah.context.persistence import PersistenceBackend
-from ghrah.context.session import Session
+from ghrah.context.persistence import ContextChanges, PersistenceBackend
+from ghrah.context.session_runtime import SessionRuntime
 from ghrah.context.state import StateManager
 from ghrah.context.window import WindowManager
 from ghrah.core.window_protocol import MessageFactory
@@ -44,13 +47,14 @@ __all__ = ["ContextManager"]
 
 
 class ContextManager:
-    """上下文管理器门面类 — 整合 Chain + StateManager + MessageStore + Session。
+    """上下文管理器门面类 — 管理多个单 Root Session。
 
     为 ActorAgent 的驱动循环提供统一的上下文管理，支持：
     - 原子性迭代（事务性状态变更 + 消息管理）
     - 链式历史（类似 Git 的不可变节点链）
-    - Session 管理（分支 + 元数据）
-    - 回滚即分支（rollback 自动创建新 branch，保持 chain 只读性）
+    - Session 管理（独立 Root + 元数据）
+    - Branch 管理（稳定 Head 引用）
+    - 回滚即分支（rollback 自动创建新 Branch）
     - 子 Agent 继承（fork_for_sub_agent 创建独立上下文）
     - 异步持久化（persist/restore）
 
@@ -66,6 +70,11 @@ class ContextManager:
         window_manager: 窗口管理器（可选）
         persistence: 持久化后端（可选，None 则不持久化）
         auto_persist: 是否在每次 commit/rollback 后自动持久化节点，默认 False
+        initial_messages: Root 初始消息（system_prompt 会显式插入最前）
+        origin_session_id: Root 来源 Session ID，必须与 origin_node_id 同时提供
+        origin_node_id: Root 来源节点 ID，只记录 provenance，不建立跨 Session 父边
+        session_metadata: 初始 Session 元数据
+        root_metadata: 初始 Root 节点元数据
     """
 
     def __init__(
@@ -78,9 +87,13 @@ class ContextManager:
         persistence: PersistenceBackend | None = None,
         auto_persist: bool = False,
         message_factory: MessageFactory | None = None,
+        initial_messages: list[Any] | None = None,
+        origin_session_id: str | None = None,
+        origin_node_id: str | None = None,
+        session_metadata: dict[str, Any] | None = None,
+        root_metadata: dict[str, Any] | None = None,
     ) -> None:
         self._agent_name = agent_name
-        self._chain = ActionChain(agent_name)
         self._state_manager = StateManager(initial_state)
         self._message_store = MessageStore(snapshot_interval=snapshot_interval)
         self._system_prompt = system_prompt
@@ -93,12 +106,8 @@ class ContextManager:
         self._persist_tasks: set[asyncio.Task[Any]] = set()
         self._persist_lock = asyncio.Lock()
 
-        # Session 管理
-        self._sessions: dict[str, Session] = {}
-        self._active_session_id: str | None = None
-
-        # 初始化链：创建根节点
-        initial_messages: list[Any] = []
+        # 初始化默认 Session：一次性创建 Root 与 main Branch。
+        effective_messages = list(initial_messages or [])
         if system_prompt:
             if message_factory is None:
                 raise ValueError(
@@ -106,25 +115,41 @@ class ContextManager:
                     "Pass a MessageFactory instance (e.g. ChatMessageFactory())."
                 )
             msg = message_factory.create_message(role="system", text=system_prompt)
-            initial_messages.append(msg)
-            self._message_store.append(msg)
+            effective_messages.insert(0, msg)
+        self._message_store.extend(effective_messages)
 
-        self._chain.init_chain(
-            agent_state=initial_state or {},
-            messages=initial_messages,
-        )
-
-        # 创建根 session
-        root_session = Session(
+        root_runtime = SessionRuntime.create(
             agent_name=agent_name,
-            branch_name="main",
-            system_prompt=system_prompt or "",
+            system_prompt=system_prompt,
+            agent_state=initial_state or {},
+            messages=effective_messages,
+            origin_session_id=origin_session_id,
+            origin_node_id=origin_node_id,
+            metadata=session_metadata,
+            root_metadata=root_metadata,
         )
-        self._sessions[root_session.session_id] = root_session
-        self._active_session_id = root_session.session_id
+        self._session_runtimes: dict[str, SessionRuntime] = {
+            root_runtime.session.session_id: root_runtime
+        }
+        self._active_session_id = root_runtime.session.session_id
 
         # 建立初始快照基准
         self._message_store.take_snapshot(0)
+        if (
+            self._auto_persist
+            and self._persistence is not None
+            and getattr(self._persistence, "connected", True)
+        ):
+            self._schedule_changes(
+                ContextChanges(
+                    agent_name=self._agent_name,
+                    sessions=(root_runtime.session,),
+                    branches=tuple(root_runtime.branches.values()),
+                    nodes=(root_runtime.active_head,),
+                    active_session_id=self._active_session_id,
+                ),
+                label=f"initialize session {root_runtime.session.session_id}",
+            )
 
     # ----------------------------------------------------------------
     # 属性
@@ -137,8 +162,13 @@ class ContextManager:
 
     @property
     def chain(self) -> ActionChain:
-        """底层链管理器（只读访问）。"""
-        return self._chain
+        """当前激活 Session 的单 Root ActionChain。"""
+        return self._active_runtime.chain
+
+    @property
+    def active_head(self) -> ContextNode:
+        """由 active_session_id 与 active_branch_id 推导的唯一运行 Head。"""
+        return self._active_runtime.active_head
 
     @property
     def message_store(self) -> MessageStore:
@@ -176,9 +206,14 @@ class ContextManager:
         return self._message_store.count
 
     @property
-    def active_session_id(self) -> str | None:
-        """当前活跃 session 的 ID。"""
+    def active_session_id(self) -> str:
+        """当前激活 Session 的稳定 ID。"""
         return self._active_session_id
+
+    @property
+    def _active_runtime(self) -> SessionRuntime:
+        """当前激活 Session 运行时。"""
+        return self._session_runtimes[self._active_session_id]
 
     # ----------------------------------------------------------------
     # Session 管理
@@ -186,110 +221,109 @@ class ContextManager:
 
     def create_session(
         self,
-        from_node_id: str | None = None,
+        *,
+        origin_session_id: str | None = None,
+        origin_node_id: str | None = None,
         system_prompt: str | None = None,
-        session_name: str | None = None,
-        session_metadata: dict[str, Any] | None = None,
-    ) -> Session:
-        """创建新 session（分支）。
+        initial_state: dict[str, Any] | None = None,
+        initial_messages: list[Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ActionSession:
+        """创建拥有独立 Root 的 Session，不隐式激活。
 
-        从指定节点处 fork 出新分支。如果不指定 from_node_id，
-        则从当前活跃分支的 head 创建。
-
-        Args:
-            from_node_id: fork 起始节点 ID（None 表示当前活跃 head）
-            system_prompt: 新 session 的系统提示词（None 继承当前）
-            session_name: 人类可读的分支名（None 自动生成）
-            session_metadata: session 的扩展元数据
-
-        Returns:
-            新创建的 Session 实例
+        传入 origin_session_id + origin_node_id 时，新 Root 复制来源节点的
+        state/messages，但 parent_id 仍为 None。
         """
-        # 确定起始节点
-        if from_node_id is None:
-            parent_node = self._chain.active_head
-            if parent_node is None:
-                raise ValueError("Cannot create session from empty chain.")
-            from_node_id = parent_node.id
-        else:
-            parent_node = self._chain.checkout(from_node_id)
-            if parent_node is None:
-                raise ValueError(f"Node '{from_node_id}' not found.")
+        self._ensure_not_in_iteration("create a session")
+        if (origin_session_id is None) != (origin_node_id is None):
+            raise ValueError(
+                "origin_session_id and origin_node_id must either both be set or both be None"
+            )
+        if origin_session_id is not None and (
+            initial_state is not None or initial_messages is not None
+        ):
+            raise ValueError("origin context and explicit initial context are mutually exclusive")
 
-        # 生成分支名
-        if session_name is None:
-            session_name = f"session-{len(self._sessions) + 1}"
+        effective_prompt = self._system_prompt if system_prompt is None else system_prompt
+        effective_state = initial_state or {}
+        effective_messages = list(initial_messages or [])
+        if origin_session_id is not None and origin_node_id is not None:
+            source = self._get_runtime(origin_session_id)
+            source_node = source.chain.checkout(origin_node_id)
+            if source_node is None:
+                raise ValueError(
+                    f"Node '{origin_node_id}' not found in session '{origin_session_id}'."
+                )
+            effective_state = source_node.agent_state
+            effective_messages = self._messages_from_history(
+                source.chain.get_history_from(origin_node_id)
+            )
+            effective_messages = [
+                message
+                for message in effective_messages
+                if getattr(message, "role", None) != "system"
+            ]
 
-        # 获取当前活跃 session 的信息
-        current_session = self._sessions.get(self._active_session_id or "")
+        if effective_prompt:
+            if self._message_factory is None:
+                raise ValueError("message_factory is required when system_prompt is provided")
+            system_message = self._message_factory.create_message(
+                role="system", text=effective_prompt
+            )
+            effective_messages.insert(0, system_message)
 
-        # 在 ActionChain 中 fork
-        fork_node = self._chain.fork(
-            branch_name=session_name,
-            parent_id=from_node_id,
-            ability_names=["session"],
-            metadata={
-                "fork_from": from_node_id,
-                "fork_branch": session_name,
-                "session_created": True,
-            },
-            session_id="",  # session_id 还没生成，下面补上
-        )
-
-        # 创建 Session 对象
-        session = Session(
+        runtime = SessionRuntime.create(
             agent_name=self._agent_name,
-            branch_name=session_name,
-            parent_node_id=from_node_id,
-            parent_session_id=self._active_session_id,
-            system_prompt=system_prompt
-            or (current_session.system_prompt if current_session else ""),
-            metadata=session_metadata or {},
+            system_prompt=effective_prompt,
+            agent_state=effective_state,
+            messages=effective_messages,
+            origin_session_id=origin_session_id,
+            origin_node_id=origin_node_id,
+            metadata=metadata,
         )
+        self._session_runtimes[runtime.session.session_id] = runtime
+        if self._auto_persist and self._persistence is not None:
+            self._schedule_changes(
+                ContextChanges(
+                    agent_name=self._agent_name,
+                    sessions=(runtime.session,),
+                    branches=tuple(runtime.branches.values()),
+                    nodes=(runtime.active_head,),
+                    active_session_id=self._active_session_id,
+                ),
+                label=f"create session {runtime.session.session_id}",
+            )
+        return runtime.session
 
-        # 用 dataclasses.replace 更新 fork 节点的 session_id
-        # 因为 ContextNode 是 frozen 的，需要创建新节点替换
-        updated_fork = dataclasses.replace(fork_node, session_id=session.session_id)
-        self._chain.replace_node(updated_fork)
+    def list_sessions(self, *, include_deleted: bool = False) -> list[ActionSession]:
+        """列出独立 Root Session；默认隐藏删除墓碑。"""
+        sessions = [runtime.session for runtime in self._session_runtimes.values()]
+        if include_deleted:
+            return sessions
+        return [session for session in sessions if not session.metadata.get("deleted")]
 
-        self._sessions[session.session_id] = session
-        self._active_session_id = session.session_id
+    def get_active_session(self) -> ActionSession:
+        """获取当前激活 Session。"""
+        return self._active_runtime.session
 
-        return session
-
-    def list_sessions(self) -> list[Session]:
-        """列出所有 session。"""
-        return list(self._sessions.values())
-
-    def get_active_session(self) -> Session:
-        """获取当前活跃 session。"""
-        if self._active_session_id is None:
-            raise RuntimeError("No active session.")
-        return self._sessions[self._active_session_id]
-
-    def switch_session(self, session_id: str) -> None:
-        """切换到指定 session。
-
-        恢复目标 session 对应的 branch head 的状态和消息。
-
-        Args:
-            session_id: 目标 session ID
-
-        Raises:
-            ValueError: session 不存在
-        """
-        if session_id not in self._sessions:
-            raise ValueError(f"Session '{session_id}' not found.")
-        session = self._sessions[session_id]
-        self._chain.set_active_branch(session.branch_name)
+    def activate_session(self, session_id: str) -> None:
+        """显式激活 Session 并完整恢复其记忆的 Branch Head 上下文。"""
+        self._ensure_not_in_iteration("activate a session")
+        runtime = self._get_runtime(session_id)
+        if runtime.session.metadata.get("deleted"):
+            raise ValueError("Cannot activate a deleted session.")
         self._active_session_id = session_id
+        self._restore_active_context()
+        if self._auto_persist and self._persistence is not None:
+            self._schedule_changes(
+                ContextChanges(
+                    agent_name=self._agent_name,
+                    active_session_id=self._active_session_id,
+                ),
+                label=f"activate session {session_id}",
+            )
 
-        # 从 branch head 的状态恢复
-        branch_head = self._chain.active_head
-        if branch_head:
-            self._state_manager.reset(branch_head.agent_state)
-
-    def get_session(self, session_id: str) -> Session:
+    def get_session(self, session_id: str) -> ActionSession:
         """获取指定 ID 的 session。
 
         Args:
@@ -301,24 +335,79 @@ class ContextManager:
         Raises:
             KeyError: session 不存在
         """
-        if session_id not in self._sessions:
+        if session_id not in self._session_runtimes:
             raise KeyError(f"Session '{session_id}' not found.")
-        return self._sessions[session_id]
+        return self._session_runtimes[session_id].session
 
-    def get_branch_head(self, branch_name: str) -> ContextNode | None:
-        """获取指定分支的头节点。
+    def create_branch(
+        self,
+        *,
+        session_id: str,
+        name: str,
+        from_node_id: str | None = None,
+        parent_branch_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> ActionBranch:
+        """在同一 Session 内从指定节点创建 Branch，不隐式激活。"""
+        self._ensure_not_in_iteration("create a branch")
+        runtime = self._get_runtime(session_id)
+        if runtime.session.metadata.get("deleted"):
+            raise ValueError("Cannot create a branch in a deleted session.")
+        branch = runtime.create_branch(
+            name=name,
+            parent_branch_id=parent_branch_id,
+            fork_point_node_id=from_node_id,
+            metadata=metadata,
+        )
+        if self._auto_persist and self._persistence is not None:
+            self._schedule_changes(
+                ContextChanges(
+                    agent_name=self._agent_name,
+                    branches=(branch,),
+                ),
+                label=f"create branch {branch.branch_id}",
+            )
+        return branch
 
-        委托给 ActionChain.get_branch_head()。
+    def list_branches(
+        self, session_id: str, *, include_deleted: bool = False
+    ) -> list[ActionBranch]:
+        """列出 Session 内的 Branch；默认隐藏删除墓碑。"""
+        branches = list(self._get_runtime(session_id).branches.values())
+        if include_deleted:
+            return branches
+        return [branch for branch in branches if not branch.metadata.get("deleted")]
 
-        Args:
-            branch_name: 分支名称
+    def activate_branch(self, session_id: str, branch_id: str) -> None:
+        """显式激活当前 Session 内的 Branch 并完整恢复上下文。"""
+        self._ensure_not_in_iteration("activate a branch")
+        if session_id != self._active_session_id:
+            raise ValueError("activate the session before activating one of its branches")
+        runtime = self._get_runtime(session_id)
+        if runtime.get_branch(branch_id).metadata.get("deleted"):
+            raise ValueError("Cannot activate a deleted branch.")
+        runtime.activate_branch(branch_id)
+        self._restore_active_context()
+        if self._auto_persist and self._persistence is not None:
+            self._schedule_changes(
+                ContextChanges(
+                    agent_name=self._agent_name,
+                    sessions=(runtime.session,),
+                    active_session_id=self._active_session_id,
+                ),
+                label=f"activate branch {branch_id}",
+            )
 
-        Returns:
-            分支头 ContextNode，不存在则返回 None
-        """
-        return self._chain.get_branch_head(branch_name)
+    def get_branch_head(self, session_id: str, branch_id: str) -> ContextNode:
+        """获取指定 Session/Branch 的 Head。"""
+        runtime = self._get_runtime(session_id)
+        branch = runtime.get_branch(branch_id)
+        node = runtime.chain.checkout(branch.head_node_id)
+        if node is None:  # pragma: no cover - SessionRuntime 已校验
+            raise RuntimeError("branch head is missing")
+        return node
 
-    def archive_session(self, session_id: str) -> Session:
+    def archive_session(self, session_id: str) -> ActionSession:
         """归档指定 session（标记 metadata.archived=True）。
 
         Args:
@@ -330,17 +419,24 @@ class ContextManager:
         Raises:
             KeyError: session 不存在
         """
-        if session_id not in self._sessions:
-            raise KeyError(f"Session '{session_id}' not found.")
-        session = self._sessions[session_id]
+        self._ensure_not_in_iteration("archive a session")
+        runtime = self._get_runtime(session_id, error_type=KeyError)
+        if session_id == self._active_session_id:
+            raise ValueError("Cannot archive the active session.")
+        session = runtime.session
         archived = dataclasses.replace(
             session,
             metadata={**session.metadata, "archived": True},
         )
-        self._sessions[session_id] = archived
+        runtime.session = archived
+        if self._auto_persist and self._persistence is not None:
+            self._schedule_changes(
+                ContextChanges(agent_name=self._agent_name, sessions=(archived,)),
+                label=f"archive session {session_id}",
+            )
         return archived
 
-    def delete_session(self, session_id: str) -> Session:
+    def delete_session(self, session_id: str) -> ActionSession:
         """删除指定 session。
 
         不能删除当前活跃的 session。
@@ -355,11 +451,108 @@ class ContextManager:
             KeyError: session 不存在
             ValueError: 试图删除当前活跃 session
         """
-        if session_id not in self._sessions:
+        if session_id not in self._session_runtimes:
             raise KeyError(f"Session '{session_id}' not found.")
         if session_id == self._active_session_id:
             raise ValueError("Cannot delete the active session.")
-        return self._sessions.pop(session_id)
+        self._ensure_not_in_iteration("delete a session")
+        runtime = self._session_runtimes[session_id]
+        deleted = dataclasses.replace(
+            runtime.session,
+            metadata={**runtime.session.metadata, "deleted": True},
+        )
+        runtime.session = deleted
+        if self._auto_persist and self._persistence is not None:
+            self._schedule_changes(
+                ContextChanges(
+                    agent_name=self._agent_name,
+                    sessions=(deleted,),
+                ),
+                label=f"delete session {session_id}",
+            )
+        return deleted
+
+    def archive_branch(self, session_id: str, branch_id: str) -> ActionBranch:
+        """归档非运行 Branch，同时保留不可变节点的来源引用。"""
+        self._ensure_not_in_iteration("archive a branch")
+        runtime = self._get_runtime(session_id)
+        if session_id == self._active_session_id and branch_id == runtime.session.active_branch_id:
+            raise ValueError("Cannot archive the active branch.")
+        branch = runtime.get_branch(branch_id)
+        archived = dataclasses.replace(
+            branch,
+            metadata={**branch.metadata, "archived": True},
+        )
+        runtime.branches[branch_id] = archived
+        if self._auto_persist and self._persistence is not None:
+            self._schedule_changes(
+                ContextChanges(agent_name=self._agent_name, branches=(archived,)),
+                label=f"archive branch {branch_id}",
+            )
+        return archived
+
+    def delete_branch(self, session_id: str, branch_id: str) -> ActionBranch:
+        """删除非运行 Branch（墓碑），不破坏节点 provenance 与拓扑。"""
+        self._ensure_not_in_iteration("delete a branch")
+        runtime = self._get_runtime(session_id)
+        if session_id == self._active_session_id and branch_id == runtime.session.active_branch_id:
+            raise ValueError("Cannot delete the active branch.")
+        branch = runtime.get_branch(branch_id)
+        deleted = dataclasses.replace(
+            branch,
+            metadata={**branch.metadata, "deleted": True},
+        )
+        runtime.branches[branch_id] = deleted
+        if self._auto_persist and self._persistence is not None:
+            self._schedule_changes(
+                ContextChanges(agent_name=self._agent_name, branches=(deleted,)),
+                label=f"delete branch {branch_id}",
+            )
+        return deleted
+
+    def _get_runtime(
+        self, session_id: str, *, error_type: type[Exception] = ValueError
+    ) -> SessionRuntime:
+        """获取 SessionRuntime，并统一产生领域错误。"""
+        try:
+            return self._session_runtimes[session_id]
+        except KeyError as exc:
+            raise error_type(f"Session '{session_id}' not found.") from exc
+
+    def _ensure_not_in_iteration(self, operation: str) -> None:
+        """禁止在迭代事务中改变运行 Head。"""
+        if self._in_iteration:
+            raise RuntimeError(f"Cannot {operation} during an iteration")
+
+    @staticmethod
+    def _messages_from_history(history: list[ContextNode]) -> list[Any]:
+        """从最近快照与后续 delta 重建 Head 消息。"""
+        snapshot_index = next(
+            (
+                index
+                for index in range(len(history) - 1, -1, -1)
+                if history[index].is_snapshot and history[index].messages_snapshot is not None
+            ),
+            None,
+        )
+        if snapshot_index is None:
+            return [message for node in history for message in node.messages_delta]
+        messages = list(history[snapshot_index].messages_snapshot or [])
+        for node in history[snapshot_index + 1 :]:
+            messages.extend(node.messages_delta)
+        return messages
+
+    def _restore_active_context(self) -> None:
+        """从当前 Session/Branch Head 恢复 state 与 MessageStore。"""
+        runtime = self._active_runtime
+        head = runtime.active_head
+        messages = self._messages_from_history(runtime.get_history())
+        self._state_manager.reset(head.agent_state)
+        self._message_store = MessageStore(snapshot_interval=self._message_store.snapshot_interval)
+        self._message_store.extend(messages)
+        self._message_store.take_snapshot(head.iteration)
+        self._system_prompt = runtime.session.system_prompt
+        self._pending_messages = []
 
     # ----------------------------------------------------------------
     # 迭代生命周期
@@ -402,9 +595,6 @@ class ContextManager:
 
         消息在 commit_iteration 时才写入 MessageStore，
         rollback_iteration 时会被丢弃。
-
-        如果不在迭代中（_in_iteration=False），直接写入 MessageStore。
-        这种模式用于迭代外的消息注入（如 system_prompt 初始化）。
 
         Args:
             messages: ChatMessage 列表
@@ -465,9 +655,8 @@ class ContextManager:
         # 3. 将 pending_messages 写入 MessageStore
         self._message_store.extend(self._pending_messages)
 
-        # 4. 计算迭代号（基于 chain head）
-        head = self._chain.active_head
-        iteration = (head.iteration + 1) if head else 0
+        # 4. 计算迭代号（基于当前 Branch Head）
+        iteration = self._active_runtime.active_head.iteration + 1
 
         # 5. delta 为当前轮次新增的消息
         delta = list(self._pending_messages)
@@ -484,11 +673,8 @@ class ContextManager:
         if llm_metadata:
             node_metadata.update(llm_metadata)
 
-        # 8. 获取活跃 session 信息
-        active_session_id = self._active_session_id or ""
-
-        # 9. 创建链式节点
-        node = self._chain.commit_node(
+        # 8. 创建链式节点并前移当前 Branch Head
+        node = self._active_runtime.commit_node(
             ability_names=effective_names,
             agent_state=new_state,
             messages_delta=delta,
@@ -496,7 +682,6 @@ class ContextManager:
             is_snapshot=is_snapshot,
             action_results=effective_result or [],
             metadata=node_metadata or None,
-            session_id=active_session_id,
         )
 
         # 10. 清理迭代状态
@@ -513,27 +698,20 @@ class ContextManager:
     # 回滚即分支
     # ----------------------------------------------------------------
 
-    def rollback_iteration(self, error: Exception) -> ContextNode:
-        """回滚当前迭代，自动创建新 branch/session 从回滚目标重新开始。
+    def rollback_iteration(self, error: Exception) -> ActionBranch:
+        """回滚未提交迭代，从当前 Head 创建并激活重试 Branch。
 
-        流程：
-        1. 回滚状态事务（恢复到迭代前）
-        2. 丢弃 pending_messages（不写入 MessageStore）
-        3. 确定回滚目标：当前 branch head 的前驱节点
-        4. 创建新 session（自动命名 rollback-{n}）
-        5. 通过 ActionChain.fork() 从回滚目标节点创建新 branch
-        6. fork 节点的 metadata 记录 rollback 事件
-        7. 切换到新 session
+        未提交迭代不会产生 ContextNode，因此重试 Branch 的 fork point 就是
+        迭代开始时的 Head。错误信息存在 Branch metadata 中。
 
         Args:
             error: 导致回滚的异常
 
         Returns:
-            fork 节点（rollback branch 的起点）
+            新创建并已激活的重试 Branch
 
         Raises:
             RuntimeError: 没有活跃的迭代
-            ValueError: 无法回滚（没有前驱节点可回退到）
         """
         if not self._in_iteration:
             raise RuntimeError("No iteration in progress")
@@ -541,77 +719,40 @@ class ContextManager:
         # 1. 回滚状态事务
         self._state_manager.rollback()
 
-        # 2. 确定回滚目标：当前活跃 branch head 的前驱节点
-        #    如果活跃 head 没有前驱节点（根节点），回滚目标是根节点自身
-        current_head = self._chain.active_head
-        if current_head is None:
-            # 不应该发生：活跃分支没有 head
-            self._pending_messages = []
-            self._in_iteration = False
-            raise ValueError("Cannot rollback: no active branch head.")
-
-        if current_head.parent_id is None:
-            # 根节点：回滚到根节点自身，fork 仍在根节点上
-            rollback_target_id = current_head.id
-        else:
-            rollback_target_id = current_head.parent_id
-
-        # 4. 生成分支名
-        rollback_branch = f"rollback-{len(self._sessions) + 1}"
-
-        # 5. 获取当前 session 信息用于 rollback metadata
-        current_session_id = self._active_session_id or ""
-
-        # 6. 通过 fork 创建新 branch，从回滚目标节点开始
-        fork_node = self._chain.fork(
-            branch_name=rollback_branch,
-            parent_id=rollback_target_id,
-            ability_names=["rollback"],
+        runtime = self._active_runtime
+        current_branch = runtime.active_branch
+        current_head = runtime.active_head
+        retry_number = len(runtime.branches)
+        branch = runtime.create_branch(
+            name=f"retry-{retry_number}",
+            parent_branch_id=current_branch.branch_id,
+            fork_point_node_id=current_head.id,
             metadata={
                 "is_rollback": True,
-                "rollback_from_branch": current_head.branch_name,
+                "rollback_from_branch_id": current_branch.branch_id,
                 "rollback_from_node_id": current_head.id,
-                "rollback_to_node_id": rollback_target_id,
-                "error": str(error),
-                "error_type": type(error).__name__,
-            },
-            session_id=current_session_id,
-        )
-
-        # 7. 创建 rollback session
-        current_session = self._sessions.get(current_session_id)
-        session = Session(
-            agent_name=self._agent_name,
-            branch_name=rollback_branch,
-            parent_node_id=rollback_target_id,
-            parent_session_id=current_session_id,
-            system_prompt=current_session.system_prompt if current_session else "",
-            metadata={
-                "is_rollback": True,
-                "rollback_from_branch": current_head.branch_name,
-                "rollback_from_node_id": current_head.id,
-                "rollback_to_node_id": rollback_target_id,
+                "rollback_to_node_id": current_head.id,
                 "error": str(error),
                 "error_type": type(error).__name__,
             },
         )
-
-        # 更新 fork 节点的 session_id
-        updated_fork = dataclasses.replace(fork_node, session_id=session.session_id)
-        self._chain.replace_node(updated_fork)
-
-        self._sessions[session.session_id] = session
-        self._active_session_id = session.session_id
+        runtime.activate_branch(branch.branch_id)
 
         # 8. 清理迭代状态
         self._pending_messages = []
         self._in_iteration = False
 
-        # 9. 自动持久化 fork 节点（如果启用）
         if self._auto_persist and self._persistence is not None:
-            self._schedule_persist_node(updated_fork)
-
-        return updated_fork
+            self._schedule_changes(
+                ContextChanges(
+                    agent_name=self._agent_name,
+                    sessions=(runtime.session,),
+                    branches=(branch,),
+                    active_session_id=self._active_session_id,
+                ),
+                label=f"rollback to branch {branch.branch_id}",
+            )
+        return branch
 
     # ----------------------------------------------------------------
     # 上下文构建
@@ -694,7 +835,7 @@ class ContextManager:
             "output_tokens": 0,
             "total_tokens": 0,
         }
-        for node in self._chain.get_history():
+        for node in self._active_runtime.get_history():
             usage = node.metadata.get("token_usage", {})
             if isinstance(usage, dict):
                 total["input_tokens"] += usage.get("input_tokens", 0)
@@ -744,26 +885,16 @@ class ContextManager:
         )
 
     # ----------------------------------------------------------------
-    # Session 管理（rebase 支持）
-    # ----------------------------------------------------------------
-
-    def replace_session(self, session: Session) -> None:
-        """插入或更新 session，并设为活跃 session。
-
-        用于 rebase 等场景，需要将新的 session 写入并设为活跃。
-        替代原 upsert_session，语义更清晰。
-
-        Args:
-            session: Session 实例
-        """
-        self._sessions[session.session_id] = session
-        self._active_session_id = session.session_id
-
-    # ----------------------------------------------------------------
     # 查询
     # ----------------------------------------------------------------
 
-    def get_history(self, limit: int = -1) -> list[ContextNode]:
+    def get_history(
+        self,
+        limit: int = -1,
+        *,
+        session_id: str | None = None,
+        branch_id: str | None = None,
+    ) -> list[ContextNode]:
         """获取链历史。
 
         Args:
@@ -772,7 +903,18 @@ class ContextManager:
         Returns:
             历史节点列表（根在前）
         """
-        return self._chain.get_history(limit=limit)
+        runtime = self._get_runtime(session_id or self._active_session_id)
+        return runtime.get_history(branch_id=branch_id, limit=limit)
+
+    def get_messages(
+        self,
+        *,
+        session_id: str | None = None,
+        branch_id: str | None = None,
+    ) -> list[Any]:
+        """从指定 Session/Branch Head 重建完整消息上下文。"""
+        history = self.get_history(session_id=session_id, branch_id=branch_id)
+        return self._messages_from_history(history)
 
     def get_current_state(self) -> dict[str, Any]:
         """获取当前状态的深拷贝。
@@ -823,20 +965,21 @@ class ContextManager:
         current.update(partial)
         self._state_manager.reset(new_state=current)
 
-    def get_branch_heads(self) -> dict[str, ContextNode]:
-        """获取所有分支的头节点。
+    def get_branch_heads(self, session_id: str | None = None) -> dict[str, ContextNode]:
+        """获取指定 Session 所有 Branch 的 Head。
 
         Returns:
-            分支名 → head ContextNode 的映射
+            branch_id → Head ContextNode 的映射
         """
+        runtime = self._get_runtime(session_id or self._active_session_id)
         result: dict[str, ContextNode] = {}
-        for branch_name, head_id in self._chain.branches.items():
-            node = self._chain.checkout(head_id)
+        for branch_id, branch in runtime.branches.items():
+            node = runtime.chain.checkout(branch.head_node_id)
             if node is not None:
-                result[branch_name] = node
+                result[branch_id] = node
         return result
 
-    def get_chain_node(self, node_id: str) -> ContextNode | None:
+    def get_chain_node(self, node_id: str, session_id: str | None = None) -> ContextNode | None:
         """获取指定 ID 的链节点。
 
         Args:
@@ -845,7 +988,8 @@ class ContextManager:
         Returns:
             对应的 ContextNode，不存在则返回 None
         """
-        return self._chain.checkout(node_id)
+        runtime = self._get_runtime(session_id or self._active_session_id)
+        return runtime.chain.checkout(node_id)
 
     # ----------------------------------------------------------------
     # 持久化
@@ -877,83 +1021,27 @@ class ContextManager:
             return
 
         async with self._persist_lock:
-            # 在进入 await 写入前捕获同一代的完整内存视图。
-            nodes = list(self._chain._nodes.values())
-            sessions = list(self._sessions.values())
-            branches = dict(self._chain.branches)
-            current_state = self._state_manager.get_snapshot()
-            active_session_id = self._active_session_id or ""
-            messages = list(self._message_store.current_messages)
-
-            # 生产 SQLite/InMemory 后端提供原子 snapshot replace：旧 checkpoint
-            # 只有在所有组成部分写成后才被替换。
-            replace_snapshot = getattr(self._persistence, "replace_snapshot", None)
-            if callable(replace_snapshot):
-                await replace_snapshot(
-                    agent_name=self._agent_name,
-                    nodes=nodes,
-                    sessions=sessions,
-                    branches=branches,
-                    current_state=current_state,
-                    active_session_id=active_session_id,
-                    messages=messages,
-                )
-                logger.debug(
-                    "Atomically persisted context for agent '%s': %d nodes, "
-                    "%d sessions, %d messages",
-                    self._agent_name,
-                    len(nodes),
-                    len(sessions),
-                    len(messages),
-                )
-                return
-
-            # 兼容不支持事务快照的验证型后端。
-            await self._persistence.delete_chain(self._agent_name)
-
-            try:
-                for node in nodes:
-                    await self._persistence.save_node(node)
-
-                for session in sessions:
-                    await self._persistence.save_session(session)
-
-                await self._persistence.save_chain_meta(
-                    agent_name=self._agent_name,
-                    branches=branches,
-                    current_state=current_state,
-                    active_session_id=active_session_id,
-                )
-
-                await self._persistence.save_messages(
-                    agent_name=self._agent_name,
-                    messages=messages,
-                )
-            except Exception:
-                logger.exception(
-                    "Persist failed for agent '%s', cleaning up partial data",
-                    self._agent_name,
-                )
-                await self._persistence.delete_chain(self._agent_name)
-                raise
-
+            runtimes = list(self._session_runtimes.values())
+            changes = ContextChanges(
+                agent_name=self._agent_name,
+                active_session_id=self._active_session_id,
+                sessions=tuple(runtime.session for runtime in runtimes),
+                branches=tuple(
+                    branch for runtime in runtimes for branch in runtime.branches.values()
+                ),
+                nodes=tuple(node for runtime in runtimes for node in runtime.chain.nodes),
+            )
+            await self._persistence.apply_changes(changes)
             logger.debug(
-                "Persisted context for agent '%s': %d nodes, %d sessions, %d messages",
+                "Upserted context for agent '%s': %d sessions, %d branches, %d nodes",
                 self._agent_name,
-                len(nodes),
-                len(sessions),
-                len(messages),
+                len(changes.sessions),
+                len(changes.branches),
+                len(changes.nodes),
             )
 
     async def restore(self, agent_name: str) -> None:
-        """从后端恢复状态，重建 chain、state、messages、sessions。
-
-        恢复流程：
-        1. 加载链元信息（branches + current_state + active_session_id）
-        2. 加载所有节点，重建 ActionChain
-        3. 从 current_state 恢复 StateManager
-        4. 加载消息列表，恢复 MessageStore
-        5. 加载 sessions，恢复 session 映射
+        """从完整 checkpoint 恢复多 SessionRuntime 和当前运行上下文。
 
         Args:
             agent_name: 要恢复的 Agent 名称
@@ -965,157 +1053,36 @@ class ContextManager:
         if self._persistence is None:
             raise RuntimeError("No persistence backend configured")
 
-        # 1. 加载链元信息
-        meta = await self._persistence.load_chain_meta(agent_name)
-        if meta is None:
+        checkpoint = await self._persistence.load_checkpoint(agent_name)
+        if checkpoint is None:
             raise ValueError(f"No persisted data found for agent '{agent_name}'")
 
-        branches, active_session_id, current_state = meta
+        branches_by_session: dict[str, list[ActionBranch]] = {}
+        nodes_by_session: dict[str, list[ContextNode]] = {}
+        for branch in checkpoint.branches:
+            branches_by_session.setdefault(branch.session_id, []).append(branch)
+        for node in checkpoint.nodes:
+            nodes_by_session.setdefault(node.session_id, []).append(node)
 
-        # 2. 加载所有节点，重建 ActionChain
-        nodes = await self._persistence.load_chain(agent_name)
-        if not nodes:
-            raise ValueError(f"No persisted nodes found for agent '{agent_name}'")
-
-        # 在替换任何内存状态前读取并校验完整 checkpoint。存在 meta 并不等于
-        # 可恢复：branch head、parent/session 引用都必须闭合。
-        sessions = await self._persistence.list_sessions(agent_name)
-        messages = await self._persistence.load_messages(agent_name)
-        node_ids = {node.id for node in nodes}
-        roots = [node for node in nodes if node.parent_id is None]
-        if len(roots) != 1:
-            raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': expected one root, "
-                f"found {len(roots)}"
+        runtimes = {
+            session.session_id: SessionRuntime.restore(
+                session=session,
+                branches=branches_by_session.get(session.session_id, []),
+                nodes=nodes_by_session.get(session.session_id, []),
             )
-        if not branches:
-            raise ValueError(f"Invalid checkpoint for agent '{agent_name}': no branches")
-        missing_heads = {
-            branch: head_id for branch, head_id in branches.items() if head_id not in node_ids
+            for session in checkpoint.sessions
         }
-        if missing_heads:
-            raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': missing branch heads {missing_heads}"
-            )
-        missing_parents = {
-            node.id: node.parent_id
-            for node in nodes
-            if node.parent_id is not None and node.parent_id not in node_ids
-        }
-        if missing_parents:
-            raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': missing parents {missing_parents}"
-            )
-        foreign_nodes = [node.id for node in nodes if node.agent_name != agent_name]
-        if foreign_nodes:
-            raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': foreign nodes {foreign_nodes}"
-            )
-        sessions_by_id = {session.session_id: session for session in sessions}
-        if active_session_id and active_session_id not in sessions_by_id:
-            raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': active session "
-                f"'{active_session_id}' not found"
-            )
-        invalid_sessions = [
-            session.session_id
-            for session in sessions
-            if session.agent_name != agent_name or session.branch_name not in branches
-        ]
-        if invalid_sessions:
-            raise ValueError(
-                f"Invalid checkpoint for agent '{agent_name}': invalid sessions {invalid_sessions}"
-            )
-
-        # 重建 chain
         self._agent_name = agent_name
-        self._chain = ActionChain(agent_name)
-
-        # 找到根节点（iteration=0 或 parent_id=None）
-        root = roots[0]
-        self._chain._nodes[root.id] = root
-        self._chain._branches["main"] = root.id
-
-        # 添加其余节点（跳过根节点）
-        for node in nodes:
-            if node.id == root.id:
-                continue
-            self._chain._nodes[node.id] = node
-
-        # 恢复分支映射
-        for branch_name, head_id in branches.items():
-            self._chain._branches[branch_name] = head_id
-
-        # 恢复活跃分支
-        self._sessions = sessions_by_id
-        if active_session_id:
-            # 从 session 映射找到对应的 branch_name
-            active_session = self._sessions.get(active_session_id)
-            if active_session:
-                self._chain._active_branch = active_session.branch_name
-            else:
-                self._chain._active_branch = "main"
-        else:
-            self._chain._active_branch = "main"
-
-        self._active_session_id = active_session_id or None
-
-        # 3. 恢复 StateManager
-        self._state_manager = StateManager(current_state)
-
-        # 4. 恢复 MessageStore；持久化读取已在结构校验前完成。
-        # 只沿 active branch 的 parent 链恢复消息，并优先从最早（通常是根）
-        # snapshot 重放全部 node delta。旧版本在 _build_response 中写过不属于
-        # 任何节点的幽灵 AI 消息；这些消息可能污染后续完整 messages 或较晚
-        # snapshot。以链节点为事实源重放可在首次恢复时自动清理该历史损坏。
-        active_history = self._chain.get_history()
-        snapshot_index = next(
-            (
-                index
-                for index, node in enumerate(active_history)
-                if node.is_snapshot and node.messages_snapshot is not None
-            ),
-            None,
-        )
-        if snapshot_index is not None:
-            snapshot_node = active_history[snapshot_index]
-            deltas = [
-                node.messages_delta
-                for node in active_history[snapshot_index + 1 :]
-                if node.messages_delta
-            ]
-            self._message_store = MessageStore(
-                snapshot_interval=self._message_store.snapshot_interval,
-            )
-            self._message_store.rebuild_from(snapshot_node.messages_snapshot or [], deltas)
-        elif messages:
-            self._message_store = MessageStore(
-                snapshot_interval=self._message_store.snapshot_interval,
-            )
-            self._message_store.extend(messages)
-
-        self._pending_messages = []
+        self._session_runtimes = runtimes
+        self._active_session_id = checkpoint.active_session_id
+        self._restore_active_context()
         self._in_iteration = False
-
-        # 恢复 system_prompt
-        active_session = self._sessions.get(active_session_id) if active_session_id else None
-        if active_session:
-            self._system_prompt = active_session.system_prompt
-        elif not self._sessions:
-            # 旧格式没有 session 数据，需要从根节点的 system message 恢复
-            root_session = Session(
-                agent_name=agent_name,
-                branch_name="main",
-                system_prompt=self._system_prompt,
-            )
-            self._sessions[root_session.session_id] = root_session
-            self._active_session_id = root_session.session_id
 
         logger.debug(
             "Restored context for agent '%s': %d nodes, %d sessions, %d messages",
             agent_name,
-            self._chain.node_count,
-            len(self._sessions),
+            sum(runtime.chain.node_count for runtime in runtimes.values()),
+            len(runtimes),
             self._message_store.count,
         )
 
@@ -1162,31 +1129,43 @@ class ContextManager:
                 strategy.set_llm(llm)
 
     def _schedule_persist_node(self, node: ContextNode) -> None:
-        """后台异步保存包含该节点的完整 checkpoint（不阻塞主循环）。
+        """后台异步保存单节点与对应 Branch Head 变更。
 
         Args:
             node: 要保存的 ContextNode
         """
+        runtime = self._get_runtime(node.session_id)
+        branch = runtime.get_branch(node.created_on_branch_id)
+        self._schedule_changes(
+            ContextChanges(
+                agent_name=self._agent_name,
+                branches=(branch,),
+                nodes=(node,),
+            ),
+            label=f"commit node {node.id}",
+        )
+
+    def _schedule_changes(self, changes: ContextChanges, *, label: str) -> None:
+        """按调度顺序在后台原子应用增量变更集。"""
         if self._persistence is None:
             return
-
         tasks = self._persist_tasks
-        agent_name = self._agent_name
-
-        async def _do_save() -> None:
-            try:
-                await self._persist_complete_checkpoint()
-            except Exception:
-                logger.warning(
-                    "Failed to persist checkpoint at node '%s' for agent '%s'",
-                    node.id,
-                    agent_name,
-                    exc_info=True,
-                )
+        predecessors = tuple(tasks)
+        backend = self._persistence
 
         async def _tracked_save() -> None:
             try:
-                await _do_save()
+                if predecessors:
+                    await asyncio.gather(*predecessors, return_exceptions=True)
+                async with self._persist_lock:
+                    await backend.apply_changes(changes)
+            except Exception:
+                logger.warning(
+                    "Failed to persist %s for agent '%s'",
+                    label,
+                    changes.agent_name,
+                    exc_info=True,
+                )
             finally:
                 tasks.discard(task)
 
@@ -1195,10 +1174,7 @@ class ContextManager:
             task = loop.create_task(_tracked_save())
             tasks.add(task)
         except RuntimeError:
-            logger.debug(
-                "No running event loop, skipping auto-persist for node '%s'",
-                node.id,
-            )
+            logger.debug("No running event loop, skipping auto-persist for %s", label)
 
     # ----------------------------------------------------------------
     # 内部辅助

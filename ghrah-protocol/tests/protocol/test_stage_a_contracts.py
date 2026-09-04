@@ -85,6 +85,8 @@ def test_chain_result_carries_project_and_agent_identity() -> None:
         project_id="p1",
         agent_id="a1",
         agent_name="architect",
+        session_id="s1",
+        branch_id="b1",
     )
     assert result.model_dump()["project_id"] == "p1"
     assert result.model_dump()["agent_id"] == "a1"

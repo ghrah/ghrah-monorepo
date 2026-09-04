@@ -580,8 +580,8 @@ describe("Event payload schemas", () => {
       messages_delta: [],
       action_results: [],
       metadata: {},
-      branch_name: "main",
       session_id: "",
+      created_on_branch_id: "",
       is_snapshot: false,
     });
     // 未提供时无默认值的可选字段应为 undefined。

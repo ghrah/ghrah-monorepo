@@ -6,7 +6,8 @@
 
 核心函数：
 - serialize_node / deserialize_node: ContextNode ↔ dict
-- serialize_session / deserialize_session: Session ↔ dict
+- serialize_action_session / deserialize_action_session: ActionSession ↔ dict
+- serialize_branch / deserialize_branch: ActionBranch ↔ dict
 - serialize_action_result / deserialize_action_result: ActionResult ↔ dict
 - serialize_action_results / deserialize_action_results: action_results 列表 ↔ dict 列表
 - serialize_messages / deserialize_messages: ChatMessage 列表 ↔ dict 列表
@@ -28,15 +29,18 @@ from ghrah.chat.message import ChatMessage
 from ghrah.chat.serialization import (
     deserialize_messages as _chat_deserialize_messages,
 )
+from ghrah.context.action_session import ActionSession
+from ghrah.context.branch import ActionBranch
 from ghrah.context.node import ContextNode
-from ghrah.context.session import Session
 from ghrah.types.results import ActionOutcome, ActionResult
 
 __all__ = [
     "serialize_node",
     "deserialize_node",
-    "serialize_session",
-    "deserialize_session",
+    "serialize_action_session",
+    "deserialize_action_session",
+    "serialize_branch",
+    "deserialize_branch",
     "serialize_action_result",
     "deserialize_action_result",
     "serialize_action_results",
@@ -260,8 +264,8 @@ def serialize_node(node: ContextNode) -> dict[str, Any]:
         "is_snapshot": node.is_snapshot,
         "action_results": serialize_action_results(node.action_results),
         "metadata": node.metadata,
-        "branch_name": node.branch_name,
         "session_id": node.session_id,
+        "created_on_branch_id": node.created_on_branch_id,
     }
 
 
@@ -291,62 +295,76 @@ def deserialize_node(data: dict[str, Any]) -> ContextNode:
         is_snapshot=data["is_snapshot"],
         action_results=deserialize_action_results(data["action_results"]) or [],
         metadata=data["metadata"],
-        branch_name=data["branch_name"],
         session_id=data.get("session_id", ""),
+        created_on_branch_id=data.get("created_on_branch_id", ""),
     )
 
 
-def serialize_session(session: Session) -> dict[str, Any]:
-    """将 Session 序列化为 JSON 兼容的 dict。
-
-    Args:
-        session: Session 实例
-
-    Returns:
-        JSON 兼容的 dict
-    """
+def serialize_action_session(session: ActionSession) -> dict[str, Any]:
+    """将 ActionSession 序列化为 JSON 兼容的 dict。"""
     return {
         "session_id": session.session_id,
         "agent_name": session.agent_name,
-        "branch_name": session.branch_name,
-        "parent_node_id": session.parent_node_id,
-        "parent_session_id": session.parent_session_id,
-        "rebase_from_agent": session.rebase_from_agent,
-        "rebase_from_node_id": session.rebase_from_node_id,
-        "rebase_from_session_id": session.rebase_from_session_id,
+        "root_node_id": session.root_node_id,
+        "active_branch_id": session.active_branch_id,
         "system_prompt": session.system_prompt,
+        "origin_session_id": session.origin_session_id,
+        "origin_node_id": session.origin_node_id,
         "created_at": session.created_at.isoformat(),
         "metadata": json.dumps(session.metadata) if session.metadata else "{}",
     }
 
 
-def deserialize_session(data: dict[str, Any]) -> Session:
-    """从 dict 反序列化为 Session。
-
-    Args:
-        data: serialize_session 产出的 dict
-
-    Returns:
-        Session 实例
-    """
+def deserialize_action_session(data: dict[str, Any]) -> ActionSession:
+    """从 dict 反序列化 ActionSession。"""
     created_at = data["created_at"]
     if isinstance(created_at, str):
         created_at = datetime.fromisoformat(created_at)
-
     metadata = data.get("metadata", "{}")
     if isinstance(metadata, str):
         metadata = json.loads(metadata)
-
-    return Session(
+    return ActionSession(
         session_id=data["session_id"],
         agent_name=data["agent_name"],
-        branch_name=data.get("branch_name", "main"),
-        parent_node_id=data.get("parent_node_id"),
-        parent_session_id=data.get("parent_session_id"),
-        rebase_from_agent=data.get("rebase_from_agent"),
-        rebase_from_node_id=data.get("rebase_from_node_id"),
-        rebase_from_session_id=data.get("rebase_from_session_id"),
+        root_node_id=data["root_node_id"],
+        active_branch_id=data["active_branch_id"],
         system_prompt=data.get("system_prompt", ""),
+        origin_session_id=data.get("origin_session_id"),
+        origin_node_id=data.get("origin_node_id"),
+        created_at=created_at,
+        metadata=metadata,
+    )
+
+
+def serialize_branch(branch: ActionBranch) -> dict[str, Any]:
+    """将 ActionBranch 序列化为 JSON 兼容的 dict。"""
+    return {
+        "branch_id": branch.branch_id,
+        "session_id": branch.session_id,
+        "name": branch.name,
+        "head_node_id": branch.head_node_id,
+        "parent_branch_id": branch.parent_branch_id,
+        "fork_point_node_id": branch.fork_point_node_id,
+        "created_at": branch.created_at.isoformat(),
+        "metadata": json.dumps(branch.metadata) if branch.metadata else "{}",
+    }
+
+
+def deserialize_branch(data: dict[str, Any]) -> ActionBranch:
+    """从 dict 反序列化 ActionBranch。"""
+    created_at = data["created_at"]
+    if isinstance(created_at, str):
+        created_at = datetime.fromisoformat(created_at)
+    metadata = data.get("metadata", "{}")
+    if isinstance(metadata, str):
+        metadata = json.loads(metadata)
+    return ActionBranch(
+        branch_id=data["branch_id"],
+        session_id=data["session_id"],
+        name=data["name"],
+        head_node_id=data["head_node_id"],
+        parent_branch_id=data.get("parent_branch_id"),
+        fork_point_node_id=data.get("fork_point_node_id"),
         created_at=created_at,
         metadata=metadata,
     )

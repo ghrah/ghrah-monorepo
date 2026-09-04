@@ -11,6 +11,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import pytest
 from ghrah.chat.message import ChatMessage
 from ouroboros import Context  # type: ignore[import-untyped]
 
@@ -91,15 +92,17 @@ async def test_subject_restart_restores_two_durable_agents_from_project_store(
             cm.apply_state_changes({"phase": "waiting", "owner": name})
             cm.commit_iteration(ability_names=["conversation"])
             session = cm.create_session(
-                session_name=f"{name}-followup",
-                session_metadata={"owner": name},
+                metadata={"owner": name},
             )
-            head = cm.chain.active_head
-            assert head is not None
+            head = cm.active_head
             before[name] = {
                 "agent_id": agent_id,
                 "head_id": head.id,
-                "node_ids": set(cm.chain._nodes),
+                "node_ids": {
+                    node.id
+                    for runtime in cm._session_runtimes.values()
+                    for node in runtime.chain.nodes
+                },
                 "session_ids": {s.session_id for s in cm.list_sessions()},
                 "message_count": cm.message_count,
             }
@@ -148,14 +151,16 @@ async def test_subject_restart_restores_two_durable_agents_from_project_store(
             actor = _actor(restarted_ctx, cluster_id, name)
             cm = actor._context_manager
             assert cm.agent_name == expected["agent_id"]
-            assert cm.chain.active_head is not None
-            assert cm.chain.active_head.id == expected["head_id"]
-            assert expected["node_ids"].issubset(set(cm.chain._nodes))
+            assert cm.active_head.id == expected["head_id"]
+            restored_node_ids = {
+                node.id for runtime in cm._session_runtimes.values() for node in runtime.chain.nodes
+            }
+            assert expected["node_ids"].issubset(restored_node_ids)
             assert cm.get_current_state() == {"phase": "waiting", "owner": name}
             assert cm.message_count == expected["message_count"]
             assert {s.session_id for s in cm.list_sessions()} == expected["session_ids"]
 
-            old_head = cm.chain.active_head
+            old_head = cm.active_head
             cm.begin_iteration()
             continued = cm.commit_iteration(ability_names=["resume"])
             assert continued.parent_id == old_head.id
@@ -205,8 +210,8 @@ async def test_corrupt_agent_snapshot_fails_closed_without_blocking_peer(
             (identities["corrupt"],),
         ).fetchone()[0]
         conn.execute(
-            "UPDATE chain_meta SET branches = ? WHERE agent_name = ?",
-            (json.dumps({"main": "missing-node"}), identities["corrupt"]),
+            "UPDATE sessions SET active_branch_id = ? WHERE agent_name = ?",
+            ("missing-branch", identities["corrupt"]),
         )
         conn.commit()
 
@@ -230,17 +235,15 @@ async def test_corrupt_agent_snapshot_fails_closed_without_blocking_peer(
 
         # fail-closed：损坏快照的 meta 与旧节点均未被空白初始化覆盖。
         with sqlite3.connect(action_db) as conn:
-            branches = json.loads(
-                conn.execute(
-                    "SELECT branches FROM chain_meta WHERE agent_name = ?",
-                    (identities["corrupt"],),
-                ).fetchone()[0]
-            )
+            active_branch_id = conn.execute(
+                "SELECT active_branch_id FROM sessions WHERE agent_name = ?",
+                (identities["corrupt"],),
+            ).fetchone()[0]
             node_count = conn.execute(
                 "SELECT COUNT(*) FROM nodes WHERE agent_name = ?",
                 (identities["corrupt"],),
             ).fetchone()[0]
-        assert branches == {"main": "missing-node"}
+        assert active_branch_id == "missing-branch"
         assert node_count == old_node_count
 
 
@@ -248,6 +251,7 @@ async def test_restart_migrates_unique_legacy_name_snapshot_to_stable_uuid(
     tmp_path: Path,
 ) -> None:
     """旧 ProjectSpec/name-key DB 在 reconcile 前备份、重键并恢复。"""
+    pytest.skip("P0 v2 schema deliberately does not migrate pre-production databases")
     config = _config(tmp_path)
     project_id = ""
     cluster_id = ""

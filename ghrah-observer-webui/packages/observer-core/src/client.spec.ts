@@ -159,11 +159,13 @@ describe("ObserverClient", () => {
   describe("getChainHistory", () => {
     it("builds correct get_chain_history payload", async () => {
       await connectClient(client, mockWs);
-      const msgPromise = client.getChainHistory("planner", 50);
+      const msgPromise = client.getChainHistory("planner", "p1", "a1", "s1", "b1", 50);
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.type).toBe(CommandType.GET_CHAIN_HISTORY);
       expect(parsed.payload.agent_name).toBe("planner");
+      expect(parsed.payload.session_id).toBe("s1");
+      expect(parsed.payload.branch_id).toBe("b1");
       expect(parsed.payload.limit).toBe(50);
 
       mockWs.onmessage!({
@@ -179,7 +181,7 @@ describe("ObserverClient", () => {
 
     it("includes stable agent and project ids when provided", async () => {
       await connectClient(client, mockWs);
-      const msgPromise = client.getChainHistory("planner", undefined, "p1", "stable-1");
+      const msgPromise = client.getChainHistory("planner", "p1", "stable-1", "s1", "b1");
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.payload).toMatchObject({

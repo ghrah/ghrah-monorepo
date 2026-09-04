@@ -246,14 +246,37 @@ export function connectStores(
             project.agents.some((agent) => agent.name === name),
           )?.project_id;
           const agentId = agent.agent_id ?? agent.config.agent_id;
-          const res =
-            projectId || agentId
-              ? await client.getChainHistory(name, undefined, projectId, agentId)
-              : await client.getChainHistory(name);
-          if (!res.success || !res.data) return;
-          const nodes = (res.data as Record<string, unknown>).nodes;
-          if (Array.isArray(nodes)) {
-            chains.setChain(name, nodes as ActionNode[]);
+          if (!projectId || !agentId) return;
+          const sessionsResult = await client.listSessions(name, projectId, agentId);
+          const sessions = (sessionsResult.data as Record<string, unknown> | null)?.sessions;
+          if (!sessionsResult.success || !Array.isArray(sessions)) return;
+          const histories = await Promise.all(
+            sessions.flatMap((session) => {
+              const sessionId = (session as Record<string, unknown>).session_id;
+              if (typeof sessionId !== "string") return [];
+              return [
+                client.listBranches(name, projectId, agentId, sessionId).then(async (result) => {
+                  const branches = (result.data as Record<string, unknown> | null)?.branches;
+                  if (!result.success || !Array.isArray(branches)) return [];
+                  const branchHistories = await Promise.all(
+                    branches.flatMap((branch) => {
+                      const branchId = (branch as Record<string, unknown>).branch_id;
+                      return typeof branchId === "string"
+                        ? [client.getChainHistory(name, projectId, agentId, sessionId, branchId)]
+                        : [];
+                    }),
+                  );
+                  return branchHistories.flatMap((history) => {
+                    const nodes = (history.data as Record<string, unknown> | null)?.nodes;
+                    return history.success && Array.isArray(nodes) ? (nodes as ActionNode[]) : [];
+                  });
+                }),
+              ];
+            }),
+          );
+          const nodes = histories.flat();
+          if (nodes.length > 0) {
+            chains.setChain(name, nodes);
           }
         } catch {
           // 单个 agent 链读失败不影响其余；增量事件会兜底

@@ -403,4 +403,63 @@ describe("mock-server 协议层", () => {
       await client.disconnect();
     }
   }, 10_000);
+
+  it("ActionChain v2：独立 Root Session、稳定 Branch ID 与显式历史路由", async () => {
+    const client = await makeClient();
+    try {
+      const project = await request(client, CommandType.PROJECT_CREATE, { name: "chain-project" });
+      const projectId = (project.data as { project: { project_id: string } }).project.project_id;
+      const agentId = "mock-agent-id";
+      await request(client, CommandType.SPAWN_AGENT, {
+        project_id: projectId,
+        config: { name: "planner", agent_id: agentId },
+      });
+      const scope = { project_id: projectId, agent_id: agentId, agent_name: "planner" };
+
+      const listed = await request(client, CommandType.SESSION_LIST, scope);
+      const [first] = (listed.data as { sessions: { session_id: string; root_node_id: string }[] })
+        .sessions;
+      const created = await request(client, CommandType.SESSION_CREATE, {
+        ...scope,
+        origin_session_id: first.session_id,
+        origin_node_id: first.root_node_id,
+      });
+      const second = created.data as {
+        session_id: string;
+        root_node_id: string;
+        active_branch_id: string;
+      };
+      expect(second.root_node_id).not.toBe(first.root_node_id);
+
+      await request(client, CommandType.SESSION_ACTIVATE, {
+        ...scope,
+        session_id: second.session_id,
+      });
+      const branchResult = await request(client, CommandType.BRANCH_CREATE, {
+        ...scope,
+        session_id: second.session_id,
+        name: "retry-1",
+        from_node_id: second.root_node_id,
+      });
+      const retry = branchResult.data as { branch_id: string };
+      await request(client, CommandType.BRANCH_ACTIVATE, {
+        ...scope,
+        session_id: second.session_id,
+        branch_id: retry.branch_id,
+      });
+
+      const history = await request(client, CommandType.GET_CHAIN_HISTORY, {
+        ...scope,
+        session_id: second.session_id,
+        branch_id: retry.branch_id,
+        limit: -1,
+      });
+      const nodes = (history.data as { nodes: { id: string; parent_id: string | null }[] }).nodes;
+      expect(nodes.map(({ id, parent_id }) => ({ id, parent_id }))).toEqual([
+        { id: second.root_node_id, parent_id: null },
+      ]);
+    } finally {
+      await client.disconnect();
+    }
+  }, 10_000);
 });

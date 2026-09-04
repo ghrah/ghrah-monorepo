@@ -670,6 +670,60 @@ describe("connectStores", () => {
       const nodeA = { id: "na", ability_names: ["conversation"] };
       const nodeB = { id: "nb", ability_names: ["send"] };
 
+      useProjectsStore().setProjectsFromList([
+        {
+          project_id: "p1",
+          name: "project",
+          description: "",
+          project_root_locator: "",
+          manifest_ref: "",
+          cluster_ids: [],
+          workspaces: [],
+          agents: [
+            {
+              name: "agent-1",
+              agent_id: "a1",
+              cluster_id: "c1",
+              manifest_ref: "",
+              instance_manifest_path: "",
+              system_prompt: "",
+              path_grants: [],
+            },
+            {
+              name: "agent-2",
+              agent_id: "a2",
+              cluster_id: "c1",
+              manifest_ref: "",
+              instance_manifest_path: "",
+              system_prompt: "",
+              path_grants: [],
+            },
+          ],
+          task_ids: [],
+          status: "active",
+          recovery: "resume",
+          version: 1,
+          created_at: "",
+          updated_at: "",
+          archived_at: null,
+          deleted_at: null,
+        },
+      ]);
+      vi.spyOn(client, "listSessions").mockImplementation((name: string) =>
+        Promise.resolve({
+          request_id: "s",
+          success: true,
+          data: { sessions: [{ session_id: `s-${name}` }] },
+        } as Awaited<ReturnType<typeof client.listSessions>>),
+      );
+      vi.spyOn(client, "listBranches").mockImplementation((name: string) =>
+        Promise.resolve({
+          request_id: "b",
+          success: true,
+          data: { branches: [{ branch_id: `b-${name}` }] },
+        } as Awaited<ReturnType<typeof client.listBranches>>),
+      );
+
       const spy = vi.spyOn(client, "getChainHistory").mockImplementation((name: string) => {
         const nodes = name === "agent-1" ? [nodeA] : [nodeB];
         return Promise.resolve({
@@ -688,8 +742,16 @@ describe("connectStores", () => {
           original_command: CommandType.LIST_AGENTS,
           data: {
             agents: [
-              { name: "agent-1", config: { ...DEFAULT_CONFIG, name: "agent-1" } },
-              { name: "agent-2", config: { ...DEFAULT_CONFIG, name: "agent-2" } },
+              {
+                name: "agent-1",
+                agent_id: "a1",
+                config: { ...DEFAULT_CONFIG, name: "agent-1", agent_id: "a1" },
+              },
+              {
+                name: "agent-2",
+                agent_id: "a2",
+                config: { ...DEFAULT_CONFIG, name: "agent-2", agent_id: "a2" },
+              },
             ],
           },
         }),
@@ -697,15 +759,15 @@ describe("connectStores", () => {
 
       // fire-and-forget：等待两个 getChainHistory 完成
       await vi.waitFor(() => {
-        expect(spy).toHaveBeenCalledWith("agent-1");
-        expect(spy).toHaveBeenCalledWith("agent-2");
+        expect(spy).toHaveBeenCalledWith("agent-1", "p1", "a1", "s-agent-1", "b-agent-1");
+        expect(spy).toHaveBeenCalledWith("agent-2", "p1", "a2", "s-agent-2", "b-agent-2");
       });
       expect(chainStore.getChain("agent-1")).toHaveLength(1);
       expect(chainStore.getChain("agent-1")[0].id).toBe("na");
       expect(chainStore.getChain("agent-2")[0].id).toBe("nb");
     });
 
-    it("F2: initial chain sync uses stable agent_id before project list arrives", async () => {
+    it("F2: initial chain sync waits for complete project and agent scope", async () => {
       await connectClient();
       const spy = vi.spyOn(client, "getChainHistory").mockResolvedValue({
         request_id: "r",
@@ -732,9 +794,8 @@ describe("connectStores", () => {
         }),
       );
 
-      await vi.waitFor(() => {
-        expect(spy).toHaveBeenCalledWith("shuoxi", undefined, undefined, "stable-shuoxi");
-      });
+      await Promise.resolve();
+      expect(spy).not.toHaveBeenCalled();
     });
 
     it("sets rooms on room_list command_result", async () => {

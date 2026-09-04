@@ -45,8 +45,8 @@ class ContextNode:
         is_snapshot: 是否为快照节点
         action_results: 本轮执行结果列表，每项为 dict 包含 ability_name 和 action_result
         metadata: 扩展信息（回滚标记、分支信息等）
-        branch_name: 所属分支名
-        session_id: 所属 session 的 ID，空字符串表示根节点或向后兼容
+        session_id: 所属 ActionSession 的稳定 ID
+        created_on_branch_id: 创建该节点的 ActionBranch ID
     """
 
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
@@ -61,11 +61,17 @@ class ContextNode:
     is_snapshot: bool = False
     action_results: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
-    branch_name: str = "main"
     session_id: str = ""
+    created_on_branch_id: str = ""
 
     def __post_init__(self) -> None:
         """确保可变字段在 frozen dataclass 中被隔离（deep copy）。"""
+        if not self.agent_name:
+            raise ValueError("agent_name must not be empty")
+        if not self.session_id:
+            raise ValueError("session_id must not be empty")
+        if not self.created_on_branch_id:
+            raise ValueError("created_on_branch_id must not be empty")
         # frozen dataclass 中不能直接赋值，需要通过 object.__setattr__
         if self.agent_state:
             object.__setattr__(self, "agent_state", copy.deepcopy(self.agent_state))
@@ -86,6 +92,10 @@ class ContextNode:
         agent_name: str,
         agent_state: dict[str, Any] | None = None,
         messages: list[Any] | None = None,
+        *,
+        session_id: str,
+        created_on_branch_id: str,
+        metadata: dict[str, Any] | None = None,
     ) -> ContextNode:
         """创建根节点（parent_id=None, iteration=0, ability_names=['init']）。
 
@@ -95,6 +105,9 @@ class ContextNode:
             agent_name: 所属 Agent 名称
             agent_state: 初始 Agent 状态
             messages: 初始完整消息列表
+            session_id: 所属 ActionSession ID
+            created_on_branch_id: 默认 ActionBranch ID
+            metadata: Root 展示与来源元数据
 
         Returns:
             根节点
@@ -102,9 +115,12 @@ class ContextNode:
         return cls(
             parent_id=None,
             agent_name=agent_name,
+            session_id=session_id,
+            created_on_branch_id=created_on_branch_id,
             iteration=0,
             ability_names=["init"],
             agent_state=agent_state or {},
             messages_snapshot=messages or [],
             is_snapshot=True,
+            metadata=metadata or {},
         )

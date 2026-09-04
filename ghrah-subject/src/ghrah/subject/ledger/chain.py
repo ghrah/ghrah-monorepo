@@ -6,8 +6,8 @@
 
 聚合裁决 D-C：存储真相源 = Core ``ContextManager`` 的 sqlite（per-agent
 链/chain_meta/messages 全在 Core 内建 backend）；本模块退化为 ``chain_history``
-读命令的薄投影——经 Core ``SqliteBackend`` 的 ``load_chain``/
-``load_chain_meta``/``load_node``/``list_agents`` API 按需查询（同一 db
+读命令的薄投影——经 Core ``SqliteBackend`` 的 ``load_checkpoint``/
+``list_agents`` API 按需查询（同一 db
 文件的第二个 WAL 连接），不再持有内存全量缓存，也不再写侧落库
 （旧事件驱动 ``append_node``/``update_chain_meta`` 面已死，随删）。
 
@@ -21,12 +21,16 @@ import logging
 from collections import deque
 from pathlib import Path
 
-from ghrah.context.chain import ActionChain  # type: ignore[import-untyped]
 from ghrah.context.node import ContextNode  # type: ignore[import-untyped]
-from ghrah.context.persistence import serialize_node  # type: ignore[import-untyped]
+from ghrah.context.persistence import (  # type: ignore[import-untyped]
+    serialize_action_session,
+    serialize_branch,
+    serialize_node,
+)
 from ghrah.context.persistence.sqlite_backend import (  # type: ignore[import-untyped]
     SqliteBackend,
 )
+from ghrah.context.session_runtime import SessionRuntime  # type: ignore[import-untyped]
 
 from ghrah.subject.ledger.models import ChainMeta, DAGEntry, LedgerNode
 
@@ -67,33 +71,35 @@ class ActionChainLedger:
 
     # ─── 读 API（按需查询 Core backend） ───
 
-    async def get_node(self, node_id: str) -> ContextNode | None:
-        return await self._backend.load_node(node_id)
-
     async def get_chain_history(
-        self, agent_name: str, branch: str = "main", limit: int = -1
+        self,
+        agent_name: str,
+        session_id: str,
+        branch_id: str,
+        limit: int = -1,
     ) -> list[ContextNode]:
-        chain = await self._build_chain(agent_name)
-        if chain is None:
+        runtime = await self._build_runtime(agent_name, session_id)
+        if runtime is None:
             return []
-        return chain.get_history(branch, limit)  # type: ignore[no-any-return]
+        return runtime.get_history(branch_id=branch_id, limit=limit)
 
-    async def get_branch_head(self, agent_name: str, branch: str = "main") -> ContextNode | None:
-        chain = await self._build_chain(agent_name)
-        if chain is None:
+    async def get_branch_head(
+        self, agent_name: str, session_id: str, branch_id: str
+    ) -> ContextNode | None:
+        runtime = await self._build_runtime(agent_name, session_id)
+        if runtime is None:
             return None
-        return chain.get_branch_head(branch)
+        return runtime.chain.checkout(runtime.get_branch(branch_id).head_node_id)
 
     async def get_chain_meta(self, agent_name: str) -> ChainMeta | None:
-        loaded = await self._backend.load_chain_meta(agent_name)
-        if loaded is None:
+        checkpoint = await self._backend.load_checkpoint(agent_name)
+        if checkpoint is None:
             return None
-        branches, active_session_id, current_state = loaded
         return ChainMeta(
             agent_name=agent_name,
-            branches=branches,
-            current_state=current_state,
-            active_session_id=active_session_id,
+            sessions=[serialize_action_session(item) for item in checkpoint.sessions],
+            branches=[serialize_branch(item) for item in checkpoint.branches],
+            active_session_id=checkpoint.active_session_id,
         )
 
     async def traverse_dag(self, agent_names: list[str] | None = None) -> list[DAGEntry]:
@@ -101,7 +107,8 @@ class ActionChainLedger:
 
         node_index: dict[str, ContextNode] = {}
         for agent_name in targets:
-            for node in await self._backend.load_chain(agent_name):
+            checkpoint = await self._backend.load_checkpoint(agent_name)
+            for node in checkpoint.nodes if checkpoint is not None else ():
                 node_index[node.id] = node
 
         children_map: dict[str, list[str]] = {}
@@ -112,13 +119,11 @@ class ActionChainLedger:
         entries: list[DAGEntry] = []
         seen: set[str] = set()
         for agent_name in targets:
-            chain = await self._build_chain(agent_name)
-            if chain is None:
+            checkpoint = await self._backend.load_checkpoint(agent_name)
+            if checkpoint is None:
                 continue
-            for node in chain.get_history("main"):
-                if node.parent_id is None:
-                    self._traverse_bfs(node.id, node_index, children_map, 0, seen, entries)
-                    break
+            for session in checkpoint.sessions:
+                self._traverse_bfs(session.root_node_id, node_index, children_map, 0, seen, entries)
         return entries
 
     async def list_agents(self) -> list[str]:
@@ -127,14 +132,24 @@ class ActionChainLedger:
     async def node_count(self) -> int:
         total = 0
         for agent_name in await self.list_agents():
-            total += len(await self._backend.load_chain(agent_name))
+            checkpoint = await self._backend.load_checkpoint(agent_name)
+            total += len(checkpoint.nodes) if checkpoint is not None else 0
         return total
 
-    async def _build_chain(self, agent_name: str) -> ActionChain | None:
-        nodes = await self._backend.load_chain(agent_name)
-        if not nodes:
+    async def _build_runtime(self, agent_name: str, session_id: str) -> SessionRuntime | None:
+        checkpoint = await self._backend.load_checkpoint(agent_name)
+        if checkpoint is None:
             return None
-        return ActionChain.rebuild_from_nodes(agent_name, nodes)
+        session = next(
+            (item for item in checkpoint.sessions if item.session_id == session_id), None
+        )
+        if session is None:
+            return None
+        return SessionRuntime.restore(
+            session=session,
+            branches=[item for item in checkpoint.branches if item.session_id == session_id],
+            nodes=[item for item in checkpoint.nodes if item.session_id == session_id],
+        )
 
     def _traverse_bfs(
         self,

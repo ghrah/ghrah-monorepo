@@ -221,7 +221,9 @@ class TestSupervisorPersistenceRecovery:
         committed = first_cm.commit_iteration(ability_names=["conversation"])
         await first.terminate_agent("recoverable")
 
-        old_node_ids = {node.id for node in await backend.load_chain("recoverable")}
+        checkpoint = await backend.load_checkpoint("recoverable")
+        assert checkpoint is not None
+        old_node_ids = {node.id for node in checkpoint.nodes}
         assert committed.id in old_node_ids
 
         restarted = SupervisorActor()
@@ -233,16 +235,17 @@ class TestSupervisorPersistenceRecovery:
         restored_cm = restarted._registry.get_info("recoverable").actor_handle._context_manager
 
         assert restarted.recovery_mode("recoverable") == "restored"
-        assert restored_cm.chain.active_head is not None
-        assert restored_cm.chain.active_head.id == committed.id
+        assert restored_cm.active_head.id == committed.id
         assert restored_cm.get_current_state() == {"phase": "waiting"}
-        assert old_node_ids.issubset({node.id for node in await backend.load_chain("recoverable")})
+        restored_checkpoint = await backend.load_checkpoint("recoverable")
+        assert restored_checkpoint is not None
+        assert old_node_ids.issubset({node.id for node in restored_checkpoint.nodes})
 
     @pytest.mark.asyncio
-    async def test_restore_discards_legacy_messages_not_represented_by_chain_nodes(
+    async def test_checkpoint_rebuilds_messages_from_nodes(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """旧 _build_response 产生的幽灵 AI 消息不能从后期 snapshot 复活。"""
+        """checkpoint 以节点快照与 delta 为消息事实源。"""
         self._patch_builder(monkeypatch)
         backend = InMemoryBackend()
         config = AgentConfig(name="recoverable", system_prompt="stable")
@@ -259,9 +262,6 @@ class TestSupervisorPersistenceRecovery:
                 ]
             )
             cm.commit_iteration(ability_names=["conversation"])
-            if iteration == 1:
-                # 模拟旧版在 commit 后额外追加、因而不属于任何 node delta 的消息。
-                cm.add_messages([ChatMessage.ai(text="ghost")])
         await first.terminate_agent("recoverable")
 
         restarted = SupervisorActor()
@@ -291,11 +291,11 @@ class TestSupervisorPersistenceRecovery:
     ) -> None:
         self._patch_builder(monkeypatch)
         backend = InMemoryBackend()
-        await backend.save_chain_meta(
-            "broken",
-            branches={"main": "missing-node"},
-            current_state={"sentinel": True},
-        )
+
+        async def load_corrupt_checkpoint(agent_name: str) -> None:
+            raise ValueError(f"corrupt checkpoint for {agent_name}")
+
+        monkeypatch.setattr(backend, "load_checkpoint", load_corrupt_checkpoint)
         supervisor = SupervisorActor()
 
         with pytest.raises(RegistryError, match="persistence recovery failed"):
@@ -306,9 +306,6 @@ class TestSupervisorPersistenceRecovery:
             )
 
         assert not supervisor._registry.exists("broken")
-        meta = await backend.load_chain_meta("broken")
-        assert meta is not None
-        assert meta[2] == {"sentinel": True}
 
     @pytest.mark.asyncio
     async def test_restore_first_across_fresh_sqlite_backends(
@@ -341,7 +338,6 @@ class TestSupervisorPersistenceRecovery:
         restored_cm = restarted._registry.get_info("sqlite-agent").actor_handle._context_manager
 
         assert restarted.recovery_mode("sqlite-agent") == "restored"
-        assert restored_cm.chain.active_head is not None
-        assert restored_cm.chain.active_head.id == committed.id
+        assert restored_cm.active_head.id == committed.id
         assert restored_cm.get_current_state() == {"checkpoint": 1}
         await restarted.terminate_agent("sqlite-agent")
