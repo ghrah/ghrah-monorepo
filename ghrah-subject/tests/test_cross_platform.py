@@ -5,29 +5,27 @@
 """跨平台（Windows 兼容）修复的回归测试。
 
 覆盖：locator round-trip（Path.as_uri 规范形态 + 旧式盘符兼容）、
-原子写（含 Windows 目标被占用的重试）、只读目录树删除、可写性探针、
+原子写（含 Windows 目标被占用的重试）、可写性探针、
 blocked 命令归一化（.exe 后缀 / 大小写）、resolve_relative_path 的
-isabs 判定、git init 的 core.autocrlf 关闭。
+isabs 判定。
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 import time
 from pathlib import Path
 
 import pytest
 from ghrah.abilities.paths import is_subpath, resolve_relative_path
 
-from ghrah.subject._fs import atomic_write_text, is_writable, robust_rmtree
+from ghrah.subject._fs import atomic_write_text, is_writable
 from ghrah.subject.sandbox.executor import SandboxExecutor, SandboxExecutorConfig
-from ghrah.subject.workspace.providers.git import (
+from ghrah.subject.workspace.locator import (
     locator_to_path,
     path_to_locator,
 )
 
-requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
 requires_posix = pytest.mark.skipif(os.name != "posix", reason="POSIX only")
 requires_windows = pytest.mark.skipif(os.name != "nt", reason="Windows only")
 
@@ -136,40 +134,6 @@ class TestAtomicWriteText:
         assert list(tmp_path.iterdir()) == []
 
 
-# ─── robust_rmtree ───
-
-
-class TestRobustRmtree:
-    def test_removes_readonly_tree(self, tmp_path: Path) -> None:
-        ws = tmp_path / "ws"
-        inner = ws / "objects" / "ab"
-        inner.mkdir(parents=True)
-        obj = inner / "readonly-obj"
-        obj.write_text("x", encoding="utf-8")
-        try:
-            os.chmod(obj, 0o444)
-            os.chmod(inner, 0o555)
-            robust_rmtree(ws)
-            assert not ws.exists()
-        finally:
-            # 恢复权限，保证 tmp_path 清理不受影响（断言失败路径也要能回收）
-            if inner.exists():
-                os.chmod(inner, 0o755)
-            if obj.exists():
-                os.chmod(obj, 0o644)
-
-    def test_missing_path_is_noop(self, tmp_path: Path) -> None:
-        robust_rmtree(tmp_path / "nope")
-        assert not (tmp_path / "nope").exists()
-
-    def test_removes_plain_tree(self, tmp_path: Path) -> None:
-        ws = tmp_path / "ws"
-        (ws / "sub").mkdir(parents=True)
-        (ws / "sub" / "f.txt").write_text("x", encoding="utf-8")
-        robust_rmtree(ws)
-        assert not ws.exists()
-
-
 # ─── is_writable ───
 
 
@@ -256,27 +220,3 @@ class TestIsSubpathNormalization:
     def test_case_sensitive_on_posix(self) -> None:
         # POSIX 上 normcase 为恒等，保持大小写敏感语义
         assert is_subpath("/tmp/DATA/f.txt", "/tmp/data") is False
-
-
-# ─── git workspace（autocrlf 关闭） ───
-
-
-@requires_git
-class TestGitInitAutocrlf:
-    async def test_init_disables_autocrlf(self, tmp_path: Path) -> None:
-        from ghrah.subject.workspace import GitWorkspaceProvider, WorkspaceRecord
-
-        sandbox = SandboxExecutor(workspace_root=str(tmp_path))
-        await sandbox.start()
-        try:
-            provider = GitWorkspaceProvider(sandbox)
-            ws_path = str(tmp_path / "agent")
-            record = WorkspaceRecord(
-                name="agent", provider_type="git", locator=path_to_locator(ws_path)
-            )
-            await provider.init(record)
-            result = await sandbox.execute_command(["git", "config", "core.autocrlf"], cwd=ws_path)
-            assert result.success is True
-            assert result.stdout.strip() == "false"
-        finally:
-            await sandbox.stop()

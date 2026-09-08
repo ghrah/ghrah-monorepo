@@ -2,51 +2,27 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Workspace 资源模型 + provider 抽象 + 注册表。
+"""Workspace 资源模型 + provider 抽象 + 注册表（挂载语义）。
 
-W1-W3 阶段：models + ABC + git/plain provider + registry。
-后续 W4-W5 在此包下补 store、manager。
+挂载语义：workspace 收敛为「登记 + 授权 + 解挂」，对挂载目录零物理操作。
+store 是唯一注册真相；legacy GitWorkspaceProvider 与 marker 机制已移除
+（快照需求由 shadow-git checkpoint 库承接，backlog）。
 """
 
 from __future__ import annotations
 
 from ghrah.subject.workspace.errors import SnapshotError, WorkspaceProviderError
-from ghrah.subject.workspace.marker import (
-    MARKER_FILENAME,
-    MarkerData,
-    adopt_marker_matches,
-)
-from ghrah.subject.workspace.models import (
-    AdoptResult,
-    SnapshotInfo,
-    WorkspaceRecord,
-    WorkspaceStatus,
-)
-from ghrah.subject.workspace.providers.base import (
-    VersionedWorkspaceProvider,
-    WorkspaceCaps,
-    WorkspaceProvider,
-)
-from ghrah.subject.workspace.providers.git import (
-    GitWorkspaceProvider,
-    locator_to_path,
-    path_to_locator,
-)
+from ghrah.subject.workspace.locator import locator_to_path, path_to_locator
+from ghrah.subject.workspace.models import WorkspaceRecord, WorkspaceStatus
+from ghrah.subject.workspace.providers.base import WorkspaceCaps, WorkspaceProvider
 from ghrah.subject.workspace.providers.plain import PlainWorkspaceProvider
 from ghrah.subject.workspace.registry import ProviderRegistry, build_default_registry
 from ghrah.subject.workspace.store import WorkspaceStore
 
 __all__ = [
-    "AdoptResult",
-    "GitWorkspaceProvider",
-    "MARKER_FILENAME",
-    "MarkerData",
-    "adopt_marker_matches",
     "PlainWorkspaceProvider",
     "ProviderRegistry",
     "SnapshotError",
-    "SnapshotInfo",
-    "VersionedWorkspaceProvider",
     "WorkspaceCaps",
     "WorkspaceProvider",
     "WorkspaceProviderError",

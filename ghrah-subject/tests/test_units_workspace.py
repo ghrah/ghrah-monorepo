@@ -86,6 +86,12 @@ async def test_workspace_unit_registers_typed_service_and_missing_workspace_resu
         assert result["success"] is False
         assert result["error"] == "project_id required"
 
+        # 已退役版本能力命令：静态拒绝（不经 agent 解析，无需 project_id）
+        for command in ("workspace_snapshot", "workspace_rollback", "workspace_diff"):
+            retired = await bridge_command(ctx, command, {"agent_name": "agent-a"})
+            assert retired["success"] is False
+            assert "capability_not_supported" in retired["error"]
+
 
 async def test_core_lifecycle_events_drive_workspace_create_destroy(
     tmp_path: Path,
@@ -166,10 +172,10 @@ async def test_workspace_register_get_list_commands(tmp_path: Path) -> None:
         ids = {w["workspace_id"] for w in lst["data"]["workspaces"]}
         assert wid in ids
 
-        # list：按 plain 过滤只剩 data
+        # list：按 plain 过滤仍含两者（挂载语义下 create 的默认 workspace 也是 plain）
         lst_plain = await bridge_command(ctx, "workspace_list", {"provider_type": "plain"})
         plain_ids = {w["workspace_id"] for w in lst_plain["data"]["workspaces"]}
-        assert plain_ids == {wid}
+        assert wid in plain_ids
 
 
 async def test_workspace_on_ouroboros_mount_route_dispose_remount(
@@ -212,5 +218,8 @@ async def test_workspace_on_ouroboros_mount_route_dispose_remount(
         recovered = await bridge_command(ctx, "workspace_status", _agent_payload())
         assert recovered["success"] is True
         assert recovered["data"]["agent_id"] == "a1"
+        # status 降级为存在性/可写性
+        assert recovered["data"]["exists"] is True
+        assert recovered["data"]["writable"] is True
 
         await ws_fiber2.dispose()

@@ -22,9 +22,9 @@ from ghrah.subject.project.models import (
     ProjectRecord,
     WorkspaceMount,
 )
+from ghrah.subject.workspace.locator import locator_to_path
 from ghrah.subject.workspace.models import WorkspaceRecord
 from ghrah.subject.workspace.providers.base import WorkspaceCaps
-from ghrah.subject.workspace.providers.git import locator_to_path
 from ghrah.subject.workspace.registry import ProviderRegistry
 
 __all__ = [

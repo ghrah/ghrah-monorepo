@@ -1,21 +1,15 @@
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 from pathlib import Path
 
 import pytest
 
 from ghrah.subject.sandbox.executor import CommandResult, SandboxExecutor, SandboxExecutorConfig
-from ghrah.subject.sandbox.workspace import (
-    SnapshotError,
-    SnapshotInfo,
-    WorkspaceManager,
-)
-from ghrah.subject.workspace.providers.git import path_to_locator
-
-requires_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
+from ghrah.subject.sandbox.workspace import WorkspaceManager
+from ghrah.subject.workspace import WorkspaceProviderError
+from ghrah.subject.workspace.locator import path_to_locator
 
 
 class TestCommandResult:
@@ -135,19 +129,35 @@ class TestSandboxExecutorResolveCwd:
 
 
 class TestExternalWorkspaceRegistration:
-    @requires_git
     async def test_registers_workspace_outside_manager_root(self, tmp_path: Path):
+        """挂载语义：register 登记已有目录，零物理操作（无 .git、无 marker）。"""
         internal_root = tmp_path / "subject-root"
         external_workspace = tmp_path / "project-source"
+        external_workspace.mkdir()
+        (external_workspace / "source.txt").write_text("user content")
         executor = SandboxExecutor(workspace_root=str(internal_root))
         manager = WorkspaceManager(root_path=str(internal_root), sandbox=executor)
         await manager.start()
         try:
             workspace = await manager.register_workspace(
-                path_to_locator(str(external_workspace)), name="source", provider_type="git"
+                path_to_locator(str(external_workspace)), name="source"
             )
             assert workspace.path == str(external_workspace)
-            assert (external_workspace / ".git").is_dir()
+            # 注册零污染：无 .git 接管、无 marker 落盘、用户内容原样
+            assert not (external_workspace / ".git").exists()
+            assert not (external_workspace / ".ghrah-workspace").exists()
+            assert (external_workspace / "source.txt").read_text() == "user content"
+        finally:
+            await manager.stop()
+
+    async def test_register_missing_directory_fails(self, tmp_path: Path):
+        internal_root = tmp_path / "subject-root"
+        executor = SandboxExecutor(workspace_root=str(internal_root))
+        manager = WorkspaceManager(root_path=str(internal_root), sandbox=executor)
+        await manager.start()
+        try:
+            with pytest.raises(WorkspaceProviderError, match="does not exist"):
+                await manager.register_workspace(path_to_locator(str(tmp_path / "missing")))
         finally:
             await manager.stop()
 
@@ -294,9 +304,9 @@ class TestSandboxExecutorTruncateOutput:
         assert truncated is True
 
 
-@requires_git
 class TestWorkspaceManagerCreate:
     async def test_create_workspace(self, tmp_path):
+        """挂载语义：create 只建纯目录（无 marker、无 git）。"""
         workspace_root = str(tmp_path / "workspaces")
         config = SandboxExecutorConfig()
         sandbox = SandboxExecutor(workspace_root=workspace_root, config=config)
@@ -305,7 +315,8 @@ class TestWorkspaceManagerCreate:
         try:
             ws = await manager.create_workspace("test-agent")
             assert os.path.isdir(ws.path)
-            assert os.path.isfile(os.path.join(ws.path, ".ghrah-workspace"))
+            assert not os.path.exists(os.path.join(ws.path, ".ghrah-workspace"))
+            assert not os.path.exists(os.path.join(ws.path, ".git"))
             assert manager.get_workspace("test-agent") is ws
         finally:
             await manager.stop()
@@ -326,15 +337,15 @@ class TestWorkspaceManagerCreate:
         manager = WorkspaceManager(root_path=str(tmp_path))
         await manager.start()
         try:
-            with pytest.raises(SnapshotError, match="SandboxExecutor"):
+            with pytest.raises(WorkspaceProviderError, match="SandboxExecutor"):
                 await manager.create_workspace("test-agent")
         finally:
             await manager.stop()
 
 
-@requires_git
 class TestWorkspaceManagerDestroy:
-    async def test_destroy_workspace(self, tmp_path):
+    async def test_destroy_workspace_preserves_directory(self, tmp_path):
+        """挂载语义：destroy ≡ unregister，目录永不物理删除。"""
         workspace_root = str(tmp_path / "workspaces")
         sandbox = SandboxExecutor(workspace_root=workspace_root)
         manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
@@ -344,7 +355,7 @@ class TestWorkspaceManagerDestroy:
             ws_path = ws.path
             assert os.path.isdir(ws_path)
             await manager.destroy_workspace("test-agent")
-            assert not os.path.exists(ws_path)
+            assert os.path.exists(ws_path)
             assert manager.get_workspace("test-agent") is None
         finally:
             await manager.stop()
@@ -354,7 +365,6 @@ class TestWorkspaceManagerDestroy:
         await manager.destroy_workspace("nonexistent-agent")
 
 
-@requires_git
 class TestWorkspaceManagerLifecycle:
     async def test_start_creates_root(self, tmp_path):
         workspace_root = str(tmp_path / "new_root")
@@ -381,220 +391,17 @@ class TestWorkspaceManagerLifecycle:
             await manager.stop()
 
 
-@requires_git
-class TestAgentWorkspaceSnapshot:
-    async def test_snapshot_with_changes(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-            test_file = os.path.join(ws.path, "test.txt")
-            with open(test_file, "w") as f:
-                f.write("hello")
-
-            commit_hash = await ws.snapshot(message="initial file")
-            assert len(commit_hash) > 0
-        finally:
-            await manager.stop()
-
-    async def test_snapshot_no_changes(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-            commit1 = await ws.snapshot("first")
-            commit2 = await ws.snapshot("no changes")
-            assert commit1 == commit2
-        finally:
-            await manager.stop()
-
-
-@requires_git
-class TestAgentWorkspaceDiff:
-    async def test_diff_after_change(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-            await ws.snapshot("initial")
-
-            test_file = os.path.join(ws.path, ".ghrah-workspace")
-            with open(test_file, "w") as f:
-                f.write("modified content")
-
-            diff = await ws.diff()
-            assert len(diff) > 0
-        finally:
-            await manager.stop()
-
-    async def test_diff_against_snapshot(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-            snapshot_id = await ws.snapshot("initial")
-
-            marker_file = os.path.join(ws.path, ".ghrah-workspace")
-            with open(marker_file, "w") as f:
-                f.write("modified content")
-
-            diff = await ws.diff(snapshot_id=snapshot_id)
-            assert len(diff) > 0
-        finally:
-            await manager.stop()
-
-
-@requires_git
-class TestAgentWorkspaceRollback:
-    async def test_rollback_restores_files(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-
-            test_file = os.path.join(ws.path, "stable.txt")
-            with open(test_file, "w") as f:
-                f.write("original content")
-
-            snapshot_id = await ws.snapshot("original state")
-
-            with open(test_file, "w") as f:
-                f.write("modified content")
-
-            await ws.rollback(snapshot_id)
-
-            with open(test_file) as f:
-                assert f.read() == "original content"
-        finally:
-            await manager.stop()
-
-    async def test_rollback_removes_untracked(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-            snapshot_id = await ws.snapshot("before new files")
-
-            new_file = os.path.join(ws.path, "new_untracked.txt")
-            with open(new_file, "w") as f:
-                f.write("untracked")
-
-            await ws.rollback(snapshot_id)
-            assert not os.path.exists(new_file)
-        finally:
-            await manager.stop()
-
-    async def test_rollback_invalid_snapshot_raises(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-            with pytest.raises(SnapshotError):
-                await ws.rollback("nonexistent_hash")
-        finally:
-            await manager.stop()
-
-
-@requires_git
 class TestAgentWorkspaceStatus:
-    async def test_status_clean(self, tmp_path):
+    async def test_status_reports_existence_and_writability(self, tmp_path):
+        """挂载语义：status 降级为存在性/可写性（git 观测走只读命令）。"""
         workspace_root = str(tmp_path / "workspaces")
         sandbox = SandboxExecutor(workspace_root=workspace_root)
         manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
         await manager.start()
         try:
             ws = await manager.create_workspace("test-agent")
-            await ws.snapshot("initial")
-
             status = await ws.status()
-            assert status.is_clean is True
-        finally:
-            await manager.stop()
-
-    async def test_status_with_changes(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-
-            new_file = os.path.join(ws.path, "untracked.txt")
-            with open(new_file, "w") as f:
-                f.write("new")
-
-            status = await ws.status()
-            assert status.is_clean is False
-            assert len(status.untracked_files) > 0 or len(status.staged_files) > 0
-        finally:
-            await manager.stop()
-
-    async def test_status_branch(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-            await ws.snapshot("initial")
-            status = await ws.status()
-            assert len(status.branch) > 0
-        finally:
-            await manager.stop()
-
-
-@requires_git
-class TestAgentWorkspaceListSnapshots:
-    async def test_list_snapshots(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-
-            test_file = os.path.join(ws.path, "file.txt")
-            for i in range(3):
-                with open(test_file, "w") as f:
-                    f.write(f"content v{i}")
-                await ws.snapshot(f"commit {i}")
-
-            snapshots = await ws.list_snapshots()
-            assert len(snapshots) >= 3
-            assert all(isinstance(s, SnapshotInfo) for s in snapshots)
-            assert all(len(s.commit_hash) > 0 for s in snapshots)
-        finally:
-            await manager.stop()
-
-    async def test_list_snapshots_max_count(self, tmp_path):
-        workspace_root = str(tmp_path / "workspaces")
-        sandbox = SandboxExecutor(workspace_root=workspace_root)
-        manager = WorkspaceManager(root_path=workspace_root, sandbox=sandbox)
-        await manager.start()
-        try:
-            ws = await manager.create_workspace("test-agent")
-
-            test_file = os.path.join(ws.path, "file.txt")
-            for i in range(5):
-                with open(test_file, "w") as f:
-                    f.write(f"content v{i}")
-                await ws.snapshot(f"commit {i}")
-
-            snapshots = await ws.list_snapshots(max_count=2)
-            assert len(snapshots) <= 2
+            assert status.exists is True
+            assert status.writable is True
         finally:
             await manager.stop()

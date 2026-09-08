@@ -27,11 +27,26 @@ _AGENT_WORKSPACE_COMMANDS = frozenset(
     {
         "create_workspace",
         "destroy_workspace",
+        "workspace_status",
+    }
+)
+
+# 挂载语义下版本能力已移除（legacy GitWorkspaceProvider 删除）；命令保留路由
+# （协议面零改动）但静态拒绝，不经 agent 解析。
+_RETIRED_VERSIONED_COMMANDS = frozenset(
+    {
         "workspace_snapshot",
         "workspace_rollback",
         "workspace_diff",
-        "workspace_status",
     }
+)
+
+_CAPABILITY_ERROR = (
+    "capability_not_supported: workspace snapshot/rollback/diff were removed with "
+    "the legacy git workspace provider; workspaces are mount-registries with zero "
+    "physical writes. Use read-only git commands (SAFE) for observation; snapshot "
+    "needs are tracked as the shadow-git checkpoint backlog (see "
+    "plans/planning/2026-09-08-dogfood-prereq-fix.md §A2/A3)."
 )
 
 logger = logging.getLogger(__name__)
@@ -133,6 +148,8 @@ class WorkspaceUnit(SubjectUnit):
         payload: dict[str, Any],
         cmd_ctx: CommandContext,
     ) -> dict[str, Any]:
+        if command in _RETIRED_VERSIONED_COMMANDS:
+            return {"success": False, "error": _CAPABILITY_ERROR}
         if command in _AGENT_WORKSPACE_COMMANDS:
             resolved = await self._resolve_agent(payload)
             if resolved.get("success") is False:
@@ -217,52 +234,6 @@ class WorkspaceUnit(SubjectUnit):
                     },
                 }
 
-            if command == "workspace_snapshot":
-                snapshot_workspace = self.manager.get_workspace(agent_name)
-                if snapshot_workspace is None:
-                    return self._workspace_not_found(agent_name)
-                commit_hash = await snapshot_workspace.snapshot(message=payload.get("message", ""))
-                return {
-                    "success": True,
-                    "data": {
-                        "project_id": payload.get("project_id"),
-                        "agent_id": agent_name,
-                        "agent_name": display_name,
-                        "snapshot_id": commit_hash,
-                    },
-                }
-
-            if command == "workspace_rollback":
-                rollback_workspace = self.manager.get_workspace(agent_name)
-                if rollback_workspace is None:
-                    return self._workspace_not_found(agent_name)
-                snapshot_id = payload.get("snapshot_id", "")
-                await rollback_workspace.rollback(snapshot_id)
-                return {
-                    "success": True,
-                    "data": {
-                        "project_id": payload.get("project_id"),
-                        "agent_id": agent_name,
-                        "agent_name": display_name,
-                        "rolled_back_to": snapshot_id,
-                    },
-                }
-
-            if command == "workspace_diff":
-                diff_workspace = self.manager.get_workspace(agent_name)
-                if diff_workspace is None:
-                    return self._workspace_not_found(agent_name)
-                diff_str = await diff_workspace.diff(snapshot_id=payload.get("snapshot_id"))
-                return {
-                    "success": True,
-                    "data": {
-                        "project_id": payload.get("project_id"),
-                        "agent_id": agent_name,
-                        "agent_name": display_name,
-                        "diff": diff_str,
-                    },
-                }
-
             if command == "workspace_status":
                 status_workspace = self.manager.get_workspace(agent_name)
                 if status_workspace is None:
@@ -274,11 +245,8 @@ class WorkspaceUnit(SubjectUnit):
                         "project_id": payload.get("project_id"),
                         "agent_id": agent_name,
                         "agent_name": display_name,
-                        "branch": status.branch,
-                        "is_clean": status.is_clean,
-                        "staged_files": status.staged_files,
-                        "unstaged_files": status.unstaged_files,
-                        "untracked_files": status.untracked_files,
+                        "exists": status.exists,
+                        "writable": status.writable,
                     },
                 }
 
