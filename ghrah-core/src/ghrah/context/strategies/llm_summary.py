@@ -20,6 +20,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from typing import Any
 
 from ghrah.context.window import WindowStrategy, _split_system_messages, estimate_tokens
 from ghrah.core.window_protocol import (
@@ -49,27 +51,40 @@ class LLMSummaryStrategy(WindowStrategy):
     行为：
     - 如果总 token 在预算内，不生成摘要
     - 将非 system 消息分为"旧"和"新"（3/4 预算分给新消息）
-    - 对旧消息调用 LLM 生成摘要
+    - 对旧消息调用 LLM 生成摘要（失败重试一次，仍失败回退截断）
     - 用一条 system 消息替代旧消息
-    - LLM 调用失败时回退到简单截断
+    - 摘要事件可经 drain_compaction_record() 取出，供节点 metadata 审计
 
     适用场景：长对话场景，需要保留对话语义但减少 token 数。
 
+    LLM 解析顺序（惰性）：
+    1. 显式注入的 llm（set_llm / 构造参数）优先
+    2. llm_factory 回调（首次调用结果 memoize；工厂抛异常时告警并回退截断，
+       不缓存失败）
+
     Args:
-        llm: 满足 SummaryLLMProtocol 的 LLM 实例
+        llm: 满足 SummaryLLMProtocol 的 LLM 实例（可选，优先于 llm_factory）
         summary_prompt: 摘要提示词（可选，使用默认提示词）
         message_factory: 消息构造工厂，用于构造摘要消息和 LLM 输入消息
+        llm_factory: 零参 LLM 工厂回调（可选；用于策略装配先于 LLM 创建的
+            时序解耦，在首次需要时惰性解析）
     """
+
+    skip_when_under_budget = True
 
     def __init__(
         self,
         llm: SummaryLLMProtocol | None = None,
         summary_prompt: str | None = None,
         message_factory: MessageFactory | None = None,
+        llm_factory: Callable[[], SummaryLLMProtocol] | None = None,
     ) -> None:
         self._llm = llm
         self._summary_prompt = summary_prompt or _DEFAULT_SUMMARY_PROMPT
         self._message_factory = message_factory
+        self._llm_factory = llm_factory
+        self._factory_llm: SummaryLLMProtocol | None = None
+        self._last_compaction: dict[str, Any] | None = None
 
     @property
     def summary_prompt(self) -> str:
@@ -117,7 +132,21 @@ class LLMSummaryStrategy(WindowStrategy):
         summary_msg = await self._generate_summary(old_msgs)
 
         if summary_msg is not None:
-            return system_msgs + [summary_msg] + new_msgs
+            result = system_msgs + [summary_msg] + new_msgs
+            self._last_compaction = {
+                "strategy": self.name,
+                "summarized_messages": len(old_msgs),
+                "tokens_before": current_tokens,
+                "tokens_after": estimate_tokens(result),
+                "summary": summary_msg.text,
+            }
+            logger.info(
+                "LLMSummaryStrategy compacted %d messages (%d -> %d tokens)",
+                len(old_msgs),
+                current_tokens,
+                self._last_compaction["tokens_after"],
+            )
+            return result
         else:
             # LLM 调用失败，回退到简单截断（只保留新消息）
             logger.warning("LLM summary failed, falling back to truncation")
@@ -166,7 +195,9 @@ class LLMSummaryStrategy(WindowStrategy):
         if not conversation_text.strip():
             return None
 
-        if self._llm is None:
+        llm = self._resolve_llm()
+
+        if llm is None:
             logger.warning("LLMSummaryStrategy has no LLM configured, skipping summary")
             return None
 
@@ -174,28 +205,59 @@ class LLMSummaryStrategy(WindowStrategy):
             logger.warning("LLMSummaryStrategy has no message_factory configured, skipping summary")
             return None
 
-        try:
-            summary_messages = [
-                self._message_factory.create_message(
-                    role="system",
-                    text=self._summary_prompt,
-                ),
-                self._message_factory.create_message(
-                    role="user",
-                    text=conversation_text,
-                ),
-            ]
-            response = await self._llm.generate(summary_messages)
-
-            summary_content = response.text or ""
-            return self._message_factory.create_message(
+        summary_messages = [
+            self._message_factory.create_message(
                 role="system",
-                text=_SUMMARY_PREFIX + summary_content,
-            )
+                text=self._summary_prompt,
+            ),
+            self._message_factory.create_message(
+                role="user",
+                text=conversation_text,
+            ),
+        ]
 
-        except Exception:
-            logger.exception("Failed to generate LLM summary")
+        summary_content: str | None = None
+        for attempt in (1, 2):
+            try:
+                response = await llm.generate(summary_messages)
+                summary_content = response.text or ""
+                break
+            except Exception:
+                logger.warning("LLM summary generate attempt %d/2 failed", attempt, exc_info=True)
+
+        if summary_content is None:
             return None
+
+        return self._message_factory.create_message(
+            role="system",
+            text=_SUMMARY_PREFIX + summary_content,
+        )
+
+    def _resolve_llm(self) -> SummaryLLMProtocol | None:
+        """按解析顺序获取 LLM：显式注入优先，其次 llm_factory 惰性解析。
+
+        factory 成功结果 memoize；factory 抛异常时告警且不缓存失败，
+        下次 apply 会重试解析。
+
+        Returns:
+            可用的 LLM 实例，无法解析时返回 None
+        """
+        if self._llm is not None:
+            return self._llm
+
+        if self._llm_factory is None:
+            return None
+
+        if self._factory_llm is None:
+            try:
+                self._factory_llm = self._llm_factory()
+            except Exception:
+                logger.exception(
+                    "LLMSummaryStrategy llm_factory failed, falling back to truncation"
+                )
+                return None
+
+        return self._factory_llm
 
     def _format_messages_for_summary(self, messages: list[WindowableMessage]) -> str:
         """将消息列表格式化为摘要用的文本。
@@ -246,6 +308,17 @@ class LLMSummaryStrategy(WindowStrategy):
 
     def set_llm(self, llm: SummaryLLMProtocol) -> None:
         self._llm = llm
+
+    def drain_compaction_record(self) -> dict[str, Any] | None:
+        """取出并清空最近一次成功摘要的 compaction 事件记录。
+
+        Returns:
+            记录 dict（strategy/summarized_messages/tokens_before/tokens_after/summary），
+            无未取出的记录时返回 None
+        """
+        record = self._last_compaction
+        self._last_compaction = None
+        return record
 
     @property
     def name(self) -> str:

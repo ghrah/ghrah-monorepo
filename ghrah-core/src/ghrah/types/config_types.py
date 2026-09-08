@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+DEFAULT_WINDOW_MAX_TOKENS = 32768
+
 
 @dataclass
 class WindowConfig:
@@ -17,14 +19,15 @@ class WindowConfig:
     控制如何将对话历史压缩到 LLM 的 token 预算内。
 
     Attributes:
-        max_tokens: LLM 上下文窗口大小（token 预算）
+        max_tokens: LLM 上下文窗口大小（token 预算），默认
+            DEFAULT_WINDOW_MAX_TOKENS（32768）；manifest/wire 显式覆盖优先
         strategies: 策略名称列表，按执行顺序排列
             可选值: "tool_call_fold", "sliding_window", "truncation", "llm_summary"
         tool_call_max_length: ToolCallFoldStrategy 的最大 content 长度
         sliding_window_size: SlidingWindowStrategy 的窗口大小
     """
 
-    max_tokens: int = 4096
+    max_tokens: int = DEFAULT_WINDOW_MAX_TOKENS
     strategies: list[str] = field(default_factory=lambda: ["tool_call_fold", "truncation"])
     tool_call_max_length: int = 500
     sliding_window_size: int = 20

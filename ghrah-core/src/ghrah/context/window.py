@@ -29,6 +29,7 @@ from ghrah.core.window_protocol import (
     MessageFactory,
     WindowableMessage,
 )
+from ghrah.types.config_types import DEFAULT_WINDOW_MAX_TOKENS
 
 __all__ = [
     "WindowStrategy",
@@ -107,7 +108,16 @@ class WindowStrategy(ABC):
     系统消息保护约定：
     - role="system" 的消息始终保留，不参与截断/折叠
     - 具体策略负责在 apply() 中分离和保护系统消息
+
+    预算短路约定：
+    - skip_when_under_budget=True 的策略在总 token 未超预算时会被
+      WindowManager 跳过（适用于"仅在超预算时生效"的策略，且其 apply()
+      内应保有同条件的预算自检以保证语义等价）
+    - 默认 False：策略无条件执行（如 ToolCallFoldStrategy 属于策略性
+      折叠，预算内也生效）
     """
+
+    skip_when_under_budget: bool = False
 
     @abstractmethod
     async def apply(
@@ -172,7 +182,7 @@ class WindowManager:
     def __init__(
         self,
         strategies: list[WindowStrategy] | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int = DEFAULT_WINDOW_MAX_TOKENS,
         message_factory: MessageFactory | None = None,
     ) -> None:
         self._strategies: list[WindowStrategy] = list(strategies) if strategies else []
@@ -207,6 +217,9 @@ class WindowManager:
     ) -> list[WindowableMessage]:
         """按顺序应用所有策略。
 
+        预算短路：先估算总 token，未超预算时跳过 skip_when_under_budget=True
+        的策略，其余策略照常执行。
+
         Args:
             messages: 输入消息列表
             max_tokens: 覆盖默认 max_tokens
@@ -215,12 +228,36 @@ class WindowManager:
             压缩后的消息列表
         """
         budget = max_tokens if max_tokens is not None else self._max_tokens
+
+        if estimate_tokens(messages) <= budget:
+            strategies = [s for s in self._strategies if not s.skip_when_under_budget]
+        else:
+            strategies = self._strategies
+
         result = list(messages)  # 浅拷贝
 
-        for strategy in self._strategies:
+        for strategy in strategies:
             result = await strategy.apply(result, budget)
 
         return result
+
+    def drain_compaction_records(self) -> list[dict[str, Any]]:
+        """收集并清空各策略产生的 compaction 事件记录。
+
+        对策略 duck-typing 调用 drain_compaction_record()（如
+        LLMSummaryStrategy），收集非 None 返回值。
+
+        Returns:
+            compaction 事件记录列表
+        """
+        records: list[dict[str, Any]] = []
+        for strategy in self._strategies:
+            drain = getattr(strategy, "drain_compaction_record", None)
+            if callable(drain):
+                record = drain()
+                if record is not None:
+                    records.append(record)
+        return records
 
     def estimate_tokens(self, messages: list[WindowableMessage]) -> int:
         """估算消息列表的总 token 数。

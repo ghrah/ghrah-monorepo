@@ -13,7 +13,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from ghrah.types.config_types import ContextConfig, ModelOverrides, WindowConfig
+from ghrah.types.config_types import (
+    DEFAULT_WINDOW_MAX_TOKENS,
+    ContextConfig,
+    ModelOverrides,
+    WindowConfig,
+)
 
 __all__ = [
     "build_window_from_dict",
@@ -28,7 +33,7 @@ __all__ = [
 def build_window_from_dict(data: dict[str, Any]) -> WindowConfig:
     """从 dict 构建 WindowConfig（wire payload 格式）。"""
     return WindowConfig(
-        max_tokens=data.get("max_tokens", 4096),
+        max_tokens=data.get("max_tokens", DEFAULT_WINDOW_MAX_TOKENS),
         strategies=data.get("strategies", ["tool_call_fold", "truncation"]),
         tool_call_max_length=data.get("tool_call_max_length", 500),
         sliding_window_size=data.get("sliding_window_size", 20),
@@ -60,7 +65,9 @@ def build_model_overrides_from_dict(data: dict[str, Any]) -> ModelOverrides:
 def build_window_from_overrides(overrides: Any) -> WindowConfig:
     """从 WindowOverrides (manifest dataclass) 构建 WindowConfig。"""
     return WindowConfig(
-        max_tokens=overrides.max_tokens if overrides.max_tokens is not None else 4096,
+        max_tokens=(
+            overrides.max_tokens if overrides.max_tokens is not None else DEFAULT_WINDOW_MAX_TOKENS
+        ),
         strategies=(
             overrides.strategies
             if overrides.strategies is not None

@@ -103,6 +103,7 @@ class ContextManager:
         self._message_factory = message_factory
         self._pending_messages: list[Any] = []
         self._in_iteration: bool = False
+        self._pending_compaction: list[dict[str, Any]] = []
         self._persist_tasks: set[asyncio.Task[Any]] = set()
         self._persist_lock = asyncio.Lock()
 
@@ -673,6 +674,11 @@ class ContextManager:
         if llm_metadata:
             node_metadata.update(llm_metadata)
 
+        # 7.1 合并窗口压缩事件记录（内部权威，来源为 get_llm_messages 的 stash）
+        if self._pending_compaction:
+            node_metadata["compaction"] = list(self._pending_compaction)
+            self._pending_compaction = []
+
         # 8. 创建链式节点并前移当前 Branch Head
         node = self._active_runtime.commit_node(
             ability_names=effective_names,
@@ -740,6 +746,7 @@ class ContextManager:
 
         # 8. 清理迭代状态
         self._pending_messages = []
+        self._pending_compaction = []
         self._in_iteration = False
 
         if self._auto_persist and self._persistence is not None:
@@ -819,6 +826,9 @@ class ContextManager:
         if self._window_manager is not None:
             budget = max_tokens or self._window_manager.max_tokens
             messages = await self._window_manager.apply(messages, max_tokens=budget)
+            records = self._window_manager.drain_compaction_records()
+            if records:
+                self._pending_compaction.extend(records)
 
         return messages
 
