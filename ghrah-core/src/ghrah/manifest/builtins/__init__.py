@@ -27,6 +27,7 @@ _BUILTIN_YAML_NAMES: tuple[str, ...] = (
     "ghrah.cluster.broadcast_message",
     "ghrah.cluster.spawn_agent",
     "ghrah.cluster.terminate_agent",
+    "ghrah.cluster.query_manifests",
 )
 
 

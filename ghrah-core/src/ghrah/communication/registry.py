@@ -33,6 +33,8 @@ class AgentInfo:
         actor_handle: agent actor 引用
         created_at: 注册时间戳
         incarnation_id: 每次成功注册生成的运行实例 ID。
+        tags: manifest AgentDef 透传的标签（无 manifest 路径为空列表），
+            供集群身份注入段展示。
     """
 
     name: str
@@ -40,6 +42,7 @@ class AgentInfo:
     actor_handle: Any
     created_at: float = field(default_factory=time.time)
     incarnation_id: str = field(default_factory=lambda: uuid4().hex)
+    tags: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """转换为可序列化的字典。"""
@@ -49,6 +52,7 @@ class AgentInfo:
             "name": self.name,
             "config": _agent_config_to_dict(self.config) if self.config else None,
             "description": self.config.description,
+            "tags": list(self.tags),
             "created_at": self.created_at,
         }
 
@@ -93,6 +97,7 @@ class AgentRegistry:
         name: str,
         config: AgentConfig,
         actor_handle: Any,
+        tags: list[str] | None = None,
     ) -> None:
         """注册一个 Agent。
 
@@ -100,6 +105,7 @@ class AgentRegistry:
             name: Agent 唯一名称
             config: Agent 配置
             actor_handle: agent actor 引用
+            tags: 可选的 manifest 标签透传（无 manifest 路径缺省空）
 
         Raises:
             RegistryError: 如果同名 Agent 已注册
@@ -114,6 +120,7 @@ class AgentRegistry:
             name=name,
             config=config,
             actor_handle=actor_handle,
+            tags=list(tags) if tags else [],
         )
         self._agents[name] = info
         self._agent_ids[agent_id] = name

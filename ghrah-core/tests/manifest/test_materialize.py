@@ -159,6 +159,80 @@ class TestInstantiateResolvedAbilities:
         assert {a.name for a in result} == {"conversation", "end_task", "read_file"}
 
 
+class TestGenericHITLWiring:
+    """通用 HITL 接线（K12）：非 FS/非 command ability 的 require_hitl 声明
+    必须经 _HITLRequiredAbility 包装实际挂接 PRE_EXECUTE hook——
+    现状兜底分支裸实例化会静默忽略该声明（纸面门禁）。"""
+
+    def test_cluster_ability_require_hitl_mounts_hook(self) -> None:
+        """spawn_agent manifest 声明 require_hitl → 实际挂 PRE_EXECUTE HITL hook。"""
+        abilities = _resolved([AbilityRef(ref="ghrah.cluster.spawn_agent")])
+        # resolver 权限合并：builtin yaml 的 require_hitl=True 应透传
+        assert abilities[0].permissions.require_hitl is True
+
+        result = instantiate_resolved_abilities(abilities, workspace_root=None)
+        assert len(result) == 1
+        wrapped = result[0]
+        assert wrapped.name == "spawn_agent"
+        hooks = wrapped.get_hooks()
+        hitl_hooks = [
+            h
+            for h in hooks
+            if getattr(h, "hook_point", None) is not None and h.hook_point.name == "PRE_EXECUTE"
+        ]
+        assert len(hitl_hooks) == 1
+
+    async def test_hitl_hook_returns_hitl_result(self) -> None:
+        """包装后的 hook 执行返回 HookResult.hitl（requires_hitl=True）。"""
+        from ghrah.abilities.context import AbilityExecutionContext
+        from ghrah.abilities.hooks import HookResult
+
+        abilities = _resolved([AbilityRef(ref="ghrah.cluster.spawn_agent")])
+        result = instantiate_resolved_abilities(abilities, workspace_root=None)
+        hitl_hook = [h for h in result[0].get_hooks() if h.hook_point.name == "PRE_EXECUTE"][0]
+
+        ctx = AbilityExecutionContext(
+            current_ability_name="spawn_agent",
+            tool_args={"manifest_ref": "ghrah.designer"},
+        )
+        assert await hitl_hook.should_trigger(ctx) is True
+        hook_result = await hitl_hook.execute(ctx, None)
+        assert isinstance(hook_result, HookResult)
+        assert hook_result.requires_hitl is True
+        assert hook_result.should_continue is False
+        assert "spawn_agent" in (hook_result.message or "")
+
+    def test_auto_approve_suppresses_generic_hitl_wiring(self) -> None:
+        """auto_approve 白名单 > manifest require_hitl——包装不生效。"""
+        abilities = _resolved([AbilityRef(ref="ghrah.cluster.spawn_agent")])
+        result = instantiate_resolved_abilities(
+            abilities,
+            workspace_root=None,
+            auto_approve_abilities=("spawn_agent",),
+        )
+        assert len(result) == 1
+        # 不应包装：hooks 中无 HITL hook（原生 spawn_agent.get_hooks() == []）
+        assert result[0].get_hooks() == []
+
+    def test_no_require_hitl_no_wrapping(self) -> None:
+        """未声明 require_hitl 的普通 ability 保持裸实例化。"""
+        abilities = _resolved([AbilityRef(type="query_agents")])
+        result = instantiate_resolved_abilities(abilities, workspace_root=None)
+        assert len(result) == 1
+        assert result[0].name == "query_agents"
+        assert result[0].get_hooks() == []
+
+    def test_wrapper_delegates_bind_tool_and_state(self) -> None:
+        """包装不破坏宿主 ability 的工具面与默认状态（组合委托）。"""
+        abilities = _resolved([AbilityRef(ref="ghrah.cluster.spawn_agent")])
+        result = instantiate_resolved_abilities(abilities, workspace_root=None)
+        wrapped = result[0]
+        tool = wrapped.bind_tool()
+        assert tool is not None
+        assert tool["function"]["name"] == "spawn_agent"
+        assert "manifest_ref" in tool["function"]["parameters"]["properties"]
+
+
 class TestHandleSpawnAgentManifestRef:
     """CoreUnit._handle_spawn_agent manifest_ref 路径（不经 wire DTO）。"""
 

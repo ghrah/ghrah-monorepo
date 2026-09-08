@@ -115,7 +115,9 @@ def ctx() -> FakeCtx:
 
 @pytest.fixture
 async def unit(ctx: FakeCtx) -> CoreUnit:
-    u = create_core_unit(CoreUnitConfig(project_id="default"))
+    u = create_core_unit(
+        CoreUnitConfig(project_id="default", default_abilities=("conversation", "end_task"))
+    )
     await u.init(ctx)
     return u
 
@@ -275,7 +277,9 @@ class TestExecuteAbility:
 
     async def test_execute_ability_unknown_ability(self, unit: CoreUnit) -> None:
         assert unit.supervisor is not None
-        await unit.supervisor.spawn_agent(AgentConfig(name="agent-1"), abilities=[])
+        await unit.supervisor.spawn_agent(
+            AgentConfig(name="agent-1"), abilities=[MockAbility(name="placeholder")]
+        )
         result = await unit.handle_command(
             "execute_ability",
             {
@@ -352,7 +356,9 @@ class TestHITL:
 
     async def test_hitl_response_no_pending_future(self, unit: CoreUnit) -> None:
         assert unit.supervisor is not None
-        await unit.supervisor.spawn_agent(AgentConfig(name="agent-1"), abilities=[])
+        await unit.supervisor.spawn_agent(
+            AgentConfig(name="agent-1"), abilities=[MockAbility(name="placeholder")]
+        )
         resp = await unit.handle_command(
             "hitl_response",
             {
@@ -550,7 +556,9 @@ class TestStandalone:
             pass
 
         no_emit_ctx = NoEmitCtx()
-        unit = create_core_unit(CoreUnitConfig(project_id="default"))
+        unit = create_core_unit(
+            CoreUnitConfig(project_id="default", default_abilities=("conversation", "end_task"))
+        )
         await unit.init(no_emit_ctx)
         result = await unit.handle_command("spawn_agent", _spawn_payload("agent-1"), None)
         assert result["success"] is True
@@ -697,7 +705,13 @@ class TestPerAgentInjection:
             calls.append(config.name)
             return backend
 
-        unit = create_core_unit(CoreUnitConfig(project_id="default", persistence_factory=factory))
+        unit = create_core_unit(
+            CoreUnitConfig(
+                project_id="default",
+                persistence_factory=factory,
+                default_abilities=("conversation", "end_task"),
+            )
+        )
         await unit.init(ctx)
 
         result = await unit.handle_command("spawn_agent", _spawn_payload("persisted"), None)
@@ -816,7 +830,13 @@ class TestForkContextContinuity:
             actor_b_cm_factory_calls.append(config.name)
             return backend_b
 
-        unit = create_core_unit(CoreUnitConfig(project_id="default", persistence_factory=factory_b))
+        unit = create_core_unit(
+            CoreUnitConfig(
+                project_id="default",
+                persistence_factory=factory_b,
+                default_abilities=("conversation", "end_task"),
+            )
+        )
         await unit.init(FakeCtx())
         result = await unit.handle_command("spawn_agent", _spawn_payload("agent-b"), None)
         assert result["success"] is True
@@ -845,7 +865,9 @@ class TestForkContextContinuity:
         from ghrah.context.rebase import create_rebased_context
 
         # 旧策略 agent（严格）
-        unit_strict = create_core_unit(CoreUnitConfig(project_id="default"))
+        unit_strict = create_core_unit(
+            CoreUnitConfig(project_id="default", default_abilities=("conversation", "end_task"))
+        )
         await unit_strict.init(ctx)
         await unit_strict.handle_command("spawn_agent", _spawn_payload("old-agent"), None)
         cm_old = _actor_of(unit_strict, "old-agent")._context_manager
@@ -889,6 +911,7 @@ async def test_multi_agent_core_restart_restores_independent_snapshots(
         cluster_id="cluster-a",
         project_id="default",
         persistence_factory=persistence_factory,
+        default_abilities=("conversation", "end_task"),
     )
     first = create_core_unit(config)
     await first.init(FakeCtx())
@@ -950,6 +973,7 @@ async def test_same_name_agents_in_different_clusters_use_uuid_snapshot_keys(
                 cluster_id=cluster_id,
                 project_id="default",
                 persistence_factory=persistence_factory,
+                default_abilities=("conversation", "end_task"),
             )
         )
         await unit.init(FakeCtx())
@@ -973,6 +997,7 @@ async def test_same_name_agents_in_different_clusters_use_uuid_snapshot_keys(
                 cluster_id=cluster_id,
                 project_id="default",
                 persistence_factory=persistence_factory,
+                default_abilities=("conversation", "end_task"),
             )
         )
         await unit.init(FakeCtx())

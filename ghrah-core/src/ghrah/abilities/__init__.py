@@ -26,8 +26,9 @@
 - QueryAgentsAbility: 查询集群中已注册的 Agent 信息
 - SendMessageAbility: 向指定 Agent 发送消息（支持同步/异步模式）
 - BroadcastMessageAbility: 向所有 Agent 广播消息
-- SpawnAgentAbility: 动态创建平级 Agent
+- SpawnAgentAbility: 以 manifest 实例化方式动态创建平级 Agent
 - TerminateAgentAbility: 终止集群中的 Agent
+- QueryManifestsAbility: 只读查询 agent manifest 定义（含能力清单）
 
 权限模块：
 - FSPermissionChecker: 文件系统路径权限检查器
@@ -60,6 +61,7 @@ from ghrah.abilities.builtin.fs_permissions import (
 from ghrah.abilities.builtin.list_directory import ListDirectoryAbility
 from ghrah.abilities.builtin.move_file import MoveFileAbility
 from ghrah.abilities.builtin.query_agents import QueryAgentsAbility
+from ghrah.abilities.builtin.query_manifests import QueryManifestsAbility
 from ghrah.abilities.builtin.read_file import ReadFileAbility
 from ghrah.abilities.builtin.search_files import SearchFilesAbility
 from ghrah.abilities.builtin.send import SendAbility
@@ -126,6 +128,7 @@ CLUSTER_ABILITY_TYPES: frozenset[str] = frozenset(
         "broadcast_message",
         "spawn_agent",
         "terminate_agent",
+        "query_manifests",
         "send",
     }
 )
@@ -153,6 +156,7 @@ def _register_builtin_abilities() -> None:
     AbilityRegistry.register("broadcast_message", BroadcastMessageAbility)
     AbilityRegistry.register("spawn_agent", SpawnAgentAbility)
     AbilityRegistry.register("terminate_agent", TerminateAgentAbility)
+    AbilityRegistry.register("query_manifests", QueryManifestsAbility)
     AbilityRegistry.register("send", SendAbility)
 
 
@@ -213,6 +217,7 @@ __all__ = [
     "BroadcastMessageAbility",
     "SpawnAgentAbility",
     "TerminateAgentAbility",
+    "QueryManifestsAbility",
     "SendAbility",
     # 文件系统权限模块
     "FSPermissionChecker",

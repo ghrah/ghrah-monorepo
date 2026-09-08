@@ -134,6 +134,11 @@ class CoreUnitConfig:
             供 manifest_ref spawn 解析 agent manifest。None = standalone
             模式（manifest_ref spawn 明确报错，对齐 ROOM_BRIDGE_UNAVAILABLE
             模式）。Subject 挂载模式下注入其 ManifestStore。
+        default_abilities: spawn 未显式传 abilities 时注入的能力名列表
+            （透传 SupervisorActor.default_abilities——部署方显式声明，
+            非隐式兜底；None = 未配置，spawn(None) raise）。
+        max_cluster_members: 集群成员上限（spawn 时超限 raise；
+            透传 SupervisorActor.max_cluster_members，<=0 表示不限制）。
     """
 
     cluster_id: str = "default"
@@ -149,6 +154,8 @@ class CoreUnitConfig:
     persistence_factory: Callable[[Any], Any] | None = None
     # duck-typed ManifestStoreProtocol；None = standalone（manifest_ref spawn 报错）
     manifest_store: Any = None
+    default_abilities: tuple[str, ...] | None = None
+    max_cluster_members: int = 20
 
 
 # ----------------------------------------------------------------
@@ -546,6 +553,13 @@ class CoreUnit:
             cluster_id=self._config.cluster_id,
             event_publisher=self._publisher,
             room_bridge=room_bridge,
+            default_abilities=(
+                list(self._config.default_abilities)
+                if self._config.default_abilities is not None
+                else None
+            ),
+            max_cluster_members=self._config.max_cluster_members,
+            manifest_store=self._config.manifest_store,
         )
         self._supervisor = supervisor
 
@@ -733,6 +747,14 @@ class CoreUnit:
                 require_approval_by_default=self._config.require_approval_by_default,
                 command_runner=self._config.command_runner,
             )
+            if not ability_instances:
+                # fail-closed：manifest 全 non-builtin/解析出 0 能力时明确报错，
+                # 不落入 default_abilities 或任何隐式注入（零隐式）。
+                return self._err(
+                    f"manifest '{sp.manifest_ref}' resolved 0 abilities for agent "
+                    f"'{sp.config.name}' — fix the manifest or spawn with explicit "
+                    f"abilities; refusing implicit defaults"
+                )
             try:
                 resolved_config = replace(
                     resolved.config,
@@ -742,6 +764,7 @@ class CoreUnit:
                     resolved_config,
                     abilities=ability_instances,
                     persistence_factory=self._config.persistence_factory,
+                    tags=list(manifest.metadata.tags),
                 )
             except RegistryError as e:
                 return self._err(str(e))
@@ -768,6 +791,9 @@ class CoreUnit:
             )
 
         # ── 直传 abilities 路径（无 manifest_ref，Observer 直传 wire DTO） ──
+        # None → default_abilities（CoreUnitConfig 显式配置）；未配置 → raise。
+        # 空 abilities 列表在 wire 上不可能出现（AbilityDefinitionPayload
+        # 非 None 即非空），防御性映射为明确报错而非隐式注入。
         core_config = AgentConfig(
             name=sp.config.name,
             agent_id=sp.config.agent_id,
@@ -1034,6 +1060,7 @@ class CoreUnit:
                 context_manager=getattr(agent_handle, "_context_manager", None),
                 supervisor=cast(Any, supervisor),
                 agent_name=ep.agent_name,
+                manifest_store=getattr(supervisor, "manifest_store", None),
             )
             action_result = await executor.execute_ability(ability, context)
             success = action_result.outcome == ActionOutcome.SUCCESS

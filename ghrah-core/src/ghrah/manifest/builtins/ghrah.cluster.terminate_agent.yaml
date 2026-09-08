@@ -6,7 +6,8 @@ metadata:
   title: Terminate Agent
   description: Terminate an agent in the cluster. The agent will be removed and cannot receive further messages. Only use this when you are certain the agent is no longer needed.
   tags: [cluster, lifecycle]
-  permissions: {}
+  permissions:
+    require_hitl: true
 tool:
   name: terminate_agent
   description: Terminate an agent in the cluster. The agent will be removed and cannot receive further messages. Only use this when you are certain the agent is no longer needed. Persistent agents can receive follow-up messages without re-initialization.

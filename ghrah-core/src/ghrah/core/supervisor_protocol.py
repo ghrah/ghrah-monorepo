@@ -23,6 +23,9 @@ class SupervisorProtocol(Protocol):
     定义 builtin cluster abilities 所需的 Supervisor 方法。
     方法签名中使用 Any 替代具体类型（如 AgentConfig、AbilityProtocol），
     避免 protocol 层反向依赖 communication 或 types。
+
+    ``get_cluster_context`` 为可选成员（structural typing）：Subject 侧
+    supervisor 实现未提供时，builder 侧 hasattr 守卫按缺省跳过注入。
     """
 
     async def list_agents(self) -> list[dict[str, Any]]: ...
@@ -47,3 +50,11 @@ class SupervisorProtocol(Protocol):
     ) -> list[dict[str, str]]: ...
 
     async def get_agent_handle(self, name: str) -> Any: ...
+
+    def get_cluster_context(self) -> dict[str, Any]:
+        """返回集群上下文（cluster_id + 成员清单）。
+
+        供 AgentBuilder 渲染 [Cluster Context] 注入段。返回形状：
+        ``{"cluster_id": str, "members": [{"name", "description", "tags"}]}``。
+        """
+        ...

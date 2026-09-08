@@ -11,6 +11,8 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from ghrah.abilities.base import ActionOutcome
 from ghrah.abilities.builtin.broadcast_message import BroadcastMessageAbility
 from ghrah.abilities.builtin.query_agents import QueryAgentsAbility
@@ -258,7 +260,84 @@ class TestBroadcastMessageAbility:
         assert "network error" in result.data["error"]
 
 
-# ── SpawnAgentAbility 测试 ──
+# ── SpawnAgentAbility 测试（manifest_ref 主路径，能力面冻结） ──
+
+
+class _FakeManifest:
+    """最小 agent manifest stub（duck-typed，供 resolver 消费）。"""
+
+    def __init__(self, name: str) -> None:
+        self.metadata = type(
+            "M",
+            (),
+            {"name": name, "description": f"manifest {name}", "tags": ["test"]},
+        )()
+        self.config = {
+            "name": name,
+            "description": f"manifest {name}",
+            "system_prompt": f"You are {name}.",
+        }
+        self.abilities = [
+            type(
+                "A",
+                (),
+                {
+                    "type": "builtin",
+                    "ability_name": "conversation",
+                    "handler": "conversation",
+                    "params": {},
+                    "permissions": None,
+                },
+            )()
+        ]
+
+
+class _FakeStore:
+    """最小 ManifestStore stub：load_agent/list_agents。"""
+
+    def __init__(self, agents: dict[str, _FakeManifest]) -> None:
+        self._agents = agents
+
+    def load_agent(self, ref: str) -> _FakeManifest:
+        if ref not in self._agents:
+            raise KeyError(f"agent manifest not found: {ref}")
+        return self._agents[ref]
+
+    def list_agents(self) -> list[str]:
+        return list(self._agents)
+
+
+def _make_store() -> _FakeStore:
+    return _FakeStore({"ghrah.designer": _FakeManifest("designer")})
+
+
+def _patch_resolver(monkeypatch: Any, store: _FakeStore) -> None:
+    """把 ManifestResolver.resolve 替换为消费 _FakeManifest 的 stub。"""
+
+    from ghrah.manifest import resolver as resolver_mod
+
+    class _ResolvedAbility:
+        def __init__(self, manifest_ref: str) -> None:
+            self.ability_name = manifest_ref
+            self.implementation = type("I", (), {"type": "builtin", "handler": "conversation"})()
+            self.permissions = type("P", (), {"require_hitl": False})()
+
+    class _ResolvedAgent:
+        def __init__(self, config: Any, abilities: list[Any]) -> None:
+            self.config = config
+            self.abilities = abilities
+
+    def fake_resolve(self: Any, manifest: Any, runtime_name: str | None = None) -> Any:
+        return _ResolvedAgent(
+            config=AgentConfig(
+                name=runtime_name or manifest.config["name"],
+                description=manifest.config["description"],
+                system_prompt=manifest.config["system_prompt"],
+            ),
+            abilities=[_ResolvedAbility("conversation")],
+        )
+
+    monkeypatch.setattr(resolver_mod.ManifestResolver, "resolve", fake_resolve)
 
 
 class TestSpawnAgentAbility:
@@ -266,112 +345,123 @@ class TestSpawnAgentAbility:
         ability = SpawnAgentAbility()
         assert ability.name == "spawn_agent"
 
-    def test_bind_tool(self) -> None:
+    def test_bind_tool_schema_has_no_free_abilities(self) -> None:
+        """LLM 工具面无自由 abilities 参数——manifest_ref 唯一主路径（K10）。"""
         ability = SpawnAgentAbility()
         schema = ability.bind_tool()
         assert schema is not None
         func = schema["function"]
         assert func["name"] == "spawn_agent"
         params = func["parameters"]["properties"]
+        assert "manifest_ref" in params
         assert "name" in params
         assert "description" in params
         assert "system_prompt" in params
-        assert "abilities" in params
+        assert "abilities" not in params
         required = func["parameters"].get("required", [])
-        assert "name" in required
+        assert "manifest_ref" in required
 
     async def test_execute_no_supervisor(self) -> None:
         ctx = _make_context(
             supervisor=None,
-            tool_args={"name": "new-agent"},
+            tool_args={"manifest_ref": "ghrah.designer"},
         )
         ability = SpawnAgentAbility()
         result = await ability.execute(ctx)
         assert result.outcome == ActionOutcome.FAILURE
         assert "No supervisor" in result.data["error"]
 
-    async def test_execute_spawn_success(self) -> None:
-        supervisor = _make_supervisor(spawn_agent_return="new-agent")
-        ctx = _make_context(
-            supervisor=supervisor,
-            agent_name="spawner",
-            tool_args={"name": "new-agent"},
-        )
-        ability = SpawnAgentAbility()
-        result = await ability.execute(ctx)
-        assert result.outcome == ActionOutcome.SUCCESS
-        assert result.data["agent_name"] == "new-agent"
-        assert result.data["status"] == "spawned"
-        supervisor.spawn_agent.assert_awaited_once()
-        call_args = supervisor.spawn_agent.call_args
-        config = call_args[0][0]
-        assert isinstance(config, AgentConfig)
-        assert config.name == "new-agent"
-        assert call_args[1].get("abilities") is None
-
-    async def test_execute_spawn_with_abilities(self) -> None:
-        supervisor = _make_supervisor(spawn_agent_return="worker-1")
-        ctx = _make_context(
-            supervisor=supervisor,
-            agent_name="spawner",
-            tool_args={
-                "name": "worker-1",
-                "description": "A worker agent",
-                "system_prompt": "You are a worker.",
-                "abilities": ["conversation", "end_task"],
-            },
-        )
-        ability = SpawnAgentAbility()
-        result = await ability.execute(ctx)
-        assert result.outcome == ActionOutcome.SUCCESS
-        assert result.data["agent_name"] == "worker-1"
-        supervisor.spawn_agent.assert_awaited_once()
-        call_args = supervisor.spawn_agent.call_args
-        config = call_args[0][0]
-        assert config.name == "worker-1"
-        assert config.description == "A worker agent"
-        assert config.system_prompt == "You are a worker."
-        abilities = call_args[1].get("abilities")
-        assert abilities is not None
-        assert len(abilities) == 2
-        ability_names = [a.name for a in abilities]
-        assert "conversation" in ability_names
-        assert "end_task" in ability_names
-
-    async def test_execute_spawn_with_unknown_ability(self) -> None:
-        supervisor = _make_supervisor(spawn_agent_return="worker-2")
-        ctx = _make_context(
-            supervisor=supervisor,
-            agent_name="spawner",
-            tool_args={
-                "name": "worker-2",
-                "abilities": ["conversation", "nonexistent_ability"],
-            },
-        )
-        ability = SpawnAgentAbility()
-        result = await ability.execute(ctx)
-        assert result.outcome == ActionOutcome.SUCCESS
-        supervisor.spawn_agent.assert_awaited_once()
-        call_args = supervisor.spawn_agent.call_args
-        abilities = call_args[1].get("abilities")
-        assert abilities is not None
-        assert len(abilities) == 1
-        assert abilities[0].name == "conversation"
-
-    async def test_execute_spawn_missing_name(self) -> None:
+    async def test_execute_missing_manifest_ref(self) -> None:
         supervisor = _make_supervisor()
         ctx = _make_context(supervisor=supervisor, tool_args={})
         ability = SpawnAgentAbility()
         result = await ability.execute(ctx)
         assert result.outcome == ActionOutcome.FAILURE
-        assert "name is required" in result.data["error"]
+        assert "manifest_ref is required" in result.data["error"]
 
-    async def test_execute_spawn_exception(self) -> None:
+    async def test_execute_store_not_wired(self) -> None:
+        """manifest_store 未接线 → 显式 FAILURE 指路（零隐式）。"""
         supervisor = _make_supervisor()
-        supervisor.spawn_agent = AsyncMock(side_effect=RuntimeError("name conflict"))
         ctx = _make_context(
             supervisor=supervisor,
-            tool_args={"name": "dup-agent"},
+            tool_args={"manifest_ref": "ghrah.designer"},
+        )
+        ability = SpawnAgentAbility()
+        result = await ability.execute(ctx)
+        assert result.outcome == ActionOutcome.FAILURE
+        assert "manifest_store is not wired" in result.data["error"]
+        supervisor.spawn_agent.assert_not_awaited()
+
+    async def test_execute_manifest_ref_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        supervisor = _make_supervisor(spawn_agent_return="designer")
+        store = _make_store()
+        _patch_resolver(monkeypatch, store)
+        ctx = _make_context(
+            supervisor=supervisor,
+            tool_args={"manifest_ref": "ghrah.designer"},
+            manifest_store=store,
+        )
+        ability = SpawnAgentAbility()
+        result = await ability.execute(ctx)
+        assert result.outcome == ActionOutcome.SUCCESS
+        assert result.data["agent_name"] == "designer"
+        assert result.data["manifest_ref"] == "ghrah.designer"
+        supervisor.spawn_agent.assert_awaited_once()
+        call_args = supervisor.spawn_agent.call_args
+        config = call_args[0][0]
+        assert isinstance(config, AgentConfig)
+        assert config.name == "designer"
+        abilities = call_args[1].get("abilities")
+        assert abilities is not None and len(abilities) > 0
+
+    async def test_execute_persona_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """name/description/system_prompt 覆写经 resolved_config 生效。"""
+        supervisor = _make_supervisor(spawn_agent_return="designer-x")
+        store = _make_store()
+        _patch_resolver(monkeypatch, store)
+        ctx = _make_context(
+            supervisor=supervisor,
+            tool_args={
+                "manifest_ref": "ghrah.designer",
+                "name": "designer-x",
+                "description": "Custom role",
+                "system_prompt": "Custom persona.",
+            },
+            manifest_store=store,
+        )
+        ability = SpawnAgentAbility()
+        result = await ability.execute(ctx)
+        assert result.outcome == ActionOutcome.SUCCESS
+        call_args = supervisor.spawn_agent.call_args
+        config = call_args[0][0]
+        assert config.name == "designer-x"
+        assert config.description == "Custom role"
+        assert config.system_prompt == "Custom persona."
+
+    async def test_execute_manifest_not_found(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        supervisor = _make_supervisor()
+        store = _make_store()
+        _patch_resolver(monkeypatch, store)
+        ctx = _make_context(
+            supervisor=supervisor,
+            tool_args={"manifest_ref": "ghrah.nonexistent"},
+            manifest_store=store,
+        )
+        ability = SpawnAgentAbility()
+        result = await ability.execute(ctx)
+        assert result.outcome == ActionOutcome.FAILURE
+        assert "ghrah.nonexistent" in result.data["error"]
+        supervisor.spawn_agent.assert_not_awaited()
+
+    async def test_execute_spawn_exception(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        supervisor = _make_supervisor()
+        supervisor.spawn_agent = AsyncMock(side_effect=RuntimeError("name conflict"))
+        store = _make_store()
+        _patch_resolver(monkeypatch, store)
+        ctx = _make_context(
+            supervisor=supervisor,
+            tool_args={"manifest_ref": "ghrah.designer"},
+            manifest_store=store,
         )
         ability = SpawnAgentAbility()
         result = await ability.execute(ctx)
@@ -520,3 +610,69 @@ class TestSendMessageAbilityAsync:
         supervisor.send.assert_awaited_once_with(
             target="agent-b", content="hello", sender="agent-a"
         )
+
+
+# ── 两档可诊断错误测试（C2d：standalone vs 装配缺陷） ──
+
+
+class _BareSupervisor:
+    """已注入但无 get_cluster_context 的 supervisor（structural typing 缺失）。"""
+
+
+class _EmptyClusterSupervisor:
+    """get_cluster_context 返回空 cluster_id 的 supervisor（装配缺陷）。"""
+
+    def get_cluster_context(self) -> dict[str, Any]:
+        return {"cluster_id": "", "members": []}
+
+
+class TestClusterSupervisorGate:
+    async def test_none_supervisor_standalone_error(self) -> None:
+        """档一：supervisor=None → standalone 正常态文案。"""
+        ctx = _make_context(supervisor=None)
+        ability = QueryAgentsAbility()
+        result = await ability.execute(ctx)
+        assert result.outcome == ActionOutcome.FAILURE
+        assert "No supervisor configured" in result.data["error"]
+        assert "standalone" in result.data["error"]
+
+    async def test_supervisor_missing_get_cluster_context(self) -> None:
+        """档二：supervisor 已注入但缺 get_cluster_context → 装配缺陷文案。"""
+        ctx = _make_context(supervisor=_BareSupervisor())
+        ability = QueryAgentsAbility()
+        result = await ability.execute(ctx)
+        assert result.outcome == ActionOutcome.FAILURE
+        assert "assembly defect" in result.data["error"]
+        assert "get_cluster_context" in result.data["error"]
+
+    async def test_supervisor_empty_cluster_id(self) -> None:
+        """档二：cluster_id 为空 → 装配缺陷文案。"""
+        ctx = _make_context(supervisor=_EmptyClusterSupervisor())
+        ability = TerminateAgentAbility()
+        result = await ability.execute(ctx)
+        assert result.outcome == ActionOutcome.FAILURE
+        assert "assembly defect" in result.data["error"]
+
+    async def test_get_cluster_context_raises(self) -> None:
+        """档二：get_cluster_context 调用抛异常 → 装配缺陷文案（不崩）。"""
+
+        class _Broken:
+            def get_cluster_context(self) -> dict[str, Any]:
+                raise RuntimeError("boom")
+
+        ctx = _make_context(supervisor=_Broken())
+        ability = SendMessageAbility()
+        result = await ability.execute(ctx)
+        assert result.outcome == ActionOutcome.FAILURE
+        assert "assembly defect" in result.data["error"]
+
+    async def test_gate_passes_with_real_cluster_supervisor(self) -> None:
+        """真实 SupervisorActor（cluster_id 非空）→ gate 放行。"""
+        from ghrah.communication.supervisor import SupervisorActor
+
+        supervisor = SupervisorActor(cluster_id="c1")
+        ctx = _make_context(supervisor=supervisor)
+        ability = QueryAgentsAbility()
+        result = await ability.execute(ctx)
+        assert result.outcome == ActionOutcome.SUCCESS
+        assert result.data["count"] == 0

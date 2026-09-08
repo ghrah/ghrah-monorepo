@@ -854,6 +854,7 @@ class ActorAgent:
             last_action_result=self._iteration_state.last_action_result,
             supervisor=self._supervisor,
             agent_name=self.config.name,
+            manifest_store=getattr(self._supervisor, "manifest_store", None),
         )
 
     def _build_ability_context(
@@ -885,6 +886,7 @@ class ActorAgent:
             last_action_result=self._iteration_state.last_action_result,
             supervisor=self._supervisor,
             agent_name=self.config.name,
+            manifest_store=getattr(self._supervisor, "manifest_store", None),
         )
 
     def _build_response(self, original: AgentMessage) -> AgentMessage:

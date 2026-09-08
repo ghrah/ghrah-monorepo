@@ -104,6 +104,9 @@ class AgentConfig:
         context: ContextManager 配置，None 表示使用默认值
         model_overrides: Manifest 模型配置覆盖值
         workspace_root: 工作区根目录，用于将相对路径解析到沙盒内（None 表示不限制）
+        cluster_context_injection: 集群身份注入开关——True 时 AgentBuilder
+            在 system_prompt 头部拼接 [Cluster Context] 段（cluster_id +
+            成员清单）。默认 False（零隐式：prompt 内容不因挂进集群而变化）
     """
 
     name: str
@@ -118,6 +121,7 @@ class AgentConfig:
     context: ContextConfig | None = None
     model_overrides: ModelOverrides | None = None
     workspace_root: str | None = None
+    cluster_context_injection: bool = False
 
     @property
     def effective_agent_config_name(self) -> str:
