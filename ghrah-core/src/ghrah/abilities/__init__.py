@@ -61,6 +61,7 @@ from ghrah.abilities.builtin.list_directory import ListDirectoryAbility
 from ghrah.abilities.builtin.move_file import MoveFileAbility
 from ghrah.abilities.builtin.query_agents import QueryAgentsAbility
 from ghrah.abilities.builtin.read_file import ReadFileAbility
+from ghrah.abilities.builtin.search_files import SearchFilesAbility
 from ghrah.abilities.builtin.send import SendAbility
 from ghrah.abilities.builtin.send_message import SendMessageAbility
 from ghrah.abilities.builtin.spawn_agent import SpawnAgentAbility
@@ -109,6 +110,7 @@ FS_ABILITY_TYPES: frozenset[str] = frozenset(
         "edit_file",
         "move_file",
         "delete_file",
+        "search_files",
     }
 )
 """文件系统类 Ability 的 handler 类型集合（单一真源）。
@@ -144,6 +146,7 @@ def _register_builtin_abilities() -> None:
     AbilityRegistry.register("edit_file", EditFileAbility)
     AbilityRegistry.register("move_file", MoveFileAbility)
     AbilityRegistry.register("delete_file", DeleteFileAbility)
+    AbilityRegistry.register("search_files", SearchFilesAbility)
     AbilityRegistry.register("execute_command", ExecuteCommandAbility)
     AbilityRegistry.register("query_agents", QueryAgentsAbility)
     AbilityRegistry.register("send_message", SendMessageAbility)

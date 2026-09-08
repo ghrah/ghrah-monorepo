@@ -82,13 +82,13 @@ class TestBuiltinManifestStore:
     def test_list_abilities_no_filter(self) -> None:
         store = BuiltinManifestStore()
         names = store.list_abilities()
-        assert len(names) == 14
+        assert len(names) == 15
         assert "ghrah.core.conversation" in names
 
     def test_list_abilities_with_namespace(self) -> None:
         store = BuiltinManifestStore()
         fs_abilities = store.list_abilities(namespace="ghrah.fs")
-        assert len(fs_abilities) == 6
+        assert len(fs_abilities) == 7
         assert all(n.startswith("ghrah.fs.") for n in fs_abilities)
 
     def test_list_agents_returns_empty(self) -> None:

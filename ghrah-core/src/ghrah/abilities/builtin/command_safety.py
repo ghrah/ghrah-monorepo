@@ -82,6 +82,7 @@ DEFAULT_SAFE_COMMANDS: set[str] = {
     "grep",
     "egrep",
     "fgrep",
+    "rg",
     "sort",
     "uniq",
     "cut",

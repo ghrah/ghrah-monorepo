@@ -9,6 +9,7 @@
 - EndTaskAbility: 终止循环，生成最终回复
 - ReadFileAbility: 文件读取
 - ListDirectoryAbility: 目录列表
+- SearchFilesAbility: 内容搜索（rg 主路径 + Python 回退）
 - WriteFileAbility: 文件写入（创建/覆盖）
 - EditFileAbility: 文件编辑（精确字符串替换）
 - MoveFileAbility: 文件移动/重命名
@@ -57,6 +58,7 @@ from ghrah.abilities.builtin.list_directory import ListDirectoryAbility
 from ghrah.abilities.builtin.move_file import MoveFileAbility
 from ghrah.abilities.builtin.query_agents import QueryAgentsAbility
 from ghrah.abilities.builtin.read_file import ReadFileAbility
+from ghrah.abilities.builtin.search_files import SearchFilesAbility
 from ghrah.abilities.builtin.send import SendAbility
 from ghrah.abilities.builtin.send_message import SendMessageAbility
 from ghrah.abilities.builtin.spawn_agent import SpawnAgentAbility
@@ -74,6 +76,7 @@ __all__ = [
     "EditFileAbility",
     "MoveFileAbility",
     "DeleteFileAbility",
+    "SearchFilesAbility",
     # 命令执行 Ability
     "ExecuteCommandAbility",
     "ExecuteCommandInput",

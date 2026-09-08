@@ -24,7 +24,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ghrah.abilities.base import Ability
 from ghrah.abilities.builtin.fs_permissions import FSPermissionChecker
@@ -44,6 +44,10 @@ class ReadFileInput(BaseModel):
 
     file_path: str
     encoding: str = "utf-8"
+    offset: int = Field(default=0, ge=0, description="0-based line number to start from")
+    limit: int = Field(
+        default=0, ge=0, description="Max lines to return; 0 = whole file (legacy behavior)"
+    )
 
 
 class ReadFileAbility(Ability):
@@ -99,7 +103,14 @@ class ReadFileAbility(Ability):
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read the content of a file at the specified path",
+                "description": (
+                    "Read the content of a file at the specified path. "
+                    "With offset/limit, the returned content is paginated and each "
+                    "line is prefixed with its 1-based line number as '  N→text' "
+                    "(line numbers are for locating edits only — do not copy them "
+                    "into edit_file old_str). Without offset/limit the whole file "
+                    "is returned without line numbers."
+                ),
                 "parameters": ReadFileInput.model_json_schema(),
             },
         }
@@ -107,8 +118,10 @@ class ReadFileAbility(Ability):
     def to_prompt_description(self) -> str:
         """用于不支持 function calling 的模型。"""
         return (
-            "read_file(file_path: str, encoding: str = 'utf-8') -> str: "
-            "Read the content of a file at the specified path"
+            "read_file(file_path: str, encoding: str = 'utf-8', offset: int = 0, "
+            "limit: int = 0) -> str: "
+            "Read the content of a file at the specified path; with offset/limit "
+            "the content is line-numbered (  N→line) and paginated"
         )
 
     def get_hooks(self) -> list[Hook]:
@@ -131,6 +144,9 @@ class ReadFileAbility(Ability):
         tool_args = context.tool_args or context.accumulated_data.get("tool_args", {})
         file_path = tool_args.get("file_path", "")
         encoding = tool_args.get("encoding", "utf-8")
+        offset = int(tool_args.get("offset", 0) or 0)
+        limit = int(tool_args.get("limit", 0) or 0)
+        paginated = offset > 0 or limit > 0
 
         if not file_path:
             return ActionResult(
@@ -151,13 +167,29 @@ class ReadFileAbility(Ability):
 
         try:
             with Path(file_path).open(encoding=encoding) as f:
-                content = f.read()
+                lines = f.readlines()
+
+            total_lines = len(lines)
+            if paginated:
+                selected = lines[offset : offset + limit] if limit > 0 else lines[offset:]
+                content = _number_lines(selected, start_no=offset + 1)
+            else:
+                content = "".join(lines)
 
             logger.debug(f"ReadFileAbility: read {len(content)} chars from {file_path}")
 
+            data: dict[str, Any] = {
+                "content": content,
+                "file_path": file_path,
+                "total_lines": total_lines,
+            }
+            if paginated:
+                data["offset"] = offset
+                data["limit"] = limit
+
             return ActionResult(
                 outcome=ActionOutcome.SUCCESS,
-                data={"content": content, "file_path": file_path},
+                data=data,
             )
         except FileNotFoundError:
             return ActionResult(
@@ -174,3 +206,8 @@ class ReadFileAbility(Ability):
                 outcome=ActionOutcome.FAILURE,
                 data={"error": str(e)},
             )
+
+
+def _number_lines(lines: list[str], *, start_no: int) -> str:
+    """行号化内容：每行前缀 ``  N→``（N 为 1-based 行号，定位编辑用）。"""
+    return "".join(f"{no:>6}\u2192{line}" for no, line in enumerate(lines, start=start_no))
