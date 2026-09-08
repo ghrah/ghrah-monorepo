@@ -4,7 +4,7 @@
 
 """Workspace 挂载语义验收（dogfood 前置工作流 A）。
 
-对照 plans/planning/2026-09-08-workflow-a-workspace-mount-hotfix.md §P3.5：
+验收要点：
 1. 零污染：真实 git 仓注册后 .git/config 字节级不变、无新增 commit、
    ref/工作树不变、无 marker；
 2. 解挂保全：register → destroy 后目录与 .git 原样、cwd 授权解除；

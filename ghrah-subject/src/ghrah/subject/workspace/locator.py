@@ -63,8 +63,11 @@ def locator_to_path(locator: str) -> str:
         path = path[1:]
     if netloc:
         if _DRIVE_NETLOC_RE.match(netloc):
-            # 旧式盘符形态：file://C:/x → /C:/x（Path 归一为 C:\x）
+            # 旧式盘符形态：file://C:/x → C:/x（剥盘符前的冗余斜杠），
+            # Path 归一为 C:\x；POSIX 上宽容接受为 /C:/x
             path = f"/{netloc}{path}"
+            if os.name == "nt":
+                path = path[1:]
         elif "\\" in netloc:
             # 宽容：file://C:\ws\a 裸拼接形态
             path = netloc + path

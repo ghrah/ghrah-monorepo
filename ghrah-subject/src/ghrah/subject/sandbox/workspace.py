@@ -355,8 +355,8 @@ class WorkspaceManager:
                 "git workspace provider is no longer supported; "
                 "workspaces are registered by mounting (read/write authorization) "
                 "with zero physical writes — use the default plain provider. "
-                "See plans/planning/2026-09-08-dogfood-prereq-fix.md §A2/A3 "
-                "(shadow-git checkpoint backlog) for the migration notes."
+                "Snapshot needs are tracked as a harness-side shadow-git "
+                "checkpoint backlog."
             )
         try:
             ws_path = locator_to_path(locator)

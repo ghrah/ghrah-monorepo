@@ -78,6 +78,7 @@ class TestLocatorRoundTrip:
     def test_windows_backslash_leniency(self) -> None:
         assert locator_to_path("file://C:\\ws\\a") == "C:\\ws\\a"
 
+    @requires_posix
     def test_legacy_drive_netloc_posix_fallback(self) -> None:
         # POSIX 上盘符 netloc 走宽容路径（/C:/... 原样保留），不抛异常
         assert locator_to_path("file://C:/ws/a") == str(Path("/C:/ws/a"))

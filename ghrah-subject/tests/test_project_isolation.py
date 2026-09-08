@@ -265,6 +265,6 @@ class TestValidateLocators:
         with pytest.raises(ValueError, match="nest") as exc_info:
             validate_workspace_locators_non_nested([nfs_loc, parent_loc, child_loc])
         msg = str(exc_info.value)
-        assert parent_loc in msg
-        assert child_loc in msg
+        assert repr(parent_loc) in msg
+        assert repr(child_loc) in msg
         assert nfs_loc not in msg

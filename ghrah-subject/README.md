@@ -15,7 +15,7 @@ Workspace 是**登记 + 授权 + 解挂**三件事，对挂载目录零物理操
   `capability_not_supported`；`workspace_status` 降级为存在性/可写性。git 观测
   由 agent 侧只读命令承担（`git status`/`git diff` 在 SAFE 子命令白名单内）。
 - 快照/回滚的后续方案是 harness 侧 shadow-git checkpoint 库（存储移出挂载
-  目录，backlog，见 plans 内 dogfood 前置修复计划 §A3）。
+  目录，backlog）。
 - 存量 store 记录在 `WorkspaceStore.start()` 时自动 retag：`git` → `plain`。
 
 ## 安装

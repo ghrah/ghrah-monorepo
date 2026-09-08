@@ -12,8 +12,7 @@
 
 版本控制能力（snapshot/rollback/diff）已随 legacy GitWorkspaceProvider
 整体移除：注册面对挂载目录结构性零写入，快照需求由 harness 侧
-shadow-git checkpoint 库承接（backlog，见
-plans/planning/2026-09-08-dogfood-prereq-fix.md §A3）。
+shadow-git checkpoint 库承接（backlog）。
 
 locator 语义：FILESYSTEM_BACKED capability 为真时 locator 必为
 ``file://`` 且可解析出本地路径（供 sandbox cwd 裁决）。

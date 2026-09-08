@@ -45,8 +45,7 @@ _CAPABILITY_ERROR = (
     "capability_not_supported: workspace snapshot/rollback/diff were removed with "
     "the legacy git workspace provider; workspaces are mount-registries with zero "
     "physical writes. Use read-only git commands (SAFE) for observation; snapshot "
-    "needs are tracked as the shadow-git checkpoint backlog (see "
-    "plans/planning/2026-09-08-dogfood-prereq-fix.md §A2/A3)."
+    "needs are tracked as a harness-side shadow-git checkpoint backlog."
 )
 
 logger = logging.getLogger(__name__)
