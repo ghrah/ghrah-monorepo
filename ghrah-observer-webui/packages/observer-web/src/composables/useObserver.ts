@@ -178,12 +178,24 @@ export function useObserver() {
     );
   }
 
-  async function listRooms(projectId?: string | null) {
-    return withClient((c) => c.listRooms(projectId ?? undefined));
+  async function listRooms(projectId?: string | null, status?: string | null) {
+    return withClient((c) => c.listRooms(projectId ?? undefined, status ?? undefined));
   }
 
   async function createRoom(projectId: string, name: string) {
     return withClient((c) => c.createRoom(projectId, name));
+  }
+
+  async function updateRoom(roomId: string, name: string, expectedVersion: number) {
+    return withClient((c) => c.updateRoom(roomId, name, expectedVersion));
+  }
+
+  async function archiveRoom(roomId: string, expectedVersion: number) {
+    return withClient((c) => c.archiveRoom({ roomId, expectedVersion }));
+  }
+
+  async function deleteRoom(roomId: string, expectedVersion: number) {
+    return withClient((c) => c.deleteRoom({ roomId, expectedVersion }));
   }
 
   async function joinRoom(
@@ -353,6 +365,9 @@ export function useObserver() {
     roomSend,
     listRooms,
     createRoom,
+    updateRoom,
+    archiveRoom,
+    deleteRoom,
     joinRoom,
     leaveRoom,
     getRoomLog,

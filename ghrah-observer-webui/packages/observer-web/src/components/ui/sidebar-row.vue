@@ -24,5 +24,6 @@ defineEmits<{ select: [] }>();
         <span v-if="$slots.secondary" class="sidebar-row-secondary"><slot name="secondary" /></span>
       </span>
     </button>
+    <span v-if="$slots.actions" class="sidebar-row-actions"><slot name="actions" /></span>
   </li>
 </template>
