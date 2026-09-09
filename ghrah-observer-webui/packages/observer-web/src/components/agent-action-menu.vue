@@ -22,10 +22,11 @@ const showDiff = ref(false);
 const diffPatch = ref<string>("");
 
 async function handleTerminate() {
-  if (!agents.selectedAgentName) return;
+  const target = agents.selectedAgentTarget;
+  if (!target) return;
   loading.value = true;
   errorMsg.value = null;
-  const result = await terminateAgent(agents.selectedAgentName);
+  const result = await terminateAgent(target);
   loading.value = false;
   if (result === null) {
     errorMsg.value = observerError.value ?? t("agents.notConnected");
@@ -37,10 +38,11 @@ async function handleTerminate() {
 }
 
 async function handleCreateWorkspace() {
-  if (!agents.selectedAgentName) return;
+  const target = agents.selectedAgentTarget;
+  if (!target) return;
   loading.value = true;
   errorMsg.value = null;
-  const result = await createWorkspace(agents.selectedAgentName);
+  const result = await createWorkspace(target);
   loading.value = false;
   if (result && !result.success) {
     errorMsg.value = result.error ?? t("agents.workspaceFailed");
@@ -52,10 +54,11 @@ async function handleCreateWorkspace() {
 }
 
 async function handleSnapshot() {
-  if (!agents.selectedAgentName) return;
+  const target = agents.selectedAgentTarget;
+  if (!target) return;
   loading.value = true;
   errorMsg.value = null;
-  const result = await workspaceSnapshot(agents.selectedAgentName);
+  const result = await workspaceSnapshot(target);
   loading.value = false;
   if (result === null) {
     errorMsg.value = observerError.value ?? t("agents.notConnected");
@@ -67,10 +70,11 @@ async function handleSnapshot() {
 }
 
 async function handleDiff() {
-  if (!agents.selectedAgentName) return;
+  const target = agents.selectedAgentTarget;
+  if (!target) return;
   loading.value = true;
   errorMsg.value = null;
-  const result = await workspaceDiff(agents.selectedAgentName);
+  const result = await workspaceDiff(target);
   loading.value = false;
   if (result === null) {
     errorMsg.value = observerError.value ?? t("agents.notConnected");

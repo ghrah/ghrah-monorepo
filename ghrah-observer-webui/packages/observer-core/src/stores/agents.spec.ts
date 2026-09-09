@@ -1,9 +1,10 @@
-import type { AgentConfigPayload, AgentSpawnedPayload } from "@ghrah/protocol";
+import type { AgentConfigPayload, ProjectInfoPayload } from "@ghrah/protocol";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it } from "vitest";
+import { agentKey } from "../scope.js";
 import { useAgentsStore } from "./agents.js";
 
-const makeConfig = (name: string): AgentConfigPayload => ({
+const config = (name: string): AgentConfigPayload => ({
   name,
   agent_config_name: null,
   description: "",
@@ -11,102 +12,128 @@ const makeConfig = (name: string): AgentConfigPayload => ({
   max_iterations: 10,
 });
 
-const makeSpawned = (
-  name: string,
-  extra: Partial<AgentSpawnedPayload> = {},
-): AgentSpawnedPayload => ({
-  name,
-  agent_id: "",
-  project_id: "",
-  cluster_id: "",
-  incarnation_id: "",
-  recovery_mode: "",
-  config: makeConfig(name),
-  ...extra,
-});
+const project = (overrides: Partial<ProjectInfoPayload> = {}) =>
+  ({ status: "active", archived_at: null, ...overrides }) as ProjectInfoPayload;
 
 describe("useAgentsStore", () => {
-  beforeEach(() => {
-    setActivePinia(createPinia());
-  });
+  beforeEach(() => setActivePinia(createPinia()));
 
-  it("starts with empty agent list", () => {
+  it("isolates same-name agents by project and stable id", () => {
     const store = useAgentsStore();
-    expect(store.agents.size).toBe(0);
-    expect(store.activeAgents).toHaveLength(0);
-  });
-
-  it("onAgentSpawned adds agent with active status", () => {
-    const store = useAgentsStore();
-    store.onAgentSpawned(
-      makeSpawned("agent-1", {
-        agent_id: "stable-1",
-        incarnation_id: "inc-1",
-        recovery_mode: "restored",
-      }),
+    store.replaceProjectAgents(
+      "p1",
+      [{ name: "coder", agent_id: "a1", runtime_state: "running" }],
+      project(),
     );
-    expect(store.agents.get("agent-1")?.status).toBe("active");
-    expect(store.agents.get("agent-1")?.name).toBe("agent-1");
-    expect(store.agents.get("agent-1")?.agentId).toBe("stable-1");
-    expect(store.agents.get("agent-1")?.incarnationId).toBe("inc-1");
-    expect(store.agents.get("agent-1")?.recoveryMode).toBe("restored");
+    store.replaceProjectAgents(
+      "p2",
+      [{ name: "coder", agent_id: "a2", runtime_state: "running" }],
+      project(),
+    );
+    expect(store.agents.size).toBe(2);
+    expect(store.agents.get(agentKey({ projectId: "p1", agentId: "a1" }))?.agentName).toBe("coder");
+    expect(store.agents.get(agentKey({ projectId: "p2", agentId: "a2" }))?.agentName).toBe("coder");
+  });
+
+  it("replaces only one project bucket and reports disappeared agents", () => {
+    const store = useAgentsStore();
+    store.replaceProjectAgents(
+      "p1",
+      [
+        { name: "one", agent_id: "a1" },
+        { name: "two", agent_id: "a2" },
+      ],
+      project(),
+    );
+    store.replaceProjectAgents("p2", [{ name: "other", agent_id: "b1" }], project());
+    const removed = store.replaceProjectAgents("p1", [{ name: "two", agent_id: "a2" }], project());
+    expect(removed).toEqual([{ projectId: "p1", agentId: "a1", agentName: "one" }]);
+    expect(store.agentsForProject("p1")).toHaveLength(1);
+    expect(store.agentsForProject("p2")).toHaveLength(1);
+  });
+
+  it("an empty list clears exactly its project bucket", () => {
+    const store = useAgentsStore();
+    store.replaceProjectAgents("p1", [{ name: "one", agent_id: "a1" }], project());
+    store.replaceProjectAgents("p2", [{ name: "two", agent_id: "a2" }], project());
+    store.replaceProjectAgents("p1", [], project());
+    expect(store.agentsForProject("p1")).toEqual([]);
+    expect(store.agentsForProject("p2")).toHaveLength(1);
+  });
+
+  it("defaults missing runtime state to stopped", () => {
+    const store = useAgentsStore();
+    store.replaceProjectAgents("p1", [{ name: "one", agent_id: "a1" }], project());
+    expect(store.getAgent({ projectId: "p1", agentId: "a1" })?.runtimeStatus).toBe("stopped");
+    expect(store.activeAgents).toEqual([]);
+  });
+
+  it("never projects running for stopped or archived projects", () => {
+    const store = useAgentsStore();
+    store.replaceProjectAgents(
+      "p1",
+      [{ name: "one", agent_id: "a1", runtime_state: "running" }],
+      project({ status: "stopped" }),
+    );
+    store.replaceProjectAgents(
+      "p2",
+      [{ name: "two", agent_id: "a2", runtime_state: "running" }],
+      project({ archived_at: "2026-09-09" }),
+    );
+    store.onAgentSpawned(
+      {
+        project_id: "p3",
+        agent_id: "a3",
+        cluster_id: "c1",
+        name: "three",
+        incarnation_id: "i1",
+        recovery_mode: "fresh",
+        config: config("three"),
+      },
+      project({ status: "stopped" }),
+    );
+    expect(store.activeAgents).toEqual([]);
+  });
+
+  it("selection is a structured target and is cleared on exact removal", () => {
+    const store = useAgentsStore();
+    const target = { projectId: "p1", agentId: "a1", agentName: "coder" };
+    store.replaceProjectAgents("p1", [{ name: "coder", agent_id: "a1" }], project());
+    store.selectAgent(target);
+    expect(store.selectedAgentTarget).toEqual(target);
+    store.removeAgent(target);
+    expect(store.selectedAgentTarget).toBeNull();
+  });
+
+  it("spawn and terminate events require complete project-scoped identity", () => {
+    const store = useAgentsStore();
+    store.onAgentSpawned({
+      project_id: "",
+      agent_id: "",
+      cluster_id: "",
+      name: "bad",
+      incarnation_id: "",
+      recovery_mode: "",
+      config: config("bad"),
+    });
+    expect(store.agents.size).toBe(0);
+    store.onAgentSpawned({
+      project_id: "p1",
+      agent_id: "a1",
+      cluster_id: "c1",
+      name: "coder",
+      incarnation_id: "i1",
+      recovery_mode: "fresh",
+      config: config("coder"),
+    });
     expect(store.activeAgents).toHaveLength(1);
-  });
-
-  it("onAgentTerminated marks agent as terminated", () => {
-    const store = useAgentsStore();
-    store.onAgentSpawned(makeSpawned("agent-1"));
     store.onAgentTerminated({
-      name: "agent-1",
-      agent_id: "",
-      project_id: "",
-      cluster_id: "",
-      incarnation_id: "",
+      project_id: "p1",
+      agent_id: "a1",
+      cluster_id: "c1",
+      name: "coder",
+      incarnation_id: "i1",
     });
-    expect(store.agents.get("agent-1")?.status).toBe("terminated");
-    expect(store.activeAgents).toHaveLength(0);
-  });
-
-  it("setAgentsFromList clears and replaces all agents", () => {
-    const store = useAgentsStore();
-    store.onAgentSpawned(makeSpawned("old-1"));
-    store.onAgentSpawned(makeSpawned("old-2"));
-
-    store.setAgentsFromList([
-      { name: "new-1", config: makeConfig("new-1") },
-      { name: "new-2", config: makeConfig("new-2") },
-      { name: "new-3", config: makeConfig("new-3") },
-    ]);
-
-    expect(store.agents.size).toBe(3);
-    expect(store.agents.has("old-1")).toBe(false);
-    expect(store.agents.has("new-1")).toBe(true);
-    expect(store.activeAgents).toHaveLength(3);
-  });
-
-  it("removeAgent deletes agent from map", () => {
-    const store = useAgentsStore();
-    store.onAgentSpawned(makeSpawned("agent-1"));
-    expect(store.agents.has("agent-1")).toBe(true);
-
-    store.removeAgent("agent-1");
-    expect(store.agents.has("agent-1")).toBe(false);
-  });
-
-  it("activeAgents filters out terminated agents", () => {
-    const store = useAgentsStore();
-    store.onAgentSpawned(makeSpawned("a1"));
-    store.onAgentSpawned(makeSpawned("a2"));
-    store.onAgentSpawned(makeSpawned("a3"));
-    store.onAgentTerminated({
-      name: "a2",
-      agent_id: "",
-      project_id: "",
-      cluster_id: "",
-      incarnation_id: "",
-    });
-
-    expect(store.activeAgents).toHaveLength(2);
-    expect(store.activeAgents.map((a) => a.name)).toEqual(["a1", "a3"]);
+    expect(store.getAgent({ projectId: "p1", agentId: "a1" })?.runtimeStatus).toBe("stopped");
   });
 });

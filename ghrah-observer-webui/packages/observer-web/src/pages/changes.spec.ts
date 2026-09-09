@@ -12,6 +12,8 @@ function change(overrides: Partial<FileChange> = {}): FileChange {
     projectId: "p1",
     agentId: "a1",
     agentName: "alpha",
+    sessionId: "s1",
+    branchId: "b1",
     abilityName: "write_file",
     filePath: "src/a.ts",
     success: true,

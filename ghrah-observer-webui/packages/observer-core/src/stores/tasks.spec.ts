@@ -79,4 +79,14 @@ describe("useTasksStore", () => {
     store.clearAll();
     expect(store.tasks.size).toBe(0);
   });
+
+  it("clearProject removes only tasks owned by that Project", () => {
+    const store = useTasksStore();
+    store.setTasksFromList([
+      makeTask({ task_id: "t1", project_id: "p1" }),
+      makeTask({ task_id: "t2", project_id: "p2" }),
+    ]);
+    store.clearProject("p1");
+    expect([...store.tasks.keys()]).toEqual(["t2"]);
+  });
 });

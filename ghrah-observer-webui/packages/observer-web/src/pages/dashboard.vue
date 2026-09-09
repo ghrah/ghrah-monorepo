@@ -1,5 +1,11 @@
 <script setup lang="ts">
-import { useAgentsStore, useRoomsStore } from "@ghrah/observer-core";
+import {
+  type AgentTarget,
+  agentKey,
+  sameAgent,
+  useAgentsStore,
+  useRoomsStore,
+} from "@ghrah/observer-core";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import ActionChainPanel from "@/components/action-chain/action-chain-panel.vue";
@@ -10,12 +16,21 @@ import ProjectSelector from "@/components/nav/project-selector.vue";
 import RoomSelector from "@/components/nav/room-selector.vue";
 import { useObserver } from "@/composables/useObserver";
 
-type WorkspaceTab = {
+type RoomWorkspaceTab = {
   id: string;
-  kind: "room" | "agent";
+  kind: "room";
   target: string;
   label: string;
 };
+
+type AgentWorkspaceTab = {
+  id: string;
+  kind: "agent";
+  target: AgentTarget;
+  label: string;
+};
+
+type WorkspaceTab = RoomWorkspaceTab | AgentWorkspaceTab;
 
 const rooms = useRoomsStore();
 const agents = useAgentsStore();
@@ -39,10 +54,10 @@ function openRoom(room: { room_id: string; name: string }) {
   activeTabId.value = id;
 }
 
-function openAgent(agentName: string) {
-  const id = `agent:${agentName}`;
+function openAgent(target: AgentTarget) {
+  const id = `agent:${agentKey(target)}`;
   if (!tabs.value.some((tab) => tab.id === id)) {
-    tabs.value.push({ id, kind: "agent", target: agentName, label: agentName });
+    tabs.value.push({ id, kind: "agent", target, label: target.agentName });
   }
   activeTabId.value = id;
 }
@@ -52,7 +67,7 @@ async function activateTab(tab: WorkspaceTab) {
   if (tab.kind === "room" && rooms.activeRoomId !== tab.target) {
     await switchRoom(tab.target);
   }
-  if (tab.kind === "agent" && agents.selectedAgentName !== tab.target) {
+  if (tab.kind === "agent" && !sameAgent(agents.selectedAgentTarget, tab.target)) {
     agents.selectAgent(tab.target);
   }
 }

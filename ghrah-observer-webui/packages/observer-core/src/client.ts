@@ -11,6 +11,9 @@ import {
   type SubscribePayload,
   type TaskPriority,
 } from "@ghrah/protocol";
+import type { AgentTarget, ChainTarget, SessionTarget } from "./scope.js";
+
+export type { AgentTarget, ChainTarget, SessionTarget } from "./scope.js";
 
 export interface CreateProjectOptions {
   description?: string;
@@ -22,20 +25,6 @@ export interface CreateProjectOptions {
     role?: string | null;
     defaultForAgents?: boolean;
   }>;
-}
-
-export interface AgentTarget {
-  projectId: string;
-  agentId: string;
-  agentName: string;
-}
-
-export interface SessionTarget extends AgentTarget {
-  sessionId: string;
-}
-
-export interface ChainTarget extends SessionTarget {
-  branchId: string;
 }
 
 export interface RoomLifecycleTarget {
@@ -57,7 +46,33 @@ export interface ListProjectsOptions {
   archived?: boolean | null;
 }
 
+export interface ObserverRequestContext {
+  command: string;
+  payload: Readonly<Record<string, unknown>>;
+}
+
 export class ObserverClient extends ServerClient {
+  private readonly _requestContexts = new Map<string, ObserverRequestContext>();
+
+  override async request(message: ServerMessage, timeout = 30_000): Promise<CommandResultPayload> {
+    const requestId = message.request_id ?? generateRequestId();
+    message.request_id = requestId;
+    this._requestContexts.set(requestId, {
+      command: message.type,
+      payload: { ...message.payload },
+    });
+    try {
+      return await super.request(message, timeout);
+    } finally {
+      this._requestContexts.delete(requestId);
+    }
+  }
+
+  /** Return local request scope while its command-result is being dispatched. */
+  getRequestContext(requestId: string): ObserverRequestContext | undefined {
+    return this._requestContexts.get(requestId);
+  }
+
   async subscribe(agentNames?: string[] | null, eventTypes?: string[] | null): Promise<void> {
     const payload: SubscribePayload = {};
     if (agentNames != null) payload.agent_names = agentNames;

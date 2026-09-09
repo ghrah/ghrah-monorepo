@@ -133,11 +133,8 @@ export function useObserver() {
     return connect(connection.serverUrl);
   }
 
-  async function sendMessage(target: string, content: string) {
-    if (!target) return null;
-    const agentTarget = resolveAgentTarget(target);
-    if (!agentTarget) return null;
-    return withClient((c) => c.sendMessage(agentTarget, content));
+  async function sendMessage(target: AgentTarget, content: string) {
+    return withClient((c) => c.sendMessage(target, content));
   }
 
   async function sendHitlResponse(promiseId: string, approved: boolean, reason?: string) {
@@ -153,32 +150,20 @@ export function useObserver() {
     return withClient((c) => c.spawnAgent(projectId, config, null, manifestRef ?? null));
   }
 
-  async function terminateAgent(name: string) {
-    const target = resolveAgentTarget(name);
-    return target ? withClient((c) => c.terminateAgent(target)) : null;
+  async function terminateAgent(target: AgentTarget) {
+    return withClient((c) => c.terminateAgent(target));
   }
 
-  async function createWorkspace(agentName: string) {
-    const target = resolveAgentTarget(agentName);
-    return target ? withClient((c) => c.createWorkspace(target)) : null;
+  async function createWorkspace(target: AgentTarget) {
+    return withClient((c) => c.createWorkspace(target));
   }
 
-  async function workspaceSnapshot(agentName: string, message = "") {
-    const target = resolveAgentTarget(agentName);
-    return target ? withClient((c) => c.workspaceSnapshot(target, message)) : null;
+  async function workspaceSnapshot(target: AgentTarget, message = "") {
+    return withClient((c) => c.workspaceSnapshot(target, message));
   }
 
-  async function workspaceDiff(agentName: string, snapshotId?: string | null) {
-    const target = resolveAgentTarget(agentName);
-    return target ? withClient((c) => c.workspaceDiff(target, snapshotId ?? undefined)) : null;
-  }
-
-  function resolveAgentTarget(agentName: string): AgentTarget | null {
-    const projectId = projects.activeProjectId;
-    const agent = agents.agents.get(agentName);
-    const agentId = agent?.agentId || agent?.config.agent_id;
-    if (!projectId || !agentId) return null;
-    return { projectId, agentId, agentName };
+  async function workspaceDiff(target: AgentTarget, snapshotId?: string | null) {
+    return withClient((c) => c.workspaceDiff(target, snapshotId ?? undefined));
   }
 
   // ── Room / Project / 导航 ──
@@ -216,12 +201,7 @@ export function useObserver() {
 
   /** 拉取 room 历史；bind 的 ROOM_GET_LOG 处理会把结果灌入 rooms store。 */
   async function getRoomLog(roomId: string) {
-    const result = await withClient((c) => c.getRoomLog(roomId));
-    // 空历史时 bind 无法从 entries 反推 room_id，这里补灌空缓存避免重复拉取。
-    if (result?.success && !rooms.logs.has(roomId)) {
-      rooms.setRoomLog(roomId, []);
-    }
-    return result;
+    return withClient((c) => c.getRoomLog(roomId));
   }
 
   async function listProjects(options: ListProjectsOptions = {}) {
@@ -244,8 +224,8 @@ export function useObserver() {
     projects.setActiveProject(projectId);
   }
 
-  function selectAgent(name: string | null) {
-    agents.selectAgent(name);
+  function selectAgent(target: AgentTarget | null) {
+    agents.selectAgent(target);
   }
 
   // ── Manifest: Ability ──

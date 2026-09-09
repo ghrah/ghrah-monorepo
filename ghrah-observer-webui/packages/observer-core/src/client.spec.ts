@@ -89,6 +89,36 @@ describe("ObserverClient", () => {
     });
   });
 
+  describe("request context", () => {
+    it("keeps the originating command scope available during result dispatch", async () => {
+      await connectClient(client, mockWs);
+      let contextDuringDispatch: ReturnType<ObserverClient["getRequestContext"]>;
+      client.on("command_result", (message) => {
+        const requestId = String((message.payload as { request_id?: string }).request_id ?? "");
+        contextDuringDispatch = client.getRequestContext(requestId);
+      });
+
+      const resultPromise = client.listAgents("p-empty");
+      const sent = JSON.parse(mockWs.sent.at(-1) ?? "{}") as {
+        request_id: string;
+      };
+      mockWs.onmessage!({
+        data: JSON.stringify({
+          type: "command_result",
+          payload: { request_id: sent.request_id, success: true, data: { agents: [] } },
+          request_id: sent.request_id,
+        }),
+      });
+
+      await resultPromise;
+      expect(contextDuringDispatch).toEqual({
+        command: CommandType.LIST_AGENTS,
+        payload: { project_id: "p-empty" },
+      });
+      expect(client.getRequestContext(sent.request_id)).toBeUndefined();
+    });
+  });
+
   describe("unsubscribe", () => {
     it("sends unsubscribe command with correct payload", async () => {
       await connectClient(client, mockWs);

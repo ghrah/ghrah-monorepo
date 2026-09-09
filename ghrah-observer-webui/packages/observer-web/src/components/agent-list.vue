@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { useAgentsStore, useRoomsStore } from "@ghrah/observer-core";
+import {
+  type AgentInfo,
+  type AgentTarget,
+  agentKey,
+  sameAgent,
+  useAgentsStore,
+  useProjectsStore,
+  useRoomsStore,
+} from "@ghrah/observer-core";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import AgentActionMenu from "@/components/agent-action-menu.vue";
@@ -7,8 +15,14 @@ import AgentActionMenu from "@/components/agent-action-menu.vue";
 const { t } = useI18n();
 
 const agents = useAgentsStore();
+const projects = useProjectsStore();
 const rooms = useRoomsStore();
-const emit = defineEmits<{ openAgent: [agentName: string] }>();
+const emit = defineEmits<{ openAgent: [target: AgentTarget] }>();
+
+const visibleAgents = computed(() => {
+  const projectId = projects.activeProjectId;
+  return projectId ? agents.activeAgentsForProject(projectId) : [];
+});
 
 /** agent 名 → 所属 room 列表（RoomMember.subject_type === "agent"）。 */
 const agentRooms = computed<Map<string, string[]>>(() => {
@@ -28,14 +42,18 @@ const agentRooms = computed<Map<string, string[]>>(() => {
   return map;
 });
 
-function roomsOf(agentName: string): string[] {
-  const agent = agents.agents.get(agentName);
-  return agentRooms.value.get(agent?.agentId || "") ?? agentRooms.value.get(agentName) ?? [];
+function roomsOf(agent: AgentInfo): string[] {
+  return agentRooms.value.get(agent.agentId) ?? agentRooms.value.get(agent.agentName) ?? [];
 }
 
-function selectAgent(agentName: string) {
-  agents.selectAgent(agentName);
-  emit("openAgent", agentName);
+function selectAgent(agent: AgentInfo) {
+  const target: AgentTarget = {
+    projectId: agent.projectId,
+    agentId: agent.agentId,
+    agentName: agent.agentName,
+  };
+  agents.selectAgent(target);
+  emit("openAgent", target);
 }
 </script>
 
@@ -49,27 +67,27 @@ function selectAgent(agentName: string) {
       <RouterLink to="/config/agents" class="btn-primary">{{ t("agents.spawn") }}</RouterLink>
     </div>
 
-    <ul v-if="agents.activeAgents.length > 0" class="flex-1 overflow-y-auto space-y-1">
+    <ul v-if="visibleAgents.length > 0" class="flex-1 overflow-y-auto space-y-1">
       <li
-        v-for="agent in agents.activeAgents"
-        :key="agent.name"
+        v-for="agent in visibleAgents"
+        :key="agentKey(agent)"
         :class="[
           'flex items-center justify-between px-2 py-1.5 rounded cursor-pointer text-sm transition-colors',
-          agents.selectedAgentName === agent.name
+          sameAgent(agents.selectedAgentTarget, agent)
             ? 'bg-blue-100 dark:bg-blue-900 text-blue-900 dark:text-blue-100 font-medium'
             : 'hover:bg-gray-100 dark:hover:bg-gray-800',
         ]"
-        @click="selectAgent(agent.name)"
+        @click="selectAgent(agent)"
       >
-        <span class="truncate">{{ agent.name }}</span>
+        <span class="truncate">{{ agent.agentName }}</span>
         <div class="flex items-center gap-1">
           <span
-            v-for="roomName in roomsOf(agent.name)"
+            v-for="roomName in roomsOf(agent)"
             :key="roomName"
             :title="roomName"
             class="agent-room-badge inline-flex items-center justify-center min-w-5 h-5 px-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
           >{{ roomName.slice(0, 1).toUpperCase() }}</span>
-          <AgentActionMenu v-if="agents.selectedAgentName === agent.name" />
+          <AgentActionMenu v-if="sameAgent(agents.selectedAgentTarget, agent)" />
           <span class="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />
         </div>
       </li>

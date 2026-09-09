@@ -40,10 +40,11 @@ function initial(subject: string): string {
   return subject.slice(0, 1).toUpperCase();
 }
 
-function memberLabel(member: RoomMember): string {
+function memberLabel(member: RoomMember, projectId: string): string {
   if (member.subject_name) return member.subject_name;
   return (
-    agents.activeAgents.find((agent) => agent.agentId === member.subject)?.name ?? member.subject
+    agents.agentsForProject(projectId).find((agent) => agent.agentId === member.subject)
+      ?.agentName ?? member.subject
   );
 }
 
@@ -105,24 +106,27 @@ const memberBusy = ref(false);
 const candidateAgents = computed(() => {
   const room = activeRoom.value;
   if (!room) return [];
-  return agents.activeAgents.filter(
-    (agent) =>
-      !room.members.some(
-        (member) =>
-          member.subject === agent.name ||
-          (!!agent.agentId && member.subject === agent.agentId) ||
-          member.subject_name === agent.name,
-      ),
-  );
+  return agents
+    .activeAgentsForProject(room.project_id)
+    .filter(
+      (agent) =>
+        !room.members.some(
+          (member) =>
+            member.subject === agent.agentName ||
+            member.subject === agent.agentId ||
+            member.subject_name === agent.agentName,
+        ),
+    );
 });
 
-async function addMember(agentName: string) {
+async function addMember(agentId: string) {
   const room = activeRoom.value;
   if (!room || memberBusy.value) return;
   memberBusy.value = true;
   try {
-    const agent = agents.agents.get(agentName);
-    const result = await joinRoom(room.room_id, agent?.agentId || agentName, "agent");
+    const agent = agents.getAgent({ projectId: room.project_id, agentId });
+    if (!agent) return;
+    const result = await joinRoom(room.room_id, agent.agentId, "agent", agent.agentName);
     if (result && !result.success) {
       error.value = result.error ?? t("nav.room.joinFailed");
     }
@@ -218,7 +222,7 @@ async function removeMember(subject: string) {
           <span
             v-for="member in room.members"
             :key="member.subject"
-            :title="memberLabel(member)"
+            :title="memberLabel(member, room.project_id)"
             :class="[
               'room-member inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold',
               isMultiRoom(member.subject)
@@ -226,7 +230,7 @@ async function removeMember(subject: string) {
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
             ]"
           >
-            {{ initial(memberLabel(member)) }}
+            {{ initial(memberLabel(member, room.project_id)) }}
           </span>
         </div>
       </li>
@@ -248,8 +252,8 @@ async function removeMember(subject: string) {
           :key="member.subject"
           class="flex items-center justify-between gap-1"
         >
-          <span class="truncate" :title="memberLabel(member)">
-            {{ member.subject_type === "human" ? "👤" : "🤖" }} {{ memberLabel(member) }}
+          <span class="truncate" :title="memberLabel(member, activeRoom.project_id)">
+            {{ member.subject_type === "human" ? "👤" : "🤖" }} {{ memberLabel(member, activeRoom.project_id) }}
           </span>
           <button
             class="text-red-500 hover:text-red-700 dark:hover:text-red-400 px-1"
@@ -279,11 +283,11 @@ async function removeMember(subject: string) {
         >
           <li
             v-for="agent in candidateAgents"
-            :key="agent.agentId || agent.name"
+            :key="agent.agentId"
             class="px-2 py-1 cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900 text-gray-700 dark:text-gray-200"
-            @click="addMember(agent.name)"
+            @click="addMember(agent.agentId)"
           >
-            🤖 {{ agent.name }}
+            🤖 {{ agent.agentName }}
           </li>
         </ul>
         <p v-if="addOpen && candidateAgents.length === 0" class="text-gray-400 dark:text-gray-600 mt-1 italic">

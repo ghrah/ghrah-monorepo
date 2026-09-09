@@ -8,6 +8,10 @@ export type ChatEntryKind =
   | "end_task";
 
 export interface ChatEntry {
+  projectId?: string;
+  agentId?: string;
+  sessionId?: string;
+  branchId?: string;
   from: string;
   to: string;
   content: string;
@@ -28,6 +32,8 @@ export interface FileChange {
   projectId: string;
   agentId: string;
   agentName: string;
+  sessionId: string;
+  branchId: string;
   abilityName: string;
   filePath?: string;
   success: boolean;
@@ -41,6 +47,13 @@ export interface FileChange {
 export interface FileChangeScope {
   projectId: string;
   agentId: string;
+  sessionId?: string;
+  branchId?: string;
+}
+
+export interface RoomLogProjectionScope {
+  projectId: string;
+  agentId?: string;
 }
 
 const FILE_CHANGE_ABILITIES = new Set(["write_file", "edit_file", "delete_file"]);
@@ -66,7 +79,10 @@ function _blockArg(block: ContentBlock, key: string): string {
  * message 为 content（缺时回退 JSON.stringify(data)）；targets 非空 = 定向这些
  * agent，缺省/空 = 整室广播。
  */
-export function roomLogToChatEntries(entry: RoomLogEntryPayload): ChatEntry {
+export function roomLogToChatEntries(
+  entry: RoomLogEntryPayload,
+  scope: RoomLogProjectionScope = { projectId: "" },
+): ChatEntry {
   const data = entry.data ?? {};
   const message = data.message;
   const content = typeof message === "string" ? message : JSON.stringify(data);
@@ -76,6 +92,8 @@ export function roomLogToChatEntries(entry: RoomLogEntryPayload): ChatEntry {
       ? (rawTargets as string[])
       : undefined;
   return {
+    projectId: scope.projectId,
+    agentId: entry.author_type === "agent" ? scope.agentId : undefined,
     from: entry.author,
     to: entry.room_id,
     content,
@@ -214,7 +232,7 @@ export function rebuildChatEntriesFromChain(nodes: ActionNode[]): ChatEntry[] {
 
 export function projectNodeToFileChanges(
   node: ActionNode,
-  scope: FileChangeScope = { projectId: "", agentId: "" },
+  scope: FileChangeScope = { projectId: "", agentId: "", sessionId: "", branchId: "" },
 ): FileChange[] {
   const out: FileChange[] = [];
   const agentName = node.agent_name ?? "";
@@ -233,6 +251,8 @@ export function projectNodeToFileChanges(
       projectId: scope.projectId,
       agentId: scope.agentId,
       agentName,
+      sessionId: scope.sessionId ?? node.session_id ?? "",
+      branchId: scope.branchId ?? node.created_on_branch_id ?? "",
       abilityName,
       filePath,
       success: outcome === "success",

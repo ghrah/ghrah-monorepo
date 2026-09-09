@@ -104,6 +104,30 @@ describe("useProjectsStore", () => {
     expect(store.activeProject?.name).toBe("two");
   });
 
+  it("treats stopped Projects as definition-operable but archived Projects as unavailable", () => {
+    const store = useProjectsStore();
+    store.setProjectsFromList([
+      makeProject({ project_id: "stopped", status: "stopped" }),
+      makeProject({ project_id: "archived", status: "stopped", archived_at: "2026-09-09" }),
+    ]);
+    expect(store.isProjectOperable("stopped")).toBe(true);
+    expect(store.isProjectOperable("archived")).toBe(false);
+  });
+
+  it("replaces active and archived Project result buckets independently", () => {
+    const store = useProjectsStore();
+    store.replaceProjects([makeProject({ project_id: "active" })], false);
+    store.replaceProjects(
+      [makeProject({ project_id: "archived", archived_at: "2026-09-09" })],
+      true,
+    );
+    store.setActiveProject("active");
+    store.replaceProjects([], false);
+    expect(store.projectList).toEqual([]);
+    expect(store.archivedProjectList.map((project) => project.project_id)).toEqual(["archived"]);
+    expect(store.activeProjectId).toBeNull();
+  });
+
   it("clearAll resets", () => {
     const store = useProjectsStore();
     store.onProjectEvent({ project: makeProject() });

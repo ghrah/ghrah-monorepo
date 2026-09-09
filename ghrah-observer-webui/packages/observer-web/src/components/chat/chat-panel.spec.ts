@@ -53,7 +53,7 @@ function logEntry(
 
 function setup() {
   const rooms = useRoomsStore();
-  rooms.setRoomsFromList([room("r1", "arch"), room("r2", "frontend")]);
+  rooms.replaceProjectRooms("p1", [room("r1", "arch"), room("r2", "frontend")], "active");
   const chat = useChatStore();
   const connection = useConnectionStore();
   connection.setConnected();
@@ -101,8 +101,20 @@ describe("ChatPanel", () => {
     const { rooms, chat } = setup();
     rooms.setActiveRoom("r1");
     rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "history")]);
-    chat.addPendingEntry({ to: "r1", content: "pending-r1", agentName: "", roomId: "r1" });
-    chat.addPendingEntry({ to: "r2", content: "pending-r2", agentName: "", roomId: "r2" });
+    chat.addPendingEntry({
+      projectId: "p1",
+      to: "r1",
+      content: "pending-r1",
+      agentName: "",
+      roomId: "r1",
+    });
+    chat.addPendingEntry({
+      projectId: "p1",
+      to: "r2",
+      content: "pending-r2",
+      agentName: "",
+      roomId: "r2",
+    });
     const wrapper = mount(ChatPanel);
     await wrapper.vm.$nextTick();
     const entries = wrapper.findAll(".chat-entry");
@@ -139,7 +151,7 @@ describe("ChatPanel", () => {
     // 模拟 bind 的 ROOM_LOG_APPENDED 分发：rooms 追加 + chat echo 确认
     const echo = logEntry("r1", 1, "user", "human", "echo me");
     rooms.onRoomLogAppended({ entry: echo });
-    chat.onRoomLogAppended(echo);
+    chat.onRoomLogAppended(echo, "p1");
     await wrapper.vm.$nextTick();
     expect(chat.allEntries.find((e) => e.content === "echo me")).toBeUndefined();
     const entries = wrapper.findAll(".chat-entry");
@@ -168,7 +180,7 @@ describe("ChatPanel", () => {
 
   it("targeted send: chip 选中后 roomSend 携带 targets", async () => {
     const { rooms } = setup();
-    rooms.setRoomsFromList([room("r1", "arch", ["frontend", "backend"])]);
+    rooms.replaceProjectRooms("p1", [room("r1", "arch", ["frontend", "backend"])], "active");
     rooms.setActiveRoom("r1");
     roomSendMock.mockResolvedValueOnce({ success: true });
     const wrapper = mount(ChatPanel);

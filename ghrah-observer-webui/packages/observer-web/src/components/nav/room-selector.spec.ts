@@ -49,6 +49,30 @@ function room(
   };
 }
 
+function setRooms(list: RoomInfoPayload[]) {
+  const store = useRoomsStore();
+  for (const projectId of new Set(list.map((item) => item.project_id))) {
+    store.replaceProjectRooms(
+      projectId,
+      list.filter((item) => item.project_id === projectId),
+      "active",
+    );
+  }
+}
+
+function setAgents(list: Array<{ name: string; agent_id?: string }>) {
+  useAgentsStore().replaceProjectAgents(
+    "p1",
+    list.map((item) => ({
+      project_id: "p1",
+      agent_id: item.agent_id ?? item.name,
+      name: item.name,
+      runtime_state: "running",
+    })),
+    { status: "active", archived_at: null },
+  );
+}
+
 describe("RoomSelector", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -65,8 +89,7 @@ describe("RoomSelector", () => {
   });
 
   it("lists rooms with member counts and emits switchRoom on click", async () => {
-    const rooms = useRoomsStore();
-    rooms.setRoomsFromList([
+    setRooms([
       room("r1", "p1", "arch", ["architect", "frontend"]),
       room("r2", "p1", "frontend", ["frontend"]),
     ]);
@@ -82,9 +105,8 @@ describe("RoomSelector", () => {
   });
 
   it("filters rooms by active project", async () => {
-    const rooms = useRoomsStore();
     const projects = useProjectsStore();
-    rooms.setRoomsFromList([room("r1", "p1", "arch"), room("r2", "p2", "other")]);
+    setRooms([room("r1", "p1", "arch"), room("r2", "p2", "other")]);
     projects.setActiveProject("p2");
     const wrapper = mount(RoomSelector);
     await wrapper.vm.$nextTick();
@@ -94,17 +116,15 @@ describe("RoomSelector", () => {
   });
 
   it("lists all rooms when no active project", async () => {
-    const rooms = useRoomsStore();
-    rooms.setRoomsFromList([room("r1", "p1", "arch"), room("r2", "p2", "other")]);
+    setRooms([room("r1", "p1", "arch"), room("r2", "p2", "other")]);
     const wrapper = mount(RoomSelector);
     await wrapper.vm.$nextTick();
     expect(wrapper.findAll("li")).toHaveLength(2);
   });
 
   it("badges members that belong to multiple rooms", async () => {
-    const rooms = useRoomsStore();
     // architect 同时在 3 个 room；frontend 只在 2 个；tester 只在 1 个
-    rooms.setRoomsFromList([
+    setRooms([
       room("r1", "p1", "arch", ["architect", "frontend"]),
       room("r2", "p1", "frontend", ["architect", "frontend"]),
       room("r3", "p1", "backend", ["architect", "tester"]),
@@ -130,7 +150,7 @@ describe("RoomSelector", () => {
 
   it("highlights the active room", async () => {
     const rooms = useRoomsStore();
-    rooms.setRoomsFromList([room("r1", "p1", "arch"), room("r2", "p1", "frontend")]);
+    setRooms([room("r1", "p1", "arch"), room("r2", "p1", "frontend")]);
     rooms.setActiveRoom("r2");
     const wrapper = mount(RoomSelector);
     await wrapper.vm.$nextTick();
@@ -186,14 +206,10 @@ describe("RoomSelector", () => {
 
   it("manages members of the active room: remove and add", async () => {
     const rooms = useRoomsStore();
-    const agents = useAgentsStore();
-    rooms.setRoomsFromList([room("r1", "p1", "arch", ["architect"])]);
+    setRooms([room("r1", "p1", "arch", ["architect"])]);
     rooms.setActiveRoom("r1");
     // active agents：architect（已在室）+ tester（候选）
-    agents.setAgentsFromList([
-      { name: "architect", config: {} as never },
-      { name: "tester", config: {} as never },
-    ]);
+    setAgents([{ name: "architect" }, { name: "tester" }]);
 
     const wrapper = mount(RoomSelector);
     await wrapper.vm.$nextTick();
@@ -226,15 +242,14 @@ describe("RoomSelector", () => {
       .find((li) => li.text().includes("tester") && li.text().includes("🤖"));
     expect(candidate).toBeDefined();
     await candidate!.trigger("click");
-    expect(joinRoomMock).toHaveBeenCalledWith("r1", "tester", "agent");
+    expect(joinRoomMock).toHaveBeenCalledWith("r1", "tester", "agent", "tester");
   });
 
   it("member candidates exclude agents already in the room", async () => {
     const rooms = useRoomsStore();
-    const agents = useAgentsStore();
-    rooms.setRoomsFromList([room("r1", "p1", "arch", ["architect"])]);
+    setRooms([room("r1", "p1", "arch", ["architect"])]);
     rooms.setActiveRoom("r1");
-    agents.setAgentsFromList([{ name: "architect", config: {} as never }]);
+    setAgents([{ name: "architect" }]);
 
     const wrapper = mount(RoomSelector);
     await wrapper.vm.$nextTick();
@@ -247,7 +262,6 @@ describe("RoomSelector", () => {
 
   it("uses stable member IDs on the wire but renders and matches the display name", async () => {
     const rooms = useRoomsStore();
-    const agents = useAgentsStore();
     const stableRoom = room("r1", "p1", "stable-room");
     stableRoom.members = [
       {
@@ -257,11 +271,11 @@ describe("RoomSelector", () => {
         joined_at: "",
       },
     ];
-    rooms.setRoomsFromList([stableRoom]);
+    setRooms([stableRoom]);
     rooms.setActiveRoom("r1");
-    agents.setAgentsFromList([
-      { name: "shuoxi", agent_id: "stable-shuoxi", config: {} as never },
-      { name: "tester", agent_id: "stable-tester", config: {} as never },
+    setAgents([
+      { name: "shuoxi", agent_id: "stable-shuoxi" },
+      { name: "tester", agent_id: "stable-tester" },
     ]);
 
     const wrapper = mount(RoomSelector);
@@ -276,6 +290,6 @@ describe("RoomSelector", () => {
     await addBtn!.trigger("click");
     const candidate = wrapper.findAll("li").find((li) => li.text().includes("tester"));
     await candidate!.trigger("click");
-    expect(joinRoomMock).toHaveBeenCalledWith("r1", "stable-tester", "agent");
+    expect(joinRoomMock).toHaveBeenCalledWith("r1", "stable-tester", "agent", "tester");
   });
 });

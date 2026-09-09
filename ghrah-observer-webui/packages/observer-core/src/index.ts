@@ -1,14 +1,13 @@
 export { type ConnectStoresOptions, connectStores } from "./bind.js";
+export { clearAgentDerived, clearProjectDerived, clearRoomDerived } from "./clear-derived.js";
 export {
-  type AgentTarget,
-  type ChainTarget,
   type CreateProjectOptions,
   type ListProjectsOptions,
   ObserverClient,
+  type ObserverRequestContext,
   type ProjectDeleteTarget,
   type ProjectLifecycleTarget,
   type RoomLifecycleTarget,
-  type SessionTarget,
 } from "./client.js";
 export {
   createFrameBatcher,
@@ -23,11 +22,31 @@ export {
   type FileChangeScope,
   projectNodeToChatEntries,
   projectNodeToFileChanges,
+  type RoomLogProjectionScope,
   rebuildChatEntriesFromChain,
   roomLogToChatEntries,
 } from "./projection.js";
-export { useActionChainsStore } from "./stores/action-chains.js";
-export { type AgentInfo, useAgentsStore } from "./stores/agents.js";
+export {
+  type AgentKey,
+  type AgentTarget,
+  agentKey,
+  branchKey,
+  type ChainTarget,
+  chainKey,
+  hasCompleteAgentKey,
+  hasCompleteChainTarget,
+  type RoomTarget,
+  type SessionTarget,
+  sameAgent,
+  sessionKey,
+} from "./scope.js";
+export {
+  type ActionChainProjection,
+  type ProjectionDiagnostic,
+  useActionChainsStore,
+} from "./stores/action-chains.js";
+export { type AgentInfo, type AgentListItem, useAgentsStore } from "./stores/agents.js";
+export { type BranchProjection, useBranchesStore } from "./stores/branches.js";
 export { useChangesStore } from "./stores/changes.js";
 export { DEFAULT_HUMAN_AUTHOR, useChatStore } from "./stores/chat.js";
 export { type ConnectionState, useConnectionStore } from "./stores/connection.js";
@@ -44,4 +63,5 @@ export {
 } from "./stores/manifests.js";
 export { useProjectsStore } from "./stores/projects.js";
 export { MAX_CACHED_ROOM_LOGS, useRoomsStore } from "./stores/rooms.js";
+export { type SessionProjection, useSessionsStore } from "./stores/sessions.js";
 export { useTasksStore } from "./stores/tasks.js";

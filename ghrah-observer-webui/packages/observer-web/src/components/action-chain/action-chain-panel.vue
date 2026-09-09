@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { useActionChainsStore, useAgentsStore } from "@ghrah/observer-core";
+import {
+  type ChainTarget,
+  chainKey,
+  useActionChainsStore,
+  useAgentsStore,
+  useBranchesStore,
+  useSessionsStore,
+} from "@ghrah/observer-core";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import ActionNodeRow from "./action-node.vue";
@@ -10,16 +17,27 @@ import { createTreeCache, type TreeRow } from "./build-tree.js";
 
 const chains = useActionChainsStore();
 const agents = useAgentsStore();
+const sessions = useSessionsStore();
+const branches = useBranchesStore();
 
 const selectedAgentName = computed(() => agents.selectedAgentName);
+const activeChainTarget = computed<ChainTarget | null>(() => {
+  const agent = agents.selectedAgentTarget;
+  if (!agent) return null;
+  const sessionId = sessions.activeSessionId(agent);
+  if (!sessionId) return null;
+  const session = { ...agent, sessionId };
+  const branchId = branches.activeBranchId(session);
+  return branchId ? { ...session, branchId } : null;
+});
 
-// per-agent 树缓存（性能红线 2）：append-only 增长走增量补建，切换 agent 不清缓存
+// per-chain 树缓存（性能红线 2）：append-only 增长走增量补建，切换作用域不清缓存
 const treeCache = createTreeCache();
 
 const rows = computed<TreeRow[]>(() => {
-  const name = selectedAgentName.value;
-  if (!name) return [];
-  return treeCache.rowsFor(name, chains.getChain(name));
+  const target = activeChainTarget.value;
+  if (!target) return [];
+  return treeCache.rowsFor(chainKey(target), chains.getChain(target));
 });
 </script>
 

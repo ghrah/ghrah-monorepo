@@ -2,24 +2,62 @@ import type { ActionNode } from "@ghrah/protocol";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 import { type FileChange, projectNodeToFileChanges } from "../projection.js";
+import type { AgentTarget, ChainTarget } from "../scope.js";
 
 export const useChangesStore = defineStore("ghrah-changes", () => {
   const changes = ref<FileChange[]>([]);
   const seenKeys = new Set<string>();
 
-  function onActionChainNode(_agentName: string, node: ActionNode) {
-    const fcs = projectNodeToFileChanges(node);
-    if (fcs.length === 0) return;
+  function onActionChainNode(target: ChainTarget, node: ActionNode) {
+    const projected = projectNodeToFileChanges(node, target);
+    if (projected.length === 0) return;
     const next = [...changes.value];
     let appended = false;
-    for (const fc of fcs) {
-      const key = `${fc.nodeId}#${fc.abilityName}#${fc.filePath ?? ""}`;
+    for (const change of projected) {
+      const key = JSON.stringify([
+        change.projectId,
+        change.agentId,
+        change.sessionId,
+        change.branchId,
+        change.nodeId,
+        change.abilityName,
+        change.filePath ?? "",
+      ]);
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
-      next.push(fc);
+      next.push(change);
       appended = true;
     }
     if (appended) changes.value = next;
+  }
+
+  function rebuildSeenKeys() {
+    seenKeys.clear();
+    for (const change of changes.value) {
+      seenKeys.add(
+        JSON.stringify([
+          change.projectId,
+          change.agentId,
+          change.sessionId,
+          change.branchId,
+          change.nodeId,
+          change.abilityName,
+          change.filePath ?? "",
+        ]),
+      );
+    }
+  }
+
+  function clearAgent(target: AgentTarget) {
+    changes.value = changes.value.filter(
+      (change) => change.projectId !== target.projectId || change.agentId !== target.agentId,
+    );
+    rebuildSeenKeys();
+  }
+
+  function clearProject(projectId: string) {
+    changes.value = changes.value.filter((change) => change.projectId !== projectId);
+    rebuildSeenKeys();
   }
 
   function clearAll() {
@@ -27,9 +65,5 @@ export const useChangesStore = defineStore("ghrah-changes", () => {
     seenKeys.clear();
   }
 
-  return {
-    changes,
-    onActionChainNode,
-    clearAll,
-  };
+  return { changes, onActionChainNode, clearAgent, clearProject, clearAll };
 });
