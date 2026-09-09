@@ -2,18 +2,13 @@ export default {
   common: {
     cancel: "Cancel",
     close: "Close",
+    confirm: "Confirm",
     create: "Create",
     loading: "Loading...",
     validationFailed: "Validation failed",
   },
   app: {
     title: "Ghrah",
-    subtitle: "Agent workspace",
-    nav: {
-      dashboard: "Dashboard",
-      changes: "Changes",
-      config: "Config",
-    },
     status: {
       connected: "Connected",
       connecting: "Connecting...",
@@ -26,6 +21,13 @@ export default {
       en: "English",
       "zh-CN": "中文",
     },
+  },
+  instanceProfile: {
+    defaultName: "Operator",
+    name: "Display name",
+    editName: "Edit display name",
+    settings: "Instance settings",
+    connectionDetails: "Connection details",
   },
   dashboard: {
     projects: "Projects",
@@ -144,7 +146,15 @@ export default {
     unknownPath: "(unknown path)",
   },
   config: {
+    title: "Instance settings",
+    close: "Close instance settings",
+    escapeHint: "Esc",
+    instanceEyebrow: "Current instance",
+    unsavedTitle: "Discard unsaved changes?",
+    unsavedConfirm: "You have unsaved changes. Discard them?",
+    discardChanges: "Discard changes",
     nav: {
+      label: "Settings sections",
       general: "General",
       agents: "Agent Config",
       abilities: "Ability Config",
@@ -161,6 +171,7 @@ export default {
       newManifest: "+ New Agent Manifest",
       empty: "No agent manifests found",
       deleteConfirm: "Delete this Agent Manifest?",
+      deleteTitle: "Delete Agent Manifest?",
       deleteFailed: "Failed to delete manifest",
       notConnected: "Not connected to Gateway",
       selectManifest: "Select an Agent Manifest to view details",

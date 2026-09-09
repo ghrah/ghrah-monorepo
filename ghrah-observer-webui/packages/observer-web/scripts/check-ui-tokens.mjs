@@ -8,7 +8,6 @@ if (/font-size:\s*\d+px/.test(css)) {
 }
 
 const tokenizedClasses = [
-  "brand-lockup > div > span",
   "section-eyebrow",
   "project-heading h3",
   "project-empty",

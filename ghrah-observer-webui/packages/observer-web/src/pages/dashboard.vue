@@ -12,6 +12,7 @@ import ActionChainPanel from "@/components/action-chain/action-chain-panel.vue";
 import AgentList from "@/components/agent-list.vue";
 import ChatPanel from "@/components/chat/chat-panel.vue";
 import HitlInbox from "@/components/hitl/hitl-inbox.vue";
+import InstanceProfileControl from "@/components/instance-profile-control.vue";
 import ProjectSelector from "@/components/nav/project-selector.vue";
 import RoomSelector from "@/components/nav/room-selector.vue";
 import { useObserver } from "@/composables/useObserver";
@@ -31,6 +32,9 @@ type AgentWorkspaceTab = {
 };
 
 type WorkspaceTab = RoomWorkspaceTab | AgentWorkspaceTab;
+const emit = defineEmits<{
+  openSettings: [section: "general" | "agents" | "abilities"];
+}>();
 
 const rooms = useRoomsStore();
 const agents = useAgentsStore();
@@ -92,7 +96,10 @@ function closeTab(tab: WorkspaceTab) {
     </aside>
 
     <aside class="room-sidebar workspace-column" :aria-label="t('dashboard.rooms')">
-      <RoomSelector @open-room="openRoom" />
+      <div class="room-sidebar-scroll">
+        <RoomSelector @open-room="openRoom" />
+      </div>
+      <InstanceProfileControl @open-settings="emit('openSettings', 'general')" />
     </aside>
 
     <section class="workspace-main" :aria-label="t('dashboard.workspaceTabs')">
@@ -148,7 +155,7 @@ function closeTab(tab: WorkspaceTab) {
     </section>
 
     <aside class="agent-sidebar workspace-column" :aria-label="t('dashboard.agents')">
-      <AgentList @open-agent="openAgent" />
+      <AgentList @open-agent="openAgent" @open-settings="emit('openSettings', $event)" />
     </aside>
   </div>
 </template>

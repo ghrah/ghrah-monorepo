@@ -52,7 +52,7 @@ function agentItem(wrapper: ReturnType<typeof mount>, name: string) {
 
 function mountAgentList() {
   return mount(AgentList, {
-    global: { stubs: { AgentActionMenu: true, RouterLink: true } },
+    global: { stubs: { AgentActionMenu: true } },
   });
 }
 
@@ -65,6 +65,12 @@ describe("AgentList", () => {
   it("shows empty state when no agents", () => {
     const wrapper = mountAgentList();
     expect(wrapper.text()).toContain("No active agents");
+  });
+
+  it("opens Agent settings from Spawn", async () => {
+    const wrapper = mountAgentList();
+    await wrapper.get(".btn-primary").trigger("click");
+    expect(wrapper.emitted("openSettings")?.[0]).toEqual(["agents"]);
   });
 
   it("click selects agent (drives per-agent ActionChain)", async () => {

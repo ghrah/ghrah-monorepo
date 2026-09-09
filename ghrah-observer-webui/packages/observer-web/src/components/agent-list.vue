@@ -17,7 +17,10 @@ const { t } = useI18n();
 const agents = useAgentsStore();
 const projects = useProjectsStore();
 const rooms = useRoomsStore();
-const emit = defineEmits<{ openAgent: [target: AgentTarget] }>();
+const emit = defineEmits<{
+  openAgent: [target: AgentTarget];
+  openSettings: [section: "agents"];
+}>();
 
 const visibleAgents = computed(() => {
   const projectId = projects.activeProjectId;
@@ -64,7 +67,9 @@ function selectAgent(agent: AgentInfo) {
         <span class="section-eyebrow">{{ t("agents.runtime") }}</span>
         <h3>{{ t("agents.title") }}</h3>
       </div>
-      <RouterLink to="/config/agents" class="btn-primary">{{ t("agents.spawn") }}</RouterLink>
+      <button type="button" class="btn-primary" @click="emit('openSettings', 'agents')">
+        {{ t("agents.spawn") }}
+      </button>
     </div>
 
     <ul v-if="visibleAgents.length > 0" class="flex-1 overflow-y-auto space-y-1">

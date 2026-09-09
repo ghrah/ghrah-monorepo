@@ -2,18 +2,13 @@ export default {
   common: {
     cancel: "取消",
     close: "关闭",
+    confirm: "确认",
     create: "创建",
     loading: "加载中...",
     validationFailed: "校验失败",
   },
   app: {
     title: "Ghrah",
-    subtitle: "Agent 工作区",
-    nav: {
-      dashboard: "工作台",
-      changes: "变更",
-      config: "配置",
-    },
     status: {
       connected: "已连接",
       connecting: "连接中...",
@@ -26,6 +21,13 @@ export default {
       en: "English",
       "zh-CN": "中文",
     },
+  },
+  instanceProfile: {
+    defaultName: "操作员",
+    name: "个人称呼",
+    editName: "编辑个人称呼",
+    settings: "实例设置",
+    connectionDetails: "连接详情",
   },
   dashboard: {
     projects: "项目",
@@ -143,7 +145,15 @@ export default {
     unknownPath: "（未知路径）",
   },
   config: {
+    title: "实例设置",
+    close: "关闭实例设置",
+    escapeHint: "Esc",
+    instanceEyebrow: "当前实例",
+    unsavedTitle: "放弃未保存的更改？",
+    unsavedConfirm: "存在未保存的更改，确定要放弃吗？",
+    discardChanges: "放弃更改",
     nav: {
+      label: "设置分区",
       general: "通用",
       agents: "Agent 配置",
       abilities: "Ability 配置",
@@ -160,6 +170,7 @@ export default {
       newManifest: "+ 新建 Agent Manifest",
       empty: "未找到 Agent Manifest",
       deleteConfirm: "确定要删除此 Agent Manifest 吗？",
+      deleteTitle: "删除 Agent Manifest？",
       deleteFailed: "删除失败",
       notConnected: "未连接到 Gateway",
       selectManifest: "选择一个 Agent Manifest 查看详情",
