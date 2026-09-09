@@ -40,6 +40,7 @@ import {
   PersistSavePayloadSchema,
   ProjectCreatePayloadSchema,
   ProjectDeletePayloadSchema,
+  ProjectInfoPayloadSchema,
   ProjectLifecyclePayloadSchema,
   ProjectListPayloadSchema,
   ProjectUpdatePayloadSchema,
@@ -103,6 +104,32 @@ describe("Project payload schemas", () => {
     expect(RoomLifecyclePayloadSchema.parse(target)).toEqual(target);
     expect(RoomDeletePayloadSchema.parse(target)).toEqual(target);
     expect(RoomDeletePayloadSchema.safeParse({ room_id: "room-001" }).success).toBe(false);
+  });
+
+  it("preserves Project isolation and Agent runtime diagnostics", () => {
+    const project = ProjectInfoPayloadSchema.parse({
+      project_id: "proj-001",
+      name: "demo",
+      isolation: {
+        agent_path_grants: { "agent-001": [{ workspace_id: "ws-1", subpath: "src" }] },
+        agent_private_dir: false,
+        task_scope: true,
+      },
+      agents: [
+        {
+          agent_id: "agent-001",
+          name: "architect",
+          cluster_id: "cluster-1",
+          runtime_status: "error",
+          runtime_error: "transport down",
+        },
+      ],
+    });
+
+    expect(project.isolation.agent_private_dir).toBe(false);
+    expect(project.isolation.agent_path_grants["agent-001"]?.[0]?.subpath).toBe("src");
+    expect(project.agents[0]?.runtime_status).toBe("error");
+    expect(project.agents[0]?.runtime_error).toBe("transport down");
   });
 });
 
@@ -200,8 +227,12 @@ describe("SendMessagePayloadSchema", () => {
       target: "agent-1",
       content: "hello",
       sender: "agent-2",
+      timeout: 30,
+      metadata: { room_id: "room-1" },
     });
     expect(result.sender).toBe("agent-2");
+    expect(result.timeout).toBe(30);
+    expect(result.metadata).toEqual({ room_id: "room-1" });
   });
 });
 
@@ -686,9 +717,12 @@ describe("System payload schemas", () => {
     const result = CommandResultPayloadSchema.parse({
       request_id: "req-001",
       success: false,
-      error: "Not found",
+      error: "agent_not_found",
+      error_detail: "Agent a1 was not found",
     });
     expect(result.data).toBeUndefined();
+    expect(result.error).toBe("agent_not_found");
+    expect(result.error_detail).toBe("Agent a1 was not found");
   });
 
   it("ErrorPayloadSchema", () => {

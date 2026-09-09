@@ -2,5 +2,6 @@
   "request_id": "req-002",
   "success": false,
   "data": null,
-  "error": "Not found"
+  "error": "Not found",
+  "error_detail": null
 }

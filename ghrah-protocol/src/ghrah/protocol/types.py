@@ -702,6 +702,7 @@ class AgentSpawnedPayload(BaseModel):
     name: str
     agent_id: str = ""
     incarnation_id: str = ""
+    recovery_mode: str = ""
     config: AgentConfigPayload
 
 
@@ -1189,6 +1190,7 @@ class ChainHistoryResultPayload(BaseModel):
     agent_name: str
     session_id: str
     branch_id: str
+    active_session_id: str = ""
     nodes: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -1360,6 +1362,18 @@ class AgentSpecSchema(BaseModel):
     system_prompt: str = ""
     abilities: list[str] | None = None
     path_grants: list[PathGrantSchema] = Field(default_factory=list)
+    runtime_status: str = "pending"
+    runtime_error: str = ""
+
+
+class IsolationSpecPayload(BaseModel):
+    """Project 隔离配置的 wire 形态。"""
+
+    agent_path_grants: dict[str, list[PathGrantSchema]] = Field(default_factory=dict)
+    agent_private_dir: bool = True
+    effect_allowlist: set[str] | None = None
+    hitl_override: dict[str, Any] | None = None
+    task_scope: bool = True
 
 
 class ProjectInfoPayload(BaseModel):
@@ -1380,6 +1394,7 @@ class ProjectInfoPayload(BaseModel):
     workspaces: list[WorkspaceMountSchema] = Field(default_factory=list)
     agents: list[AgentSpecSchema] = Field(default_factory=list)
     task_ids: list[str] = Field(default_factory=list)
+    isolation: IsolationSpecPayload = Field(default_factory=IsolationSpecPayload)
     status: ProjectStatus = ProjectStatus.ACTIVE
     recovery: str = RecoveryAction.RESUME.value
     version: int = 1
@@ -1853,6 +1868,7 @@ class CommandResultPayload(BaseModel):
     success: bool
     data: Any = None
     error: str | None = None
+    error_detail: str | None = None
 
 
 class ErrorPayload(BaseModel):
@@ -2179,6 +2195,7 @@ def create_command_result(
     success: bool,
     data: Any = None,
     error: str | None = None,
+    error_detail: str | None = None,
 ) -> Envelope:
     """创建命令结果消息的便捷函数。"""
     return Envelope(
@@ -2188,6 +2205,7 @@ def create_command_result(
             success=success,
             data=data,
             error=error,
+            error_detail=error_detail,
         ),
         request_id=request_id,
     )

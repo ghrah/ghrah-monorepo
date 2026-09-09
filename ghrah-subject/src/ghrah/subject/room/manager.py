@@ -78,6 +78,16 @@ def _err(msg: str) -> dict[str, Any]:
     return {"success": False, "data": None, "error": msg}
 
 
+def _err_code(code: str, detail: str = "") -> dict[str, Any]:
+    """Return a stable machine code separately from its display detail."""
+    return {
+        "success": False,
+        "data": None,
+        "error": code,
+        "error_detail": detail,
+    }
+
+
 class RoomManager:
     """Room 命令编排：生命周期 + 成员 + seq 单点分配 + send 收敛。"""
 
@@ -215,7 +225,10 @@ class RoomManager:
                 p.room_id, expected_version=p.expected_version, mutator=mutator
             )
         except ConcurrentModificationError:
-            return _err(f"version conflict: expected {p.expected_version}")
+            return _err_code(
+                "room_version_conflict",
+                f"version conflict: expected {p.expected_version}",
+            )
         if updated is None:
             return _err(f"room not found: {p.room_id}")
         await self._emit_room("room_updated", updated)
@@ -244,7 +257,10 @@ class RoomManager:
                 p.room_id, expected_version=p.expected_version, mutator=mutator
             )
         except ConcurrentModificationError:
-            return _err(f"version conflict: expected {p.expected_version}")
+            return _err_code(
+                "room_version_conflict",
+                f"version conflict: expected {p.expected_version}",
+            )
         if updated is None:
             return _err(f"room not found: {p.room_id}")
         await self._emit_room("room_archived", updated)
@@ -273,7 +289,10 @@ class RoomManager:
                 p.room_id, expected_version=p.expected_version, mutator=mutator
             )
         except ConcurrentModificationError:
-            return _err(f"version conflict: expected {p.expected_version}")
+            return _err_code(
+                "room_version_conflict",
+                f"version conflict: expected {p.expected_version}",
+            )
         if updated is None:
             return _err(f"room not found: {p.room_id}")
         await self._emit_room("room_restored", updated)
@@ -288,7 +307,10 @@ class RoomManager:
         try:
             deleted = await self._store.delete(p.room_id, expected_version=p.expected_version)
         except ConcurrentModificationError:
-            return _err(f"version conflict: expected {p.expected_version}")
+            return _err_code(
+                "room_version_conflict",
+                f"version conflict: expected {p.expected_version}",
+            )
         if not deleted:
             return _err(f"room not found: {p.room_id}")
         await self._emit(

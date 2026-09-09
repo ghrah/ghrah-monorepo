@@ -287,9 +287,15 @@ class TestFactoryFunctions:
         assert dumped["payload"]["success"] is True
 
     def test_create_command_result_with_error(self):
-        msg = create_command_result(request_id="r1", success=False, error="boom")
+        msg = create_command_result(
+            request_id="r1",
+            success=False,
+            error="agent_not_found",
+            error_detail="Agent a1 was not found",
+        )
         assert msg.payload.success is False
-        assert msg.payload.error == "boom"
+        assert msg.payload.error == "agent_not_found"
+        assert msg.payload.error_detail == "Agent a1 was not found"
 
     def test_create_event_payload_is_model(self):
         payload = AgentResponsePayload(sender="a", recipient="b", content="hi")

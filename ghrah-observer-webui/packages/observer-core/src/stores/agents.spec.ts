@@ -20,6 +20,7 @@ const makeSpawned = (
   project_id: "",
   cluster_id: "",
   incarnation_id: "",
+  recovery_mode: "",
   config: makeConfig(name),
   ...extra,
 });

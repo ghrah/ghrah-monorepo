@@ -4,6 +4,7 @@
   "name": "agent-1",
   "agent_id": "agent-001",
   "incarnation_id": "inc-001",
+  "recovery_mode": "",
   "config": {
     "name": "agent-1",
     "agent_config_name": null,

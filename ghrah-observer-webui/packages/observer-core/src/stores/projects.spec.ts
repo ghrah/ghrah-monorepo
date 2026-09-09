@@ -22,6 +22,13 @@ function makeProject(overrides: Partial<ProjectInfoPayload> = {}): ProjectInfoPa
     archived_at: null,
     deleted_at: null,
     ...overrides,
+    isolation: overrides.isolation ?? {
+      agent_path_grants: {},
+      agent_private_dir: true,
+      effect_allowlist: null,
+      hitl_override: null,
+      task_scope: true,
+    },
   };
 }
 
@@ -58,6 +65,8 @@ describe("useProjectsStore", () => {
             instance_manifest_path: "",
             system_prompt: "",
             path_grants: [],
+            runtime_status: "pending",
+            runtime_error: "",
           },
         ],
       }),

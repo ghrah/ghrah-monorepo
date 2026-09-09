@@ -247,7 +247,8 @@ export function connectStores(
           )?.project_id;
           const agentId = agent.agent_id ?? agent.config.agent_id;
           if (!projectId || !agentId) return;
-          const sessionsResult = await client.listSessions(name, projectId, agentId);
+          const agentTarget = { agentName: name, projectId, agentId };
+          const sessionsResult = await client.listSessions(agentTarget);
           const sessions = (sessionsResult.data as Record<string, unknown> | null)?.sessions;
           if (!sessionsResult.success || !Array.isArray(sessions)) return;
           const histories = await Promise.all(
@@ -255,14 +256,20 @@ export function connectStores(
               const sessionId = (session as Record<string, unknown>).session_id;
               if (typeof sessionId !== "string") return [];
               return [
-                client.listBranches(name, projectId, agentId, sessionId).then(async (result) => {
+                client.listBranches({ ...agentTarget, sessionId }).then(async (result) => {
                   const branches = (result.data as Record<string, unknown> | null)?.branches;
                   if (!result.success || !Array.isArray(branches)) return [];
                   const branchHistories = await Promise.all(
                     branches.flatMap((branch) => {
                       const branchId = (branch as Record<string, unknown>).branch_id;
                       return typeof branchId === "string"
-                        ? [client.getChainHistory(name, projectId, agentId, sessionId, branchId)]
+                        ? [
+                            client.getChainHistory({
+                              ...agentTarget,
+                              sessionId,
+                              branchId,
+                            }),
+                          ]
                         : [];
                     }),
                   );

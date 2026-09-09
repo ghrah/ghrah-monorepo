@@ -1,12 +1,14 @@
 import {
   type AbilityManifestInfo,
   type AgentManifestInfo,
+  type AgentTarget,
   type CreateProjectOptions,
   connectStores,
   extractAbilityList,
   extractAgentList,
   extractManifestEntry,
   extractValidationResult,
+  type ListProjectsOptions,
   ObserverClient,
   useActionChainsStore,
   useAgentsStore,
@@ -133,7 +135,9 @@ export function useObserver() {
 
   async function sendMessage(target: string, content: string) {
     if (!target) return null;
-    return withClient((c) => c.sendMessage(target, content));
+    const agentTarget = resolveAgentTarget(target);
+    if (!agentTarget) return null;
+    return withClient((c) => c.sendMessage(agentTarget, content));
   }
 
   async function sendHitlResponse(promiseId: string, approved: boolean, reason?: string) {
@@ -144,23 +148,37 @@ export function useObserver() {
   }
 
   async function spawnAgent(config: AgentConfigPayload, manifestRef?: string | null) {
-    return withClient((c) => c.spawnAgent(config, null, manifestRef ?? null));
+    const projectId = projects.activeProjectId;
+    if (!projectId) return null;
+    return withClient((c) => c.spawnAgent(projectId, config, null, manifestRef ?? null));
   }
 
   async function terminateAgent(name: string) {
-    return withClient((c) => c.terminateAgent(name));
+    const target = resolveAgentTarget(name);
+    return target ? withClient((c) => c.terminateAgent(target)) : null;
   }
 
   async function createWorkspace(agentName: string) {
-    return withClient((c) => c.createWorkspace(agentName));
+    const target = resolveAgentTarget(agentName);
+    return target ? withClient((c) => c.createWorkspace(target)) : null;
   }
 
   async function workspaceSnapshot(agentName: string, message = "") {
-    return withClient((c) => c.workspaceSnapshot(agentName, message));
+    const target = resolveAgentTarget(agentName);
+    return target ? withClient((c) => c.workspaceSnapshot(target, message)) : null;
   }
 
   async function workspaceDiff(agentName: string, snapshotId?: string | null) {
-    return withClient((c) => c.workspaceDiff(agentName, snapshotId ?? undefined));
+    const target = resolveAgentTarget(agentName);
+    return target ? withClient((c) => c.workspaceDiff(target, snapshotId ?? undefined)) : null;
+  }
+
+  function resolveAgentTarget(agentName: string): AgentTarget | null {
+    const projectId = projects.activeProjectId;
+    const agent = agents.agents.get(agentName);
+    const agentId = agent?.agentId || agent?.config.agent_id;
+    if (!projectId || !agentId) return null;
+    return { projectId, agentId, agentName };
   }
 
   // ── Room / Project / 导航 ──
@@ -183,8 +201,13 @@ export function useObserver() {
     return withClient((c) => c.createRoom(projectId, name));
   }
 
-  async function joinRoom(roomId: string, subject: string, subjectType: "agent" | "human") {
-    return withClient((c) => c.joinRoom(roomId, subject, subjectType));
+  async function joinRoom(
+    roomId: string,
+    subject: string,
+    subjectType: "agent" | "human",
+    subjectName?: string,
+  ) {
+    return withClient((c) => c.joinRoom(roomId, subject, subjectType, subjectName));
   }
 
   async function leaveRoom(roomId: string, subject: string) {
@@ -201,8 +224,8 @@ export function useObserver() {
     return result;
   }
 
-  async function listProjects() {
-    return withClient((c) => c.listProjects());
+  async function listProjects(options: ListProjectsOptions = {}) {
+    return withClient((c) => c.listProjects(options));
   }
 
   async function createProject(name: string, options: CreateProjectOptions) {

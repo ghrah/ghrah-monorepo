@@ -62,6 +62,29 @@ def test_project_lifecycle_axes_and_legacy_deleted_record_input() -> None:
     assert legacy.deleted_at is not None
     assert legacy.archived_at is None
     assert legacy.status.value == "active"
+    assert legacy.isolation.agent_private_dir is True
+    assert legacy.isolation.task_scope is True
+
+
+def test_project_agent_runtime_fields_are_part_of_wire_contract() -> None:
+    project = ProjectInfoPayload(
+        project_id="p1",
+        name="runtime",
+        agents=[
+            {
+                "agent_id": "a1",
+                "name": "architect",
+                "cluster_id": "c1",
+                "runtime_status": "error",
+                "runtime_error": "transport down",
+            }
+        ],
+    )
+
+    wire = project.model_dump(mode="json")
+    assert wire["agents"][0]["runtime_status"] == "error"
+    assert wire["agents"][0]["runtime_error"] == "transport down"
+    assert wire["isolation"]["agent_path_grants"] == {}
 
 
 @pytest.mark.parametrize(
@@ -90,6 +113,7 @@ def test_chain_result_carries_project_and_agent_identity() -> None:
     )
     assert result.model_dump()["project_id"] == "p1"
     assert result.model_dump()["agent_id"] == "a1"
+    assert result.model_dump()["active_session_id"] == ""
     assert make_agent_key("p1", "a1") == "p1:a1"
 
 

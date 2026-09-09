@@ -152,6 +152,7 @@ describe("connectStores", () => {
         project_id: "",
         cluster_id: "",
         incarnation_id: "",
+        recovery_mode: "",
         config: { ...DEFAULT_CONFIG, name: "agent-1" },
       });
 
@@ -688,6 +689,8 @@ describe("connectStores", () => {
               instance_manifest_path: "",
               system_prompt: "",
               path_grants: [],
+              runtime_status: "running",
+              runtime_error: "",
             },
             {
               name: "agent-2",
@@ -697,9 +700,18 @@ describe("connectStores", () => {
               instance_manifest_path: "",
               system_prompt: "",
               path_grants: [],
+              runtime_status: "running",
+              runtime_error: "",
             },
           ],
           task_ids: [],
+          isolation: {
+            agent_path_grants: {},
+            agent_private_dir: true,
+            effect_allowlist: null,
+            hitl_override: null,
+            task_scope: true,
+          },
           status: "active",
           recovery: "resume",
           version: 1,
@@ -709,23 +721,23 @@ describe("connectStores", () => {
           deleted_at: null,
         },
       ]);
-      vi.spyOn(client, "listSessions").mockImplementation((name: string) =>
+      vi.spyOn(client, "listSessions").mockImplementation((target) =>
         Promise.resolve({
           request_id: "s",
           success: true,
-          data: { sessions: [{ session_id: `s-${name}` }] },
+          data: { sessions: [{ session_id: `s-${target.agentName}` }] },
         } as Awaited<ReturnType<typeof client.listSessions>>),
       );
-      vi.spyOn(client, "listBranches").mockImplementation((name: string) =>
+      vi.spyOn(client, "listBranches").mockImplementation((target) =>
         Promise.resolve({
           request_id: "b",
           success: true,
-          data: { branches: [{ branch_id: `b-${name}` }] },
+          data: { branches: [{ branch_id: `b-${target.agentName}` }] },
         } as Awaited<ReturnType<typeof client.listBranches>>),
       );
 
-      const spy = vi.spyOn(client, "getChainHistory").mockImplementation((name: string) => {
-        const nodes = name === "agent-1" ? [nodeA] : [nodeB];
+      const spy = vi.spyOn(client, "getChainHistory").mockImplementation((target) => {
+        const nodes = target.agentName === "agent-1" ? [nodeA] : [nodeB];
         return Promise.resolve({
           request_id: "r",
           success: true,
@@ -759,8 +771,20 @@ describe("connectStores", () => {
 
       // fire-and-forget：等待两个 getChainHistory 完成
       await vi.waitFor(() => {
-        expect(spy).toHaveBeenCalledWith("agent-1", "p1", "a1", "s-agent-1", "b-agent-1");
-        expect(spy).toHaveBeenCalledWith("agent-2", "p1", "a2", "s-agent-2", "b-agent-2");
+        expect(spy).toHaveBeenCalledWith({
+          agentName: "agent-1",
+          projectId: "p1",
+          agentId: "a1",
+          sessionId: "s-agent-1",
+          branchId: "b-agent-1",
+        });
+        expect(spy).toHaveBeenCalledWith({
+          agentName: "agent-2",
+          projectId: "p1",
+          agentId: "a2",
+          sessionId: "s-agent-2",
+          branchId: "b-agent-2",
+        });
       });
       expect(chainStore.getChain("agent-1")).toHaveLength(1);
       expect(chainStore.getChain("agent-1")[0].id).toBe("na");
@@ -1031,7 +1055,7 @@ describe("connectStores", () => {
       const listProjectsSpy = vi.spyOn(c, "listProjects").mockResolvedValue({
         request_id: "r2",
         success: true,
-        data: { projects: [] },
+        data: { projects: [{ project_id: "p1" }] },
       } satisfies CommandResultPayload);
       const listRoomsSpy = vi.spyOn(c, "listRooms").mockResolvedValue({
         request_id: "r3",

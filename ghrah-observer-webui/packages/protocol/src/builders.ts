@@ -30,6 +30,7 @@ export function createCommandResult(
   success: boolean,
   data?: unknown,
   error?: string,
+  errorDetail?: string,
 ): ServerMessage {
   return {
     type: SystemType.COMMAND_RESULT,
@@ -38,6 +39,7 @@ export function createCommandResult(
       success,
       data: data ?? null,
       error: error ?? null,
+      error_detail: errorDetail ?? null,
     },
     request_id: requestId,
   };

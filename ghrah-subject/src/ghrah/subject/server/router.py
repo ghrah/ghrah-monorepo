@@ -113,6 +113,7 @@ class ObserverRouter:
             success=bool(result.get("success", False)),
             data=result.get("data"),
             error=result.get("error"),
+            error_detail=result.get("error_detail"),
         )
 
     async def handle_event(

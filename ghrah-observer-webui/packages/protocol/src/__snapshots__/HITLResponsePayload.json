@@ -1,5 +1,9 @@
 {
   "promise_id": "p-001",
+  "agent_name": "",
+  "ability_name": "",
+  "tool_call_id": "",
   "approved": true,
-  "reason": null
+  "reason": null,
+  "result": null
 }

@@ -440,6 +440,13 @@ export class MockState {
       workspaces: [],
       agents: [],
       task_ids: [],
+      isolation: {
+        agent_path_grants: {},
+        agent_private_dir: true,
+        effect_allowlist: null,
+        hitl_override: null,
+        task_scope: true,
+      },
       status: "active",
       recovery: "resume",
       version: 1,
@@ -457,6 +464,7 @@ export class MockState {
     title: string;
     project_id: string;
     description?: string;
+    agent_id?: string | null;
     agent_name?: string | null;
     priority?: "low" | "normal" | "high" | "urgent";
     parent_id?: string | null;
@@ -471,6 +479,7 @@ export class MockState {
       project_id: p.project_id,
       title: p.title,
       description: p.description ?? "",
+      agent_id: p.agent_id ?? null,
       agent_name: p.agent_name ?? null,
       status: "pending",
       priority: p.priority ?? "normal",

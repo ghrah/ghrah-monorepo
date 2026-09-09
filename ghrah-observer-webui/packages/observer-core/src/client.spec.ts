@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ObserverClient } from "./client.js";
 
 const WS_OPEN = 1;
+const AGENT_TARGET = { projectId: "p1", agentId: "a1", agentName: "agent-1" } as const;
 
 interface MockWebSocket extends WebSocketLike {
   sent: string[];
@@ -106,6 +107,7 @@ describe("ObserverClient", () => {
       await connectClient(client, mockWs);
       const ab: AbilityDefinitionPayload = { ability_type: "read_file", params: {} };
       const spawnPromise = client.spawnAgent(
+        "p1",
         {
           name: "test-agent",
           description: "",
@@ -117,6 +119,7 @@ describe("ObserverClient", () => {
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.type).toBe(CommandType.SPAWN_AGENT);
+      expect(parsed.payload.project_id).toBe("p1");
       expect(parsed.payload.config.name).toBe("test-agent");
       expect(parsed.payload.abilities).toHaveLength(1);
 
@@ -136,13 +139,22 @@ describe("ObserverClient", () => {
   describe("sendMessage", () => {
     it("builds correct send_message payload", async () => {
       await connectClient(client, mockWs);
-      const msgPromise = client.sendMessage("agent-1", "Hello", "user");
+      const msgPromise = client.sendMessage(AGENT_TARGET, "Hello", "user", {
+        timeout: 12,
+        metadata: { room_id: "r1" },
+      });
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.type).toBe(CommandType.SEND_MESSAGE);
       expect(parsed.payload.target).toBe("agent-1");
       expect(parsed.payload.content).toBe("Hello");
       expect(parsed.payload.sender).toBe("user");
+      expect(parsed.payload).toMatchObject({
+        project_id: "p1",
+        agent_id: "a1",
+        timeout: 12,
+        metadata: { room_id: "r1" },
+      });
 
       mockWs.onmessage!({
         data: JSON.stringify({
@@ -159,7 +171,16 @@ describe("ObserverClient", () => {
   describe("getChainHistory", () => {
     it("builds correct get_chain_history payload", async () => {
       await connectClient(client, mockWs);
-      const msgPromise = client.getChainHistory("planner", "p1", "a1", "s1", "b1", 50);
+      const msgPromise = client.getChainHistory(
+        {
+          projectId: "p1",
+          agentId: "a1",
+          agentName: "planner",
+          sessionId: "s1",
+          branchId: "b1",
+        },
+        50,
+      );
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.type).toBe(CommandType.GET_CHAIN_HISTORY);
@@ -181,7 +202,13 @@ describe("ObserverClient", () => {
 
     it("includes stable agent and project ids when provided", async () => {
       await connectClient(client, mockWs);
-      const msgPromise = client.getChainHistory("planner", "p1", "stable-1", "s1", "b1");
+      const msgPromise = client.getChainHistory({
+        projectId: "p1",
+        agentId: "stable-1",
+        agentName: "planner",
+        sessionId: "s1",
+        branchId: "b1",
+      });
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.payload).toMatchObject({
@@ -199,6 +226,53 @@ describe("ObserverClient", () => {
       });
 
       await expect(msgPromise).resolves.toBeDefined();
+    });
+  });
+
+  describe("Session and Branch context", () => {
+    async function runRequest(promise: Promise<unknown>) {
+      const parsed = JSON.parse(mockWs.sent[0]);
+      mockWs.onmessage!({
+        data: JSON.stringify({
+          type: "command_result",
+          payload: { request_id: parsed.request_id, success: true, data: {} },
+          request_id: parsed.request_id,
+        }),
+      });
+      await expect(promise).resolves.toBeDefined();
+      return parsed;
+    }
+
+    it("always sends the structured Agent/Session/Branch scope", async () => {
+      await connectClient(client, mockWs);
+      const sessionTarget = { ...AGENT_TARGET, sessionId: "s1" };
+      const chainTarget = { ...sessionTarget, branchId: "b1" };
+
+      const sessions = await runRequest(client.listSessions(AGENT_TARGET));
+      expect(sessions.payload).toEqual({
+        project_id: "p1",
+        agent_id: "a1",
+        agent_name: "agent-1",
+      });
+
+      mockWs.sent.length = 0;
+      const branches = await runRequest(client.listBranches(sessionTarget));
+      expect(branches.payload).toEqual({
+        project_id: "p1",
+        agent_id: "a1",
+        agent_name: "agent-1",
+        session_id: "s1",
+      });
+
+      mockWs.sent.length = 0;
+      const activated = await runRequest(client.activateBranch(chainTarget));
+      expect(activated.payload).toEqual({
+        project_id: "p1",
+        agent_id: "a1",
+        agent_name: "agent-1",
+        session_id: "s1",
+        branch_id: "b1",
+      });
     });
   });
 
@@ -222,11 +296,12 @@ describe("ObserverClient", () => {
   describe("listAgents", () => {
     it("sends list_agents command", async () => {
       await connectClient(client, mockWs);
-      const listPromise = client.listAgents();
+      const listPromise = client.listAgents("p1");
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.type).toBe(CommandType.LIST_AGENTS);
       expect(parsed.client_type).toBe(ClientType.OBSERVER);
+      expect(parsed.payload).toEqual({ project_id: "p1" });
 
       mockWs.onmessage!({
         data: JSON.stringify({
@@ -287,11 +362,12 @@ describe("ObserverClient", () => {
     it("sends register_ability command", async () => {
       await connectClient(client, mockWs);
       const ability: AbilityDefinitionPayload = { ability_type: "write_file", params: {} };
-      const regPromise = client.registerAbility("agent-1", ability);
+      const regPromise = client.registerAbility(AGENT_TARGET, ability);
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.type).toBe(CommandType.REGISTER_ABILITY);
       expect(parsed.payload.agent_name).toBe("agent-1");
+      expect(parsed.payload).toMatchObject({ project_id: "p1", agent_id: "a1" });
       expect(parsed.payload.ability.ability_type).toBe("write_file");
 
       mockWs.onmessage!({
@@ -309,13 +385,24 @@ describe("ObserverClient", () => {
   describe("delegate", () => {
     it("sends delegate command", async () => {
       await connectClient(client, mockWs);
-      const delPromise = client.delegate("agent-1", "agent-2", "Review this");
+      const delPromise = client.delegate(
+        AGENT_TARGET,
+        { projectId: "p1", agentId: "a2", agentName: "agent-2" },
+        "Review this",
+        15,
+      );
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.type).toBe(CommandType.DELEGATE);
       expect(parsed.payload.from_agent).toBe("agent-1");
       expect(parsed.payload.to_agent).toBe("agent-2");
       expect(parsed.payload.content).toBe("Review this");
+      expect(parsed.payload).toMatchObject({
+        project_id: "p1",
+        from_agent_id: "a1",
+        to_agent_id: "a2",
+        timeout: 15,
+      });
 
       mockWs.onmessage!({
         data: JSON.stringify({
@@ -332,11 +419,12 @@ describe("ObserverClient", () => {
   describe("workspace methods", () => {
     it("createWorkspace sends create_workspace command", async () => {
       await connectClient(client, mockWs);
-      const wpPromise = client.createWorkspace("agent-1");
+      const wpPromise = client.createWorkspace(AGENT_TARGET);
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.type).toBe(CommandType.CREATE_WORKSPACE);
       expect(parsed.payload.agent_name).toBe("agent-1");
+      expect(parsed.payload).toMatchObject({ project_id: "p1", agent_id: "a1" });
 
       mockWs.onmessage!({
         data: JSON.stringify({
@@ -397,18 +485,34 @@ describe("ObserverClient", () => {
       expect(parsed.payload).toEqual({ room_id: "r1", name: "new-name", expected_version: 3 });
     });
 
-    it("deleteRoom sends room_delete with force", async () => {
+    it("archive/restore/delete Room send optimistic lifecycle payloads", async () => {
       await connectClient(client, mockWs);
-      const parsed = await runRequest(client.deleteRoom("r1", true));
-      expect(parsed.type).toBe(CommandType.ROOM_DELETE);
-      expect(parsed.payload).toEqual({ room_id: "r1", force: true });
+      const target = { roomId: "r1", expectedVersion: 3 };
+      const archived = await runRequest(client.archiveRoom(target));
+      expect(archived.type).toBe(CommandType.ROOM_ARCHIVE);
+      expect(archived.payload).toEqual({ room_id: "r1", expected_version: 3 });
+
+      mockWs.sent.length = 0;
+      const restored = await runRequest(client.restoreRoom(target));
+      expect(restored.type).toBe(CommandType.ROOM_RESTORE);
+      expect(restored.payload).toEqual({ room_id: "r1", expected_version: 3 });
+
+      mockWs.sent.length = 0;
+      const deleted = await runRequest(client.deleteRoom(target));
+      expect(deleted.type).toBe(CommandType.ROOM_DELETE);
+      expect(deleted.payload).toEqual({ room_id: "r1", expected_version: 3 });
     });
 
     it("joinRoom / leaveRoom send membership commands", async () => {
       await connectClient(client, mockWs);
-      const join = await runRequest(client.joinRoom("r1", "agent-1", "agent"));
+      const join = await runRequest(client.joinRoom("r1", "a1", "agent", "agent-1"));
       expect(join.type).toBe(CommandType.ROOM_JOIN);
-      expect(join.payload).toEqual({ room_id: "r1", subject: "agent-1", subject_type: "agent" });
+      expect(join.payload).toEqual({
+        room_id: "r1",
+        subject: "a1",
+        subject_type: "agent",
+        subject_name: "agent-1",
+      });
 
       mockWs.sent.length = 0;
       const leave = await runRequest(client.leaveRoom("r1", "agent-1"));
@@ -499,11 +603,11 @@ describe("ObserverClient", () => {
       expect(parsed.payload).toEqual({ name: "private-project", writable_workspaces: [] });
     });
 
-    it("listProjects sends project_list", async () => {
+    it("listProjects sends independent status and archived filters", async () => {
       await connectClient(client, mockWs);
-      const parsed = await runRequest(client.listProjects());
+      const parsed = await runRequest(client.listProjects({ status: "stopped", archived: true }));
       expect(parsed.type).toBe(CommandType.PROJECT_LIST);
-      expect(parsed.payload).toEqual({});
+      expect(parsed.payload).toEqual({ status: "stopped", archived: true });
     });
 
     it("getProject sends project_get", async () => {
@@ -522,14 +626,25 @@ describe("ObserverClient", () => {
       expect(parsed.payload).toEqual({ project_id: "p1", name: "renamed", expected_version: 2 });
     });
 
-    it("deleteProject sends project_delete", async () => {
+    it("archive/restore/delete Project send optimistic lifecycle payloads", async () => {
       await connectClient(client, mockWs);
-      const parsed = await runRequest(client.deleteProject("p1", true, true));
-      expect(parsed.type).toBe(CommandType.PROJECT_DELETE);
-      expect(parsed.payload).toEqual({
+      const target = { projectId: "p1", expectedVersion: 2 };
+      const archived = await runRequest(client.archiveProject(target));
+      expect(archived.type).toBe(CommandType.PROJECT_ARCHIVE);
+      expect(archived.payload).toEqual({ project_id: "p1", expected_version: 2 });
+
+      mockWs.sent.length = 0;
+      const restored = await runRequest(client.restoreProject(target));
+      expect(restored.type).toBe(CommandType.PROJECT_RESTORE);
+      expect(restored.payload).toEqual({ project_id: "p1", expected_version: 2 });
+
+      mockWs.sent.length = 0;
+      const deleted = await runRequest(client.deleteProject({ ...target, cascadeRooms: true }));
+      expect(deleted.type).toBe(CommandType.PROJECT_DELETE);
+      expect(deleted.payload).toEqual({
         project_id: "p1",
-        force: true,
-        purge_storage: true,
+        expected_version: 2,
+        cascade_rooms: true,
       });
     });
   });
@@ -592,7 +707,7 @@ describe("ObserverClient", () => {
       const listProjectsSpy = vi.spyOn(client, "listProjects").mockResolvedValue({
         request_id: "r2",
         success: true,
-        data: { projects: [] },
+        data: { projects: [{ project_id: "p1" }] },
       } satisfies CommandResultPayload);
       const listRoomsSpy = vi.spyOn(client, "listRooms").mockResolvedValue({
         request_id: "r3",
@@ -603,9 +718,11 @@ describe("ObserverClient", () => {
       await (client as any)._syncInitialState();
 
       expect(listAgentsSpy).toHaveBeenCalledOnce();
+      expect(listAgentsSpy).toHaveBeenCalledWith("p1");
       expect(listManifestSpy).toHaveBeenCalledOnce();
       expect(listProjectsSpy).toHaveBeenCalledOnce();
       expect(listRoomsSpy).toHaveBeenCalledOnce();
+      expect(listRoomsSpy).toHaveBeenCalledWith("p1", "active");
     });
 
     it("continues on listAgents failure", async () => {
@@ -618,7 +735,7 @@ describe("ObserverClient", () => {
       const listProjectsSpy = vi.spyOn(client, "listProjects").mockResolvedValue({
         request_id: "r2",
         success: true,
-        data: { projects: [] },
+        data: { projects: [{ project_id: "p1" }] },
       } satisfies CommandResultPayload);
       const listRoomsSpy = vi.spyOn(client, "listRooms").mockResolvedValue({
         request_id: "r3",
@@ -631,6 +748,7 @@ describe("ObserverClient", () => {
       expect(listManifestSpy).toHaveBeenCalledOnce();
       expect(listProjectsSpy).toHaveBeenCalledOnce();
       expect(listRoomsSpy).toHaveBeenCalledOnce();
+      expect(listRoomsSpy).toHaveBeenCalledWith("p1", "active");
     });
   });
 });
