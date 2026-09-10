@@ -50,15 +50,34 @@ async function request(
   return client.request(createCommand(type, payload), 5000);
 }
 
-/** 建一个 project + room，返回 room_id。 */
-async function setupRoom(client: ServerClient): Promise<string> {
-  const project = await request(client, CommandType.PROJECT_CREATE, { name: "p1" });
+async function requestWithId(
+  client: ServerClient,
+  type: CommandType,
+  payload: Record<string, unknown>,
+  requestId: string,
+): Promise<CommandResultPayload> {
+  return client.request(createCommand(type, payload, requestId), 5000);
+}
+
+/** 建一个 project + room，返回二者稳定身份。 */
+async function setupProjectRoom(
+  client: ServerClient,
+  suffix = crypto.randomUUID().slice(0, 8),
+): Promise<{ projectId: string; roomId: string }> {
+  const project = await request(client, CommandType.PROJECT_CREATE, { name: `p-${suffix}` });
   const projectId = (project.data as { project: { project_id: string } }).project.project_id;
   const room = await request(client, CommandType.ROOM_CREATE, {
     project_id: projectId,
-    name: "r1",
+    name: `r-${suffix}`,
   });
-  return (room.data as { room: RoomInfoPayload }).room.room_id;
+  return {
+    projectId,
+    roomId: (room.data as { room: RoomInfoPayload }).room.room_id,
+  };
+}
+
+async function setupRoom(client: ServerClient): Promise<string> {
+  return (await setupProjectRoom(client)).roomId;
 }
 
 beforeEach(async () => {
@@ -120,8 +139,8 @@ describe("mock-server 协议层", () => {
 
       const r2 = await request(sender, CommandType.ROOM_SEND, {
         room_id: roomId,
-        author: "architect",
-        author_type: "agent",
+        author: "human:second",
+        author_type: "human",
         data: { message: "hi" },
       });
       const entry2 = (r2.data as { entry: RoomLogEntryPayload }).entry;
@@ -145,11 +164,17 @@ describe("mock-server 协议层", () => {
   it("room_send targets：透传 + 非成员 target 拒绝 + 空 targets 广播放行", async () => {
     const client = await makeClient();
     try {
-      const roomId = await setupRoom(client);
+      const { projectId, roomId } = await setupProjectRoom(client, "targets");
+      const frontendId = "frontend-agent-id";
+      await request(client, CommandType.SPAWN_AGENT, {
+        project_id: projectId,
+        config: { name: "frontend", agent_id: frontendId },
+      });
       await request(client, CommandType.ROOM_JOIN, {
         room_id: roomId,
-        subject: "frontend",
+        subject: frontendId,
         subject_type: "agent",
+        subject_name: "frontend",
       });
 
       // 定向成员：透传 data.targets
@@ -157,12 +182,20 @@ describe("mock-server 协议层", () => {
         room_id: roomId,
         author: "human:user",
         author_type: "human",
-        data: { message: "hi frontend", targets: ["frontend"] },
+        data: { message: "hi frontend", targets: [frontendId] },
       });
       expect(targeted.success).toBe(true);
       expect((targeted.data as { entry: RoomLogEntryPayload }).entry.data.targets).toEqual([
-        "frontend",
+        frontendId,
       ]);
+
+      const authored = await request(client, CommandType.ROOM_SEND, {
+        room_id: roomId,
+        author: "frontend",
+        author_type: "agent",
+        data: { message: "agent reply" },
+      });
+      expect((authored.data as { entry: RoomLogEntryPayload }).entry.author).toBe(frontendId);
 
       // 非成员 target：拒绝
       const bad = await request(client, CommandType.ROOM_SEND, {
@@ -254,7 +287,8 @@ describe("mock-server 协议层", () => {
         expected_version: 99,
       });
       expect(conflict.success).toBe(false);
-      expect(conflict.error).toContain("version conflict");
+      expect(conflict.error).toBe("room_version_conflict");
+      expect(conflict.error_detail).toContain("expected 99");
 
       const okResult = await request(client, CommandType.ROOM_UPDATE, {
         room_id: roomId,
@@ -325,8 +359,20 @@ describe("mock-server 协议层", () => {
   it("HITL：hitl_request → hitl_response(approved) 成功；未知 promise_id 失败", async () => {
     const client = await makeClient();
     try {
+      const project = await request(client, CommandType.PROJECT_CREATE, { name: "hitl-project" });
+      const projectId = (project.data as { project: { project_id: string } }).project.project_id;
+      await request(client, CommandType.SPAWN_AGENT, {
+        project_id: projectId,
+        config: { name: "backend", agent_id: "backend-agent-id" },
+      });
       const hitlEvents = collect(client, EventType.HITL_REQUEST);
-      const triggered = server.state.triggerHitl("backend", "deploy", { target: "staging" });
+      const triggered = server.state.triggerHitl(
+        "backend",
+        "deploy",
+        { target: "staging" },
+        {},
+        projectId,
+      );
 
       await waitUntil(() => hitlEvents.length >= 1);
       const payload = hitlEvents[0].payload as { promise_id: string; agent_name: string };
@@ -355,14 +401,12 @@ describe("mock-server 协议层", () => {
   it("初始同步形态：list_agents / room_list / project_list / room_get_log 与 bind.ts 消费端一致", async () => {
     const client = await makeClient();
     try {
-      const project = await request(client, CommandType.PROJECT_CREATE, { name: "p1" });
-      const projectId = (project.data as { project: { project_id: string } }).project.project_id;
+      const { projectId, roomId } = await setupProjectRoom(client, "sync");
       const spawned = await request(client, CommandType.SPAWN_AGENT, {
         project_id: projectId,
         config: { name: "architect", description: "架构师" },
       });
       expect(spawned.success).toBe(true);
-      const roomId = await setupRoom(client);
       await request(client, CommandType.ROOM_SEND, {
         room_id: roomId,
         author: "human:user",
@@ -371,9 +415,15 @@ describe("mock-server 协议层", () => {
       });
 
       // LIST_AGENTS → data.agents: [{name, config}]
-      const agents = await request(client, CommandType.LIST_AGENTS, {});
-      const agentList = (agents.data as { agents: { name: string; config: unknown }[] }).agents;
+      const agents = await request(client, CommandType.LIST_AGENTS, { project_id: projectId });
+      const agentList = (
+        agents.data as {
+          agents: { project_id: string; agent_id: string; name: string; config: unknown }[];
+        }
+      ).agents;
       expect(Array.isArray(agentList)).toBe(true);
+      expect(agentList[0].project_id).toBe(projectId);
+      expect(agentList[0].agent_id).toBeTypeOf("string");
       expect(agentList[0].name).toBe("architect");
       expect(agentList[0].config).toBeTypeOf("object");
 
@@ -390,7 +440,7 @@ describe("mock-server 协议层", () => {
       const projectList = (projects.data as { projects: { project_id: string; name: string }[] })
         .projects;
       expect(Array.isArray(projectList)).toBe(true);
-      expect(projectList[0].name).toBe("p1");
+      expect(projectList[0].name).toBe("p-sync");
 
       // ROOM_GET_LOG → data.entries: RoomLogEntryPayload[]（bind 从 data.room_id 或 entry.room_id 取）
       const log = await request(client, CommandType.ROOM_GET_LOG, { room_id: roomId });
@@ -399,6 +449,283 @@ describe("mock-server 协议层", () => {
       expect(logData.entries.length).toBe(1);
       expect(logData.entries[0].room_id).toBe(roomId);
       expect(logData.entries[0].seq).toBe(1);
+    } finally {
+      await client.disconnect();
+    }
+  }, 10_000);
+
+  it("Agent 身份按 Project 隔离：同名实例、运行态和历史互不串线", async () => {
+    const client = await makeClient();
+    try {
+      const firstProject = await request(client, CommandType.PROJECT_CREATE, { name: "alpha" });
+      const secondProject = await request(client, CommandType.PROJECT_CREATE, { name: "beta" });
+      const firstProjectId = (firstProject.data as { project: { project_id: string } }).project
+        .project_id;
+      const secondProjectId = (secondProject.data as { project: { project_id: string } }).project
+        .project_id;
+      const firstAgentId = "alpha-architect";
+      const secondAgentId = "beta-architect";
+
+      expect(
+        (
+          await request(client, CommandType.SPAWN_AGENT, {
+            project_id: firstProjectId,
+            config: { name: "architect", agent_id: firstAgentId },
+          })
+        ).success,
+      ).toBe(true);
+      expect(
+        (
+          await request(client, CommandType.SPAWN_AGENT, {
+            project_id: secondProjectId,
+            config: { name: "architect", agent_id: secondAgentId },
+          })
+        ).success,
+      ).toBe(true);
+
+      const firstList = await request(client, CommandType.LIST_AGENTS, {
+        project_id: firstProjectId,
+      });
+      const secondList = await request(client, CommandType.LIST_AGENTS, {
+        project_id: secondProjectId,
+      });
+      expect((firstList.data as { agents: { agent_id: string }[] }).agents).toHaveLength(1);
+      expect((firstList.data as { agents: { agent_id: string }[] }).agents[0].agent_id).toBe(
+        firstAgentId,
+      );
+      expect((secondList.data as { agents: { agent_id: string }[] }).agents[0].agent_id).toBe(
+        secondAgentId,
+      );
+
+      const firstSessions = await request(client, CommandType.SESSION_LIST, {
+        project_id: firstProjectId,
+        agent_id: firstAgentId,
+        agent_name: "architect",
+      });
+      const secondSessions = await request(client, CommandType.SESSION_LIST, {
+        project_id: secondProjectId,
+        agent_id: secondAgentId,
+        agent_name: "architect",
+      });
+      const firstSessionId = (firstSessions.data as { sessions: { session_id: string }[] })
+        .sessions[0].session_id;
+      const secondSessionId = (secondSessions.data as { sessions: { session_id: string }[] })
+        .sessions[0].session_id;
+      expect(firstSessionId).not.toBe(secondSessionId);
+
+      const terminated = await request(client, CommandType.TERMINATE_AGENT, {
+        project_id: firstProjectId,
+        agent_id: firstAgentId,
+        name: "architect",
+      });
+      expect(terminated.success).toBe(true);
+      expect(
+        (
+          (
+            await request(client, CommandType.LIST_AGENTS, {
+              project_id: firstProjectId,
+            })
+          ).data as { agents: unknown[] }
+        ).agents,
+      ).toEqual([]);
+      expect(
+        (
+          (
+            await request(client, CommandType.LIST_AGENTS, {
+              project_id: secondProjectId,
+            })
+          ).data as { agents: unknown[] }
+        ).agents,
+      ).toHaveLength(1);
+      expect(server.state.projects.get(firstProjectId)?.agents[0].runtime_status).toBe("stopped");
+      expect(server.state.projects.get(secondProjectId)?.agents[0].runtime_status).toBe("running");
+    } finally {
+      await client.disconnect();
+    }
+  }, 10_000);
+
+  it("Room 生命周期：归档冻结日志操作，恢复保留日志，删除仅清日志不删 Agent", async () => {
+    const client = await makeClient();
+    try {
+      const { projectId, roomId } = await setupProjectRoom(client, "room-lifecycle");
+      const agentId = "room-agent-id";
+      await request(client, CommandType.SPAWN_AGENT, {
+        project_id: projectId,
+        config: { name: "worker", agent_id: agentId },
+      });
+      await request(client, CommandType.ROOM_SEND, {
+        room_id: roomId,
+        author: "human:user",
+        author_type: "human",
+        data: { message: "persist me" },
+      });
+
+      const conflict = await request(client, CommandType.ROOM_ARCHIVE, {
+        room_id: roomId,
+        expected_version: 99,
+      });
+      expect(conflict.error).toBe("room_version_conflict");
+      expect(conflict.error_detail).toContain("current 1");
+
+      const archived = await request(client, CommandType.ROOM_ARCHIVE, {
+        room_id: roomId,
+        expected_version: 1,
+      });
+      expect(archived.success).toBe(true);
+      expect((archived.data as { room: RoomInfoPayload }).room.version).toBe(2);
+      expect(
+        (
+          await request(client, CommandType.ROOM_SEND, {
+            room_id: roomId,
+            author: "human:user",
+            author_type: "human",
+            data: { message: "blocked" },
+          })
+        ).error,
+      ).toBe("resource_archived");
+      const activeRooms = await request(client, CommandType.ROOM_LIST, {
+        project_id: projectId,
+        status: "active",
+      });
+      const archivedRooms = await request(client, CommandType.ROOM_LIST, {
+        project_id: projectId,
+        status: "archived",
+      });
+      expect((activeRooms.data as { rooms: unknown[] }).rooms).toEqual([]);
+      expect((archivedRooms.data as { rooms: RoomInfoPayload[] }).rooms[0].room_id).toBe(roomId);
+
+      const restored = await request(client, CommandType.ROOM_RESTORE, {
+        room_id: roomId,
+        expected_version: 2,
+      });
+      expect((restored.data as { room: RoomInfoPayload }).room.version).toBe(3);
+      const log = await request(client, CommandType.ROOM_GET_LOG, { room_id: roomId });
+      expect((log.data as { entries: RoomLogEntryPayload[] }).entries).toHaveLength(1);
+
+      const deleted = await request(client, CommandType.ROOM_DELETE, {
+        room_id: roomId,
+        expected_version: 3,
+      });
+      expect(deleted.success).toBe(true);
+      expect(server.state.rooms.has(roomId)).toBe(false);
+      expect(server.state.roomLogs.has(roomId)).toBe(false);
+      const agents = await request(client, CommandType.LIST_AGENTS, { project_id: projectId });
+      expect((agents.data as { agents: { agent_id: string }[] }).agents[0].agent_id).toBe(agentId);
+    } finally {
+      await client.disconnect();
+    }
+  }, 10_000);
+
+  it("Project 生命周期：归档停 Agent，恢复不复活，删除需显式级联且只发 Project 事件", async () => {
+    const client = await makeClient();
+    try {
+      const { projectId, roomId } = await setupProjectRoom(client, "project-lifecycle");
+      const agentId = "project-agent-id";
+      await request(client, CommandType.SPAWN_AGENT, {
+        project_id: projectId,
+        config: { name: "worker", agent_id: agentId },
+      });
+      const roomDeleted = collect(client, EventType.ROOM_DELETED);
+      const projectDeleted = collect(client, EventType.PROJECT_DELETED);
+
+      const conflict = await request(client, CommandType.PROJECT_ARCHIVE, {
+        project_id: projectId,
+        expected_version: 99,
+      });
+      expect(conflict.error).toBe("project_version_conflict");
+
+      const archived = await request(client, CommandType.PROJECT_ARCHIVE, {
+        project_id: projectId,
+        expected_version: 2,
+      });
+      expect(
+        (archived.data as { project: { status: string; version: number } }).project,
+      ).toMatchObject({ status: "stopped", version: 3 });
+      expect(server.state.projects.get(projectId)?.agents[0].runtime_status).toBe("stopped");
+      expect(
+        (
+          (await request(client, CommandType.PROJECT_LIST, { archived: false })).data as {
+            projects: { project_id: string }[];
+          }
+        ).projects.some((project) => project.project_id === projectId),
+      ).toBe(false);
+      expect(
+        (
+          (await request(client, CommandType.PROJECT_LIST, { archived: true })).data as {
+            projects: { project_id: string }[];
+          }
+        ).projects.some((project) => project.project_id === projectId),
+      ).toBe(true);
+
+      const restored = await request(client, CommandType.PROJECT_RESTORE, {
+        project_id: projectId,
+        expected_version: 3,
+      });
+      expect(
+        (restored.data as { project: { status: string; version: number } }).project,
+      ).toMatchObject({ status: "stopped", version: 4 });
+      await request(client, CommandType.PROJECT_RESUME, { project_id: projectId });
+      const agentsAfterResume = await request(client, CommandType.LIST_AGENTS, {
+        project_id: projectId,
+      });
+      expect((agentsAfterResume.data as { agents: unknown[] }).agents).toEqual([]);
+
+      const refused = await request(client, CommandType.PROJECT_DELETE, {
+        project_id: projectId,
+        expected_version: 5,
+        cascade_rooms: false,
+      });
+      expect(refused.error).toBe("project_has_rooms");
+      expect(server.state.rooms.has(roomId)).toBe(true);
+
+      const deleted = await request(client, CommandType.PROJECT_DELETE, {
+        project_id: projectId,
+        expected_version: 5,
+        cascade_rooms: true,
+      });
+      expect(deleted.success).toBe(true);
+      await waitUntil(() => projectDeleted.length === 1);
+      expect(roomDeleted).toHaveLength(0);
+      expect(server.state.projects.has(projectId)).toBe(false);
+      expect(server.state.rooms.has(roomId)).toBe(false);
+      expect([...server.state.agents.values()].some((agent) => agent.projectId === projectId)).toBe(
+        false,
+      );
+    } finally {
+      await client.disconnect();
+    }
+  }, 10_000);
+
+  it("生命周期 request_id 幂等重放：不重复变更或发事件，复用到不同请求会拒绝", async () => {
+    const client = await makeClient();
+    try {
+      const { roomId } = await setupProjectRoom(client, "idempotency");
+      const archivedEvents = collect(client, EventType.ROOM_ARCHIVED);
+      const payload = { room_id: roomId, expected_version: 1 };
+      const first = await requestWithId(
+        client,
+        CommandType.ROOM_ARCHIVE,
+        payload,
+        "room-archive-idempotent",
+      );
+      const replay = await requestWithId(
+        client,
+        CommandType.ROOM_ARCHIVE,
+        payload,
+        "room-archive-idempotent",
+      );
+      expect(first).toEqual(replay);
+      expect(server.state.rooms.get(roomId)?.version).toBe(2);
+      expect(archivedEvents).toHaveLength(1);
+
+      const reused = await requestWithId(
+        client,
+        CommandType.ROOM_RESTORE,
+        { room_id: roomId, expected_version: 2 },
+        "room-archive-idempotent",
+      );
+      expect(reused.success).toBe(false);
+      expect(reused.error).toBe("request_id_conflict");
     } finally {
       await client.disconnect();
     }

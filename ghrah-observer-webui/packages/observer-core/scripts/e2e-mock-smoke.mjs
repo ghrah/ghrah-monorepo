@@ -17,10 +17,12 @@ import {
   ObserverClient,
   useActionChainsStore,
   useAgentsStore,
+  useBranchesStore,
   useChatStore,
   useHitlStore,
   useProjectsStore,
   useRoomsStore,
+  useSessionsStore,
 } from "../dist/index.js";
 
 let failures = 0;
@@ -60,6 +62,8 @@ async function main() {
   const rooms = useRoomsStore();
   const agents = useAgentsStore();
   const chains = useActionChainsStore();
+  const sessions = useSessionsStore();
+  const branches = useBranchesStore();
   const hitl = useHitlStore();
   const chat = useChatStore();
 
@@ -80,11 +84,20 @@ async function main() {
     "4 demo rooms by name",
     ["architecture", "frontend", "backend", "testing"].every((n) => roomByName(n)),
   );
+  const demoProject = projects.projectList.find((project) => project.name === "demo-project");
+  const demoProjectId = demoProject?.project_id;
+  const demoArchitectId = "demo-architect";
+  const demoFrontendId = "demo-frontend";
 
   // ── 4. 成员多 room：architect 在 3 个 room（join 在场景 2.2s 处，等事件落地）──
   const architectRooms = () =>
     rooms.roomList.filter((r) =>
-      (r.members ?? []).some((m) => m.subject === "architect" && m.subject_type === "agent"),
+      (r.members ?? []).some(
+        (m) =>
+          m.subject === demoArchitectId &&
+          m.subject_name === "architect" &&
+          m.subject_type === "agent",
+      ),
     );
   const joinedOk = await waitFor("architect joins 3 rooms", () => architectRooms().length === 3);
   check("architect member of 3 rooms", joinedOk);
@@ -103,6 +116,7 @@ async function main() {
   check("room history via get_room_log", historyOk);
 
   chat.addPendingEntry({
+    projectId: demoProjectId,
     to: arch.room_id,
     content: "smoke hello",
     agentName: "",
@@ -131,12 +145,12 @@ async function main() {
   // ── 6.5 定向发信（data.targets 约定）──
   const targetedRes = await client.roomSend(arch.room_id, {
     message: "targeted smoke",
-    targets: ["architect"],
+    targets: [demoArchitectId],
   });
   check(
     "targeted room_send success + data.targets echoed",
     targetedRes.success &&
-      JSON.stringify(targetedRes.data?.entry?.data?.targets) === '["architect"]',
+      JSON.stringify(targetedRes.data?.entry?.data?.targets) === `["${demoArchitectId}"]`,
   );
   const badTarget = await client.roomSend(arch.room_id, {
     message: "to nobody",
@@ -148,12 +162,12 @@ async function main() {
   );
   const scenarioTargeted = await waitFor("scenario targeted message in frontend room", () =>
     (rooms.logs.get(roomByName("frontend")?.room_id) ?? []).some(
-      (e) => Array.isArray(e.data?.targets) && e.data.targets.includes("frontend"),
+      (e) => Array.isArray(e.data?.targets) && e.data.targets.includes(demoFrontendId),
     ),
   );
   check("scenario targeted entry visible in room log", scenarioTargeted);
 
-  // ── 6.6 UI 管理面链路：project_create → room_create → join/leave ──
+  // ── 6.6 Project-scoped Agent + Session/Branch v2 + 生命周期 ──
   const newProject = await client.createProject("smoke-project", {
     writableWorkspaces: [
       {
@@ -171,6 +185,83 @@ async function main() {
     );
     check("PROJECT_CREATED updates projects store", projectSynced);
 
+    const smokeAgentId = "smoke-architect";
+    const smokeAgentTarget = {
+      projectId: smokeProjectId,
+      agentId: smokeAgentId,
+      agentName: "architect",
+    };
+    const spawned = await client.spawnAgent(smokeProjectId, {
+      name: "architect",
+      agent_id: smokeAgentId,
+      description: "same-name isolation smoke",
+    });
+    check("same-name agent spawn in second project", spawned.success);
+    const agentsIsolated = await waitFor("same-name agents isolated by project", () => {
+      const values = [...agents.agents.values()].filter((agent) => agent.agentName === "architect");
+      return (
+        values.some(
+          (agent) => agent.projectId === demoProjectId && agent.agentId === demoArchitectId,
+        ) &&
+        values.some((agent) => agent.projectId === smokeProjectId && agent.agentId === smokeAgentId)
+      );
+    });
+    check("same-name Agent projections remain project-scoped", agentsIsolated);
+
+    const initialSessions = await client.listSessions(smokeAgentTarget);
+    const firstSession = initialSessions.data?.sessions?.[0];
+    const secondSessionResult = await client.createSession(smokeAgentTarget, {
+      originSessionId: firstSession?.session_id,
+      originNodeId: firstSession?.root_node_id,
+    });
+    const secondSession = secondSessionResult.data;
+    check(
+      "second Root Session has independent root",
+      secondSessionResult.success &&
+        !!firstSession &&
+        secondSession?.root_node_id !== firstSession.root_node_id,
+    );
+    if (firstSession && secondSession?.session_id) {
+      await client.activateSession({ ...smokeAgentTarget, sessionId: secondSession.session_id });
+      const branchResult = await client.createBranch(
+        { ...smokeAgentTarget, sessionId: secondSession.session_id },
+        "smoke-retry",
+        { fromNodeId: secondSession.root_node_id },
+      );
+      const branch = branchResult.data;
+      const chainTarget = {
+        ...smokeAgentTarget,
+        sessionId: secondSession.session_id,
+        branchId: branch?.branch_id,
+      };
+      await client.activateBranch(chainTarget);
+      const firstHistory = await client.getChainHistory({
+        ...smokeAgentTarget,
+        sessionId: firstSession.session_id,
+        branchId: firstSession.active_branch_id,
+      });
+      const secondHistory = await client.getChainHistory(chainTarget);
+      check(
+        "multi Session/Branch histories route independently",
+        branchResult.success &&
+          firstHistory.success &&
+          secondHistory.success &&
+          firstHistory.data?.session_id === firstSession.session_id &&
+          secondHistory.data?.session_id === secondSession.session_id &&
+          firstHistory.data?.nodes?.[0]?.id !== secondHistory.data?.nodes?.[0]?.id,
+      );
+      const sessionProjected = await waitFor(
+        "Session/Branch events projected",
+        () =>
+          sessions.sessionsForAgent(smokeAgentTarget).length >= 2 &&
+          branches.branchesForSession({
+            ...smokeAgentTarget,
+            sessionId: secondSession.session_id,
+          }).length >= 2,
+      );
+      check("Session/Branch v2 stores preserve explicit scope", sessionProjected);
+    }
+
     const newRoom = await client.createRoom(smokeProjectId, "smoke-room");
     const smokeRoomId = newRoom.data?.room?.room_id;
     check("room_create success", newRoom.success && !!smokeRoomId);
@@ -180,29 +271,148 @@ async function main() {
       );
       check("ROOM_CREATED updates rooms store", roomSynced);
 
-      const join = await client.joinRoom(smokeRoomId, "architect", "agent");
+      const join = await client.joinRoom(smokeRoomId, smokeAgentId, "agent", "architect");
       check("room_join success", join.success);
       const memberJoined = await waitFor("architect visible in smoke-room members", () =>
-        (rooms.rooms.get(smokeRoomId)?.members ?? []).some((m) => m.subject === "architect"),
+        (rooms.rooms.get(smokeRoomId)?.members ?? []).some(
+          (member) => member.subject === smokeAgentId && member.subject_name === "architect",
+        ),
       );
-      check("ROOM_MEMBER_JOINED updates store", memberJoined);
+      check("ROOM_MEMBER_JOINED carries stable agent_id + subject_name", memberJoined);
 
-      const leave = await client.leaveRoom(smokeRoomId, "architect");
+      const leave = await client.leaveRoom(smokeRoomId, smokeAgentId);
       const memberLeft = await waitFor(
         "architect removed from smoke-room members",
-        () => !(rooms.rooms.get(smokeRoomId)?.members ?? []).some((m) => m.subject === "architect"),
+        () =>
+          !(rooms.rooms.get(smokeRoomId)?.members ?? []).some(
+            (member) => member.subject === smokeAgentId,
+          ),
       );
       check("room_leave success + ROOM_MEMBER_LEFT updates store", leave.success && memberLeft);
+
+      await client.roomSend(smokeRoomId, { message: "survives archive" });
+      const archived = await client.archiveRoom({
+        projectId: smokeProjectId,
+        roomId: smokeRoomId,
+        expectedVersion: 1,
+      });
+      const roomArchived = await waitFor(
+        "Room archived projection",
+        () => !rooms.activeRooms.has(smokeRoomId) && rooms.archivedRooms.has(smokeRoomId),
+      );
+      check(
+        "Room archive hides active Room and clears derived log",
+        archived.success && roomArchived,
+      );
+
+      const restored = await client.restoreRoom({
+        projectId: smokeProjectId,
+        roomId: smokeRoomId,
+        expectedVersion: 2,
+      });
+      const roomRestored = await waitFor("Room restored projection", () =>
+        rooms.activeRooms.has(smokeRoomId),
+      );
+      await client.getRoomLog(smokeRoomId);
+      const logPreserved = await waitFor("Room log restored", () =>
+        (rooms.logs.get(smokeRoomId) ?? []).some(
+          (entry) => entry.data?.message === "survives archive",
+        ),
+      );
+      check(
+        "Room restore preserves AppendOnly Log",
+        restored.success && roomRestored && logPreserved,
+      );
+
+      const deleted = await client.deleteRoom({
+        projectId: smokeProjectId,
+        roomId: smokeRoomId,
+        expectedVersion: 3,
+      });
+      const roomDeleted = await waitFor(
+        "Room deleted projection",
+        () => !rooms.activeRooms.has(smokeRoomId) && !rooms.archivedRooms.has(smokeRoomId),
+      );
+      check(
+        "Room delete removes only Room log, not Agent",
+        deleted.success && roomDeleted && agents.getAgent(smokeAgentTarget)?.status === "active",
+      );
     }
+
+    const cascadeRoom = await client.createRoom(smokeProjectId, "cascade-room");
+    const cascadeRoomId = cascadeRoom.data?.room?.room_id;
+    const archivedProject = await client.archiveProject({
+      projectId: smokeProjectId,
+      expectedVersion: 2,
+    });
+    const projectArchived = await waitFor(
+      "Project archived projection",
+      () =>
+        projects.archivedProjectList.some((project) => project.project_id === smokeProjectId) &&
+        agents.agentsForProject(smokeProjectId).length === 0,
+    );
+    check(
+      "Project archive stops and clears derived Agent state",
+      archivedProject.success && projectArchived,
+    );
+
+    const restoredProject = await client.restoreProject({
+      projectId: smokeProjectId,
+      expectedVersion: 3,
+    });
+    const projectRestored = await waitFor(
+      "Project restored projection",
+      () =>
+        projects.projectList.some((project) => project.project_id === smokeProjectId) &&
+        (cascadeRoomId ? rooms.activeRooms.has(cascadeRoomId) : false),
+    );
+    check(
+      "Project restore re-syncs Rooms without reviving stopped Agent",
+      restoredProject.success &&
+        projectRestored &&
+        agents.agentsForProject(smokeProjectId).length === 0,
+    );
+
+    const refusedDelete = await client.deleteProject({
+      projectId: smokeProjectId,
+      expectedVersion: 4,
+      cascadeRooms: false,
+    });
+    check(
+      "Project delete refuses remaining Rooms without cascade",
+      refusedDelete.error === "project_has_rooms",
+    );
+    const deletedProject = await client.deleteProject({
+      projectId: smokeProjectId,
+      expectedVersion: 4,
+      cascadeRooms: true,
+    });
+    const projectPurged = await waitFor(
+      "Project cascade deletion projection",
+      () =>
+        !projects.projects.has(smokeProjectId) &&
+        (!cascadeRoomId || !rooms.activeRooms.has(cascadeRoomId)) &&
+        sessions.sessionsForAgent(smokeAgentTarget).length === 0,
+    );
+    check(
+      "cascade Project delete invalidates all scoped projections",
+      deletedProject.success && projectPurged,
+    );
   }
 
-  // ── 7. per-agent ActionChain ──
+  // ── 7. Project/Agent/Session/Branch-scoped ActionChain ──
   const chainOk = await waitFor(
     "action_chain_updated for architect",
-    () => chains.getChain("architect").length > 0,
+    () =>
+      [...chains.chains.values()].some(
+        (chain) =>
+          chain.target.projectId === demoProjectId &&
+          chain.target.agentId === demoArchitectId &&
+          chain.nodes.length > 0,
+      ),
     25_000,
   );
-  check("per-agent chain received", chainOk);
+  check("fully scoped ActionChain received", chainOk);
 
   // ── 8. HITL 单路径：scenario 12.6s 处 backend 触发 deploy 审批 ──
   const hitlOk = await waitFor(

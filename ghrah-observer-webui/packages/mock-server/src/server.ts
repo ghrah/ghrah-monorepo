@@ -14,7 +14,7 @@ import {
   serializeMessage,
 } from "@ghrah/protocol";
 import { type WebSocket, WebSocketServer } from "ws";
-import { MockState } from "./state.js";
+import { type CommandOutcome, MockState } from "./state.js";
 
 export interface MockServerOptions {
   /** 监听端口；0 = 随机端口（测试用）。 */
@@ -41,6 +41,19 @@ interface BufferedEvent {
   raw: string;
 }
 
+interface CachedRequestOutcome extends CommandOutcome {
+  fingerprint: string;
+}
+
+const IDEMPOTENT_LIFECYCLE_COMMANDS = new Set<string>([
+  CommandType.ROOM_ARCHIVE,
+  CommandType.ROOM_RESTORE,
+  CommandType.ROOM_DELETE,
+  CommandType.PROJECT_ARCHIVE,
+  CommandType.PROJECT_RESTORE,
+  CommandType.PROJECT_DELETE,
+]);
+
 /**
  * WS 协议层 mock server：@ghrah/protocol 的 ServerClient/ObserverClient 的对端。
  * - 入站 parseMessage → 命令路由到 MockState → COMMAND_RESULT 回执（回带 request_id）
@@ -60,6 +73,7 @@ export class MockServer {
   private readonly _connections = new Set<ConnectionContext>();
   private _seqId = 0;
   private readonly _ring: BufferedEvent[] = [];
+  private readonly _requestResults = new Map<string, CachedRequestOutcome>();
 
   constructor(options: MockServerOptions) {
     this._options = {
@@ -206,8 +220,50 @@ export class MockServer {
         return;
       }
       default: {
+        const requestId = message.request_id ?? "";
+        const replayable = requestId !== "" && IDEMPOTENT_LIFECYCLE_COMMANDS.has(message.type);
+        const fingerprint = JSON.stringify([message.type, message.payload]);
+        if (replayable) {
+          const cached = this._requestResults.get(requestId);
+          if (cached) {
+            if (cached.fingerprint !== fingerprint) {
+              this._sendResult(
+                conn,
+                message,
+                false,
+                null,
+                "request_id_conflict",
+                "request_id was already used with a different command payload",
+              );
+              return;
+            }
+            this._sendResult(
+              conn,
+              message,
+              cached.success,
+              cached.data,
+              cached.error,
+              cached.errorDetail,
+            );
+            return;
+          }
+        }
         const outcome = this.state.handleCommand(message.type, message.payload);
-        this._sendResult(conn, message, outcome.success, outcome.data, outcome.error);
+        if (replayable) {
+          this._requestResults.set(requestId, { ...outcome, fingerprint });
+          if (this._requestResults.size > this._options.replayBufferSize) {
+            const oldest = this._requestResults.keys().next().value;
+            if (oldest !== undefined) this._requestResults.delete(oldest);
+          }
+        }
+        this._sendResult(
+          conn,
+          message,
+          outcome.success,
+          outcome.data,
+          outcome.error,
+          outcome.errorDetail,
+        );
       }
     }
   }
@@ -218,8 +274,12 @@ export class MockServer {
     success: boolean,
     data?: unknown,
     error?: string,
+    errorDetail?: string,
   ): void {
-    this._send(conn, createCommandResult(request.request_id ?? "", success, data, error));
+    this._send(
+      conn,
+      createCommandResult(request.request_id ?? "", success, data, error, errorDetail),
+    );
   }
 
   private _send(conn: ConnectionContext, message: ServerMessage): void {

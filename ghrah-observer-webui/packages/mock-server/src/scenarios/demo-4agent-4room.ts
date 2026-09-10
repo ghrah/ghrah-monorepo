@@ -13,6 +13,12 @@ import type { Scenario } from "./types.js";
 
 const PROJECT_NAME = "demo-project";
 const ROOM_NAMES = ["architecture", "frontend", "backend", "testing"] as const;
+const AGENT_IDS = {
+  architect: "demo-architect",
+  frontend: "demo-frontend",
+  backend: "demo-backend",
+  tester: "demo-tester",
+} as const;
 
 function projectId(state: MockState): string {
   const project = [...state.projects.values()].find((p) => p.name === PROJECT_NAME);
@@ -45,10 +51,12 @@ export const demoScenario: Scenario = {
     // ── spawn 4 agent ──
     [
       500,
-      ({ apply }) =>
+      ({ state, apply }) =>
         apply(CommandType.SPAWN_AGENT, {
+          project_id: projectId(state),
           config: {
             name: "architect",
+            agent_id: AGENT_IDS.architect,
             description: "架构师",
             system_prompt: "You are the architect.",
           },
@@ -56,25 +64,46 @@ export const demoScenario: Scenario = {
     ],
     [
       900,
-      ({ apply }) =>
-        apply(CommandType.SPAWN_AGENT, { config: { name: "frontend", description: "前端工程师" } }),
+      ({ state, apply }) =>
+        apply(CommandType.SPAWN_AGENT, {
+          project_id: projectId(state),
+          config: {
+            name: "frontend",
+            agent_id: AGENT_IDS.frontend,
+            description: "前端工程师",
+          },
+        }),
     ],
     [
       1300,
-      ({ apply }) =>
-        apply(CommandType.SPAWN_AGENT, { config: { name: "backend", description: "后端工程师" } }),
+      ({ state, apply }) =>
+        apply(CommandType.SPAWN_AGENT, {
+          project_id: projectId(state),
+          config: {
+            name: "backend",
+            agent_id: AGENT_IDS.backend,
+            description: "后端工程师",
+          },
+        }),
     ],
     [
       1700,
-      ({ apply }) =>
-        apply(CommandType.SPAWN_AGENT, { config: { name: "tester", description: "测试工程师" } }),
+      ({ state, apply }) =>
+        apply(CommandType.SPAWN_AGENT, {
+          project_id: projectId(state),
+          config: {
+            name: "tester",
+            agent_id: AGENT_IDS.tester,
+            description: "测试工程师",
+          },
+        }),
     ],
 
     // ── join rooms（architect 在 architecture/frontend/backend 3 个 room） ──
     [
       2200,
       ({ state, apply }) => {
-        const joins: Array<[string, string]> = [
+        const joins: Array<[string, keyof typeof AGENT_IDS]> = [
           ["architecture", "architect"],
           ["frontend", "architect"],
           ["backend", "architect"],
@@ -85,8 +114,9 @@ export const demoScenario: Scenario = {
         for (const [room, agent] of joins) {
           apply(CommandType.ROOM_JOIN, {
             room_id: roomId(state, room),
-            subject: agent,
+            subject: AGENT_IDS[agent],
             subject_type: "agent",
+            subject_name: agent,
           });
         }
       },
@@ -127,7 +157,7 @@ export const demoScenario: Scenario = {
           author_type: "agent",
           data: {
             message: "@frontend 前端按 Project → Room 三级导航拆分，chat 数据源走 RoomLog。",
-            targets: ["frontend"],
+            targets: [AGENT_IDS.frontend],
           },
         }),
     ],
@@ -193,6 +223,7 @@ export const demoScenario: Scenario = {
           "deploy",
           { target: "staging", ref: "main" },
           { room: "backend" },
+          projectId(state),
         );
       },
     ],
