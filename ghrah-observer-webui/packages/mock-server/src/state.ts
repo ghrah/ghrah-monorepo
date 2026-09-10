@@ -13,10 +13,14 @@ import {
   GetChainHistoryPayloadSchema,
   type HITLRequestPayload,
   HITLResponsePayloadSchema,
+  ListAgentsPayloadSchema,
   ProjectCreatePayloadSchema,
+  ProjectDeletePayloadSchema,
   ProjectIdPayloadSchema,
   type ProjectInfoPayload,
+  ProjectLifecyclePayloadSchema,
   ProjectListPayloadSchema,
+  ProjectUpdatePayloadSchema,
   RoomCreatePayloadSchema,
   RoomDeletePayloadSchema,
   RoomGetLogPayloadSchema,
@@ -24,6 +28,7 @@ import {
   type RoomInfoPayload,
   RoomJoinPayloadSchema,
   RoomLeavePayloadSchema,
+  RoomLifecyclePayloadSchema,
   RoomListPayloadSchema,
   type RoomLogEntryPayload,
   type RoomMember,
@@ -48,6 +53,7 @@ export interface CommandOutcome {
   success: boolean;
   data?: unknown;
   error?: string;
+  errorDetail?: string;
 }
 
 export type EmitFn = (eventType: EventType, payload: Record<string, unknown>) => void;
@@ -62,14 +68,19 @@ export interface MockStateOptions {
 }
 
 interface AgentRecord {
+  projectId: string;
+  agentId: string;
+  clusterId: string;
   name: string;
   config: AgentConfigPayload;
   abilities: AbilityDefinitionPayload[];
+  runtimeState: "running" | "stopped";
 }
 
 interface AgentActionState {
   projectId: string;
   agentId: string;
+  clusterId: string;
   activeSessionId: string;
   sessions: Map<string, SessionInfoPayload>;
   branches: Map<string, BranchInfoPayload>;
@@ -83,7 +94,11 @@ export interface PendingHitl {
 }
 
 const ok = (data?: unknown): CommandOutcome => ({ success: true, data: data ?? null });
-const fail = (error: string): CommandOutcome => ({ success: false, error });
+const fail = (error: string, errorDetail?: string): CommandOutcome => ({
+  success: false,
+  error,
+  ...(errorDetail ? { errorDetail } : {}),
+});
 
 function isoNow(): string {
   return new Date().toISOString();
@@ -91,6 +106,10 @@ function isoNow(): string {
 
 function uuid(): string {
   return crypto.randomUUID();
+}
+
+function agentKey(projectId: string, agentId: string): string {
+  return `${projectId}\u0000${agentId}`;
 }
 
 /**
@@ -146,6 +165,14 @@ export class MockState {
         });
       case CommandType.ROOM_UPDATE:
         return this._parse(RoomUpdatePayloadSchema, rawPayload, (p) => this._roomUpdate(p));
+      case CommandType.ROOM_ARCHIVE:
+        return this._parse(RoomLifecyclePayloadSchema, rawPayload, (p) =>
+          this._roomArchive(p.room_id, p.expected_version),
+        );
+      case CommandType.ROOM_RESTORE:
+        return this._parse(RoomLifecyclePayloadSchema, rawPayload, (p) =>
+          this._roomRestore(p.room_id, p.expected_version),
+        );
       case CommandType.ROOM_DELETE:
         return this._parse(RoomDeletePayloadSchema, rawPayload, (p) => this._roomDelete(p));
       case CommandType.ROOM_JOIN:
@@ -153,12 +180,7 @@ export class MockState {
       case CommandType.ROOM_LEAVE:
         return this._parse(RoomLeavePayloadSchema, rawPayload, (p) => this._roomLeave(p));
       case CommandType.ROOM_GET_MEMBERS:
-        return this._parse(RoomIdPayloadSchema, rawPayload, (p) => {
-          const room = this.rooms.get(p.room_id);
-          return room
-            ? ok({ room_id: room.room_id, members: room.members, count: room.members.length })
-            : fail(`room not found: ${p.room_id}`);
-        });
+        return this._parse(RoomIdPayloadSchema, rawPayload, (p) => this._roomMembers(p.room_id));
       case CommandType.ROOM_GET_LOG:
         return this._parse(RoomGetLogPayloadSchema, rawPayload, (p) => this._roomGetLog(p));
       case CommandType.ROOM_SEND:
@@ -171,6 +193,7 @@ export class MockState {
         return this._parse(ProjectListPayloadSchema, rawPayload, (p) => {
           let list = [...this.projects.values()];
           if (p.status != null) list = list.filter((proj) => proj.status === p.status);
+          list = list.filter((project) => (project.archived_at != null) === p.archived);
           return ok({ projects: list, count: list.length });
         });
       case CommandType.PROJECT_GET:
@@ -178,6 +201,32 @@ export class MockState {
           const project = this.projects.get(p.project_id);
           return project ? ok({ project }) : fail(`project not found: ${p.project_id}`);
         });
+      case CommandType.PROJECT_UPDATE:
+        return this._parse(ProjectUpdatePayloadSchema, rawPayload, (p) => this._projectUpdate(p));
+      case CommandType.PROJECT_ARCHIVE:
+        return this._parse(ProjectLifecyclePayloadSchema, rawPayload, (p) =>
+          this._projectArchive(p.project_id, p.expected_version),
+        );
+      case CommandType.PROJECT_RESTORE:
+        return this._parse(ProjectLifecyclePayloadSchema, rawPayload, (p) =>
+          this._projectRestore(p.project_id, p.expected_version),
+        );
+      case CommandType.PROJECT_DELETE:
+        return this._parse(ProjectDeletePayloadSchema, rawPayload, (p) =>
+          this._projectDelete(p.project_id, p.expected_version, p.cascade_rooms),
+        );
+      case CommandType.PROJECT_PAUSE:
+        return this._parse(ProjectIdPayloadSchema, rawPayload, (p) =>
+          this._projectTransition(p.project_id, "paused", EventType.PROJECT_PAUSED),
+        );
+      case CommandType.PROJECT_RESUME:
+        return this._parse(ProjectIdPayloadSchema, rawPayload, (p) =>
+          this._projectTransition(p.project_id, "active", EventType.PROJECT_RESUMED),
+        );
+      case CommandType.PROJECT_STOP:
+        return this._parse(ProjectIdPayloadSchema, rawPayload, (p) =>
+          this._projectTransition(p.project_id, "stopped", EventType.PROJECT_STOPPED),
+        );
 
       // Task（最小实现）
       case CommandType.TASK_CREATE:
@@ -199,16 +248,16 @@ export class MockState {
       // Agent / Core
       case CommandType.SPAWN_AGENT:
         return this._parse(SpawnAgentPayloadSchema, rawPayload, (p) =>
-          this.spawnAgent(p.config, p.abilities ?? [], p.project_id),
+          this.spawnAgent(p.project_id, p.config, p.abilities ?? [], p.cluster_id),
         );
       case CommandType.TERMINATE_AGENT:
         return this._parse(TerminateAgentPayloadSchema, rawPayload, (p) =>
-          this.terminateAgent(p.name),
+          this.terminateAgent(p.project_id, p.agent_id, p.name),
         );
       case CommandType.LIST_AGENTS:
-        return ok({
-          agents: [...this.agents.values()].map((a) => ({ name: a.name, config: a.config })),
-        });
+        return this._parse(ListAgentsPayloadSchema, rawPayload, (p) =>
+          this._listAgents(p.project_id),
+        );
       case CommandType.HEALTH_CHECK:
         return ok({ status: "ok" });
 
@@ -274,9 +323,11 @@ export class MockState {
   // ─── Room ───
 
   private _roomCreate(p: { project_id: string; name: string }): CommandOutcome {
-    if (!this.projects.has(p.project_id)) {
+    const project = this.projects.get(p.project_id);
+    if (!project) {
       return fail(`project not found: ${p.project_id}`);
     }
+    if (project.archived_at != null) return fail("project_archived");
     const room: RoomInfoPayload = {
       room_id: uuid(),
       project_id: p.project_id,
@@ -302,6 +353,7 @@ export class MockState {
     let list = [...this.rooms.values()];
     if (p.project_id != null) list = list.filter((r) => r.project_id === p.project_id);
     if (p.status != null) list = list.filter((r) => r.status === p.status);
+    list = list.filter((room) => this.projects.get(room.project_id)?.archived_at == null);
     return ok({ rooms: list, count: list.length });
   }
 
@@ -312,8 +364,13 @@ export class MockState {
   }): CommandOutcome {
     const room = this.rooms.get(p.room_id);
     if (!room) return fail(`room not found: ${p.room_id}`);
+    const guard = this._activeRoomGuard(room);
+    if (guard) return guard;
     if (p.expected_version != null && p.expected_version !== room.version) {
-      return fail(`version conflict: expected ${p.expected_version}, current ${room.version}`);
+      return fail(
+        "room_version_conflict",
+        `version conflict: expected ${p.expected_version}, current ${room.version}`,
+      );
     }
     if (p.name != null) room.name = p.name;
     room.version += 1;
@@ -322,12 +379,56 @@ export class MockState {
     return ok({ room });
   }
 
-  private _roomDelete(p: { room_id: string; force?: boolean }): CommandOutcome {
+  private _roomArchive(roomId: string, expectedVersion: number): CommandOutcome {
+    const room = this.rooms.get(roomId);
+    if (!room) return fail(`room not found: ${roomId}`);
+    const project = this.projects.get(room.project_id);
+    if (!project || project.archived_at != null) return fail("project_archived");
+    if (room.status === "archived") return ok({ room });
+    if (expectedVersion !== room.version) {
+      return fail(
+        "room_version_conflict",
+        `version conflict: expected ${expectedVersion}, current ${room.version}`,
+      );
+    }
+    room.status = "archived";
+    room.archived_at = isoNow();
+    room.version += 1;
+    room.updated_at = isoNow();
+    this.emit(EventType.ROOM_ARCHIVED, { room });
+    return ok({ room });
+  }
+
+  private _roomRestore(roomId: string, expectedVersion: number): CommandOutcome {
+    const room = this.rooms.get(roomId);
+    if (!room) return fail(`room not found: ${roomId}`);
+    const project = this.projects.get(room.project_id);
+    if (!project || project.archived_at != null) return fail("project_archived");
+    if (room.status === "active") return ok({ room });
+    if (expectedVersion !== room.version) {
+      return fail(
+        "room_version_conflict",
+        `version conflict: expected ${expectedVersion}, current ${room.version}`,
+      );
+    }
+    room.status = "active";
+    room.archived_at = null;
+    room.version += 1;
+    room.updated_at = isoNow();
+    this.emit(EventType.ROOM_RESTORED, { room });
+    return ok({ room });
+  }
+
+  private _roomDelete(p: { room_id: string; expected_version: number }): CommandOutcome {
     const room = this.rooms.get(p.room_id);
     if (!room) return fail(`room not found: ${p.room_id}`);
-    const log = this.roomLogs.get(p.room_id) ?? [];
-    if (log.length > 0 && !p.force) {
-      return fail(`room has ${log.length} log entries; pass force=true to delete`);
+    const project = this.projects.get(room.project_id);
+    if (!project || project.archived_at != null) return fail("project_archived");
+    if (p.expected_version !== room.version) {
+      return fail(
+        "room_version_conflict",
+        `version conflict: expected ${p.expected_version}, current ${room.version}`,
+      );
     }
     this.rooms.delete(p.room_id);
     this.roomLogs.delete(p.room_id);
@@ -342,14 +443,29 @@ export class MockState {
     room_id: string;
     subject: string;
     subject_type: "agent" | "human";
+    subject_name?: string;
   }): CommandOutcome {
     const room = this.rooms.get(p.room_id);
     if (!room) return fail(`room not found: ${p.room_id}`);
-    if (!room.members.some((m) => m.subject === p.subject)) {
+    const guard = this._activeRoomGuard(room);
+    if (guard) return guard;
+    let subject = p.subject;
+    let subjectName = p.subject_name;
+    if (p.subject_type === "agent") {
+      const matches = this._agentsForProject(room.project_id).filter(
+        (agent) => agent.agentId === p.subject || agent.name === p.subject,
+      );
+      if (matches.length > 1) return fail(`ambiguous agent in room project: ${p.subject}`);
+      const agent = matches[0];
+      if (!agent) return fail("agent_project_mismatch");
+      subject = agent.agentId;
+      subjectName = agent.name;
+    }
+    if (!room.members.some((member) => member.subject === subject)) {
       const member: RoomMember = {
-        subject: p.subject,
+        subject,
         subject_type: p.subject_type,
-        subject_name: p.subject,
+        subject_name: subjectName,
         joined_at: isoNow(),
       };
       room.members.push(member);
@@ -362,11 +478,17 @@ export class MockState {
   private _roomLeave(p: { room_id: string; subject: string }): CommandOutcome {
     const room = this.rooms.get(p.room_id);
     if (!room) return fail(`room not found: ${p.room_id}`);
-    const idx = room.members.findIndex((m) => m.subject === p.subject);
+    const guard = this._activeRoomGuard(room);
+    if (guard) return guard;
+    const matches = room.members.filter(
+      (member) => member.subject === p.subject || member.subject_name === p.subject,
+    );
+    const subject = matches.length === 1 ? matches[0].subject : p.subject;
+    const idx = room.members.findIndex((member) => member.subject === subject);
     if (idx < 0) return fail(`subject not in room: ${p.subject}`);
     room.members.splice(idx, 1);
     room.updated_at = isoNow();
-    this.emit(EventType.ROOM_MEMBER_LEFT, { room, subject: p.subject });
+    this.emit(EventType.ROOM_MEMBER_LEFT, { room, subject });
     return ok({ room });
   }
 
@@ -377,6 +499,8 @@ export class MockState {
   }): CommandOutcome {
     const room = this.rooms.get(p.room_id);
     if (!room) return fail(`room not found: ${p.room_id}`);
+    const guard = this._activeRoomGuard(room);
+    if (guard) return guard;
     let entries = this.roomLogs.get(p.room_id) ?? [];
     if (p.since_seq != null) entries = entries.filter((e) => e.seq > p.since_seq!);
     const limit = p.limit ?? 100;
@@ -393,17 +517,35 @@ export class MockState {
   }): CommandOutcome {
     const room = this.rooms.get(p.room_id);
     if (!room) return fail(`room not found: ${p.room_id}`);
+    const guard = this._activeRoomGuard(room);
+    if (guard) return guard;
+    const memberIdentity = (value: string): string => {
+      const matches = room.members.filter(
+        (member) => member.subject === value || member.subject_name === value,
+      );
+      return matches.length === 1 ? matches[0].subject : value;
+    };
+    const author = p.author_type === "agent" ? memberIdentity(p.author) : p.author;
+    if (
+      p.author_type === "agent" &&
+      !room.members.some((member) => member.subject === author && member.subject_type === "agent")
+    ) {
+      return fail(`author not in room: ${p.author}`);
+    }
     // 写时校验：data.targets（{message, targets?} 约定）须 ⊆ 该 room 的 agent 成员；
     // 缺省/空 = 整室广播。
     const targets = p.data?.targets;
+    let data = p.data ?? {};
     if (targets !== undefined) {
       if (!Array.isArray(targets) || !targets.every((t) => typeof t === "string")) {
         return fail("invalid targets: expected string[]");
       }
-      for (const t of targets as string[]) {
+      const normalizedTargets = (targets as string[]).map(memberIdentity);
+      for (const t of normalizedTargets) {
         const isMember = room.members.some((m) => m.subject === t && m.subject_type === "agent");
         if (!isMember) return fail(`target not in room: ${t}`);
       }
+      data = { ...data, targets: normalizedTargets };
     }
     const seq = room.seq_watermark + 1;
     room.seq_watermark = seq;
@@ -412,14 +554,29 @@ export class MockState {
       id: uuid(),
       room_id: room.room_id,
       seq,
-      author: p.author,
+      author,
       author_type: p.author_type,
       timestamp: Date.now() / 1000,
-      data: p.data ?? {},
+      data,
     };
     this.roomLogs.get(room.room_id)!.push(entry);
     this.emit(EventType.ROOM_LOG_APPENDED, { entry });
     return ok({ entry });
+  }
+
+  private _activeRoomGuard(room: RoomInfoPayload): CommandOutcome | null {
+    const project = this.projects.get(room.project_id);
+    if (!project || project.archived_at != null) return fail("project_archived");
+    if (room.status === "archived") return fail("resource_archived");
+    return null;
+  }
+
+  private _roomMembers(roomId: string): CommandOutcome {
+    const room = this.rooms.get(roomId);
+    if (!room) return fail(`room not found: ${roomId}`);
+    const guard = this._activeRoomGuard(room);
+    if (guard) return guard;
+    return ok({ room_id: room.room_id, members: room.members, count: room.members.length });
   }
 
   // ─── Project / Task（最小实现） ───
@@ -440,6 +597,13 @@ export class MockState {
       workspaces: [],
       agents: [],
       task_ids: [],
+      isolation: {
+        agent_path_grants: {},
+        agent_private_dir: true,
+        effect_allowlist: null,
+        hitl_override: null,
+        task_scope: true,
+      },
       status: "active",
       recovery: "resume",
       version: 1,
@@ -453,10 +617,145 @@ export class MockState {
     return ok({ project });
   }
 
+  private _projectUpdate(p: {
+    project_id: string;
+    name?: string | null;
+    description?: string | null;
+    manifest_ref?: string | null;
+    expected_version?: number | null;
+  }): CommandOutcome {
+    const project = this.projects.get(p.project_id);
+    if (!project) return fail(`project not found: ${p.project_id}`);
+    if (project.archived_at != null) return fail("resource_archived");
+    if (p.expected_version != null && p.expected_version !== project.version) {
+      return fail(
+        "project_version_conflict",
+        `version conflict: expected ${p.expected_version}, current ${project.version}`,
+      );
+    }
+    if (p.name != null) project.name = p.name;
+    if (p.description != null) project.description = p.description;
+    if (p.manifest_ref != null) project.manifest_ref = p.manifest_ref;
+    project.version += 1;
+    project.updated_at = isoNow();
+    this.emit(EventType.PROJECT_UPDATED, { project });
+    return ok({ project });
+  }
+
+  private _projectArchive(projectId: string, expectedVersion: number): CommandOutcome {
+    const project = this.projects.get(projectId);
+    if (!project) return fail(`project not found: ${projectId}`);
+    if (project.archived_at != null) return ok({ project });
+    if (expectedVersion !== project.version) {
+      return fail(
+        "project_version_conflict",
+        `version conflict: expected ${expectedVersion}, current ${project.version}`,
+      );
+    }
+    for (const agent of this._agentsForProject(projectId)) {
+      agent.runtimeState = "stopped";
+      this._setAgentSpecRuntime(project, agent.agentId, "stopped");
+      this._stopChainSimulation(agentKey(projectId, agent.agentId));
+    }
+    project.archived_at = isoNow();
+    project.status = "stopped";
+    project.version += 1;
+    project.updated_at = isoNow();
+    this.emit(EventType.PROJECT_ARCHIVED, { project });
+    return ok({ project });
+  }
+
+  private _projectRestore(projectId: string, expectedVersion: number): CommandOutcome {
+    const project = this.projects.get(projectId);
+    if (!project) return fail(`project not found: ${projectId}`);
+    if (project.archived_at == null) return ok({ project });
+    if (expectedVersion !== project.version) {
+      return fail(
+        "project_version_conflict",
+        `version conflict: expected ${expectedVersion}, current ${project.version}`,
+      );
+    }
+    project.archived_at = null;
+    project.status = "stopped";
+    for (const spec of project.agents) spec.runtime_status = "stopped";
+    project.version += 1;
+    project.updated_at = isoNow();
+    this.emit(EventType.PROJECT_RESTORED, { project });
+    return ok({ project });
+  }
+
+  private _projectDelete(
+    projectId: string,
+    expectedVersion: number,
+    cascadeRooms: boolean,
+  ): CommandOutcome {
+    const project = this.projects.get(projectId);
+    if (!project) return fail(`project not found: ${projectId}`);
+    if (expectedVersion !== project.version) {
+      return fail(
+        "project_version_conflict",
+        `version conflict: expected ${expectedVersion}, current ${project.version}`,
+      );
+    }
+    const projectRooms = [...this.rooms.values()].filter((room) => room.project_id === projectId);
+    if (projectRooms.length > 0 && !cascadeRooms) return fail("project_has_rooms");
+    for (const room of projectRooms) {
+      this.rooms.delete(room.room_id);
+      this.roomLogs.delete(room.room_id);
+    }
+    for (const agent of this._agentsForProject(projectId)) {
+      const key = agentKey(projectId, agent.agentId);
+      this._stopChainSimulation(key);
+      this.agents.delete(key);
+      this.actionStates.delete(key);
+    }
+    for (const [taskId, task] of this.tasks) {
+      if (task.project_id === projectId) this.tasks.delete(taskId);
+    }
+    for (const [promiseId, pending] of this.pendingHitl) {
+      if (pending.payload.project_id !== projectId) continue;
+      const timer = this._hitlTimers.get(promiseId);
+      if (timer != null) clearTimeout(timer);
+      this._hitlTimers.delete(promiseId);
+      this.pendingHitl.delete(promiseId);
+    }
+    this.projects.delete(projectId);
+    this.emit(EventType.PROJECT_DELETED, { project });
+    return ok({
+      project_id: projectId,
+      deleted: true,
+      storage_purged: true,
+      rooms_deleted: projectRooms.length,
+    });
+  }
+
+  private _projectTransition(
+    projectId: string,
+    status: "active" | "paused" | "stopped",
+    eventType: EventType,
+  ): CommandOutcome {
+    const project = this.projects.get(projectId);
+    if (!project) return fail(`project not found: ${projectId}`);
+    if (project.archived_at != null) return fail("resource_archived");
+    project.status = status;
+    if (status !== "active") {
+      for (const agent of this._agentsForProject(projectId)) {
+        agent.runtimeState = "stopped";
+        this._setAgentSpecRuntime(project, agent.agentId, "stopped");
+        this._stopChainSimulation(agentKey(projectId, agent.agentId));
+      }
+    }
+    project.version += 1;
+    project.updated_at = isoNow();
+    this.emit(eventType, { project });
+    return ok({ project });
+  }
+
   private _taskCreate(p: {
     title: string;
     project_id: string;
     description?: string;
+    agent_id?: string | null;
     agent_name?: string | null;
     priority?: "low" | "normal" | "high" | "urgent";
     parent_id?: string | null;
@@ -471,6 +770,7 @@ export class MockState {
       project_id: p.project_id,
       title: p.title,
       description: p.description ?? "",
+      agent_id: p.agent_id ?? null,
       agent_name: p.agent_name ?? null,
       status: "pending",
       priority: p.priority ?? "normal",
@@ -497,8 +797,10 @@ export class MockState {
     agent_id: string;
     agent_name: string;
   }): AgentActionState | null {
-    const state = this.actionStates.get(p.agent_name);
+    const state = this.actionStates.get(agentKey(p.project_id, p.agent_id));
     if (!state || state.projectId !== p.project_id || state.agentId !== p.agent_id) return null;
+    const record = this.agents.get(agentKey(p.project_id, p.agent_id));
+    if (!record || record.name !== p.agent_name) return null;
     return state;
   }
 
@@ -546,7 +848,7 @@ export class MockState {
     const session: SessionInfoPayload = {
       project_id: state.projectId,
       agent_id: state.agentId,
-      cluster_id: "mock",
+      cluster_id: state.clusterId,
       session_id: sessionId,
       agent_name: agentName,
       root_node_id: rootId,
@@ -777,17 +1079,37 @@ export class MockState {
   }
 
   spawnAgent(
+    projectId: string,
     config: AgentConfigPayload,
     abilities: AbilityDefinitionPayload[] = [],
-    projectId = "",
+    requestedClusterId = "",
   ): CommandOutcome {
-    if (this.agents.has(config.name)) {
-      return fail(`agent already exists: ${config.name}`);
+    const project = this.projects.get(projectId);
+    if (!project) return fail(`project not found: ${projectId}`);
+    if (project.archived_at != null) return fail("resource_archived");
+    if (project.status !== "active") return fail("project_not_active");
+    if (project.agents.some((agent) => agent.name === config.name)) {
+      return fail("agent_name_exists");
     }
-    this.agents.set(config.name, { name: config.name, config, abilities });
+    const agentId = config.agent_id || uuid();
+    const key = agentKey(projectId, agentId);
+    if (this.agents.has(key)) return fail("agent_identity_conflict");
+    const clusterId = requestedClusterId || `${projectId}:default`;
+    const normalizedConfig = { ...config, agent_id: agentId };
+    const record: AgentRecord = {
+      projectId,
+      agentId,
+      clusterId,
+      name: config.name,
+      config: normalizedConfig,
+      abilities,
+      runtimeState: "running",
+    };
+    this.agents.set(key, record);
     const actionState: AgentActionState = {
       projectId,
-      agentId: config.agent_id ?? uuid(),
+      agentId,
+      clusterId,
       activeSessionId: "",
       sessions: new Map(),
       branches: new Map(),
@@ -798,31 +1120,79 @@ export class MockState {
     });
     session.state = "active";
     actionState.activeSessionId = session.session_id;
-    this.actionStates.set(config.name, actionState);
-    this.emit(EventType.AGENT_SPAWNED, { name: config.name, config });
-    if (this._simulateChains) this._startChainSimulation(config.name);
-    return ok({ name: config.name, config });
+    this.actionStates.set(key, actionState);
+    project.agents.push({
+      agent_id: agentId,
+      name: config.name,
+      cluster_id: clusterId,
+      manifest_ref: "",
+      instance_manifest_path: "",
+      system_prompt: config.system_prompt,
+      abilities: null,
+      path_grants: [],
+      runtime_status: "running",
+      runtime_error: "",
+    });
+    if (!project.cluster_ids.includes(clusterId)) project.cluster_ids.push(clusterId);
+    project.version += 1;
+    project.updated_at = isoNow();
+    this.emit(EventType.PROJECT_AGENT_ADDED, {
+      project,
+      agent_name: config.name,
+      agent_id: agentId,
+    });
+    this.emit(EventType.AGENT_SPAWNED, this._agentEvent(record));
+    if (this._simulateChains) this._startChainSimulation(key);
+    return ok({ ...this._agentEvent(record), runtime_state: "running" });
   }
 
-  terminateAgent(name: string): CommandOutcome {
-    if (!this.agents.has(name)) return fail(`agent not found: ${name}`);
-    this._stopChainSimulation(name);
-    this.agents.delete(name);
-    this.actionStates.delete(name);
-    this.emit(EventType.AGENT_TERMINATED, { name });
-    return ok({ name });
+  terminateAgent(projectId: string, agentId: string, name: string): CommandOutcome {
+    const key = agentKey(projectId, agentId);
+    const record = this.agents.get(key);
+    if (!record) return fail("agent_not_found");
+    if (record.name !== name) return fail("agent_identity_mismatch");
+    record.runtimeState = "stopped";
+    const project = this.projects.get(projectId);
+    if (project) {
+      this._setAgentSpecRuntime(project, agentId, "stopped");
+      project.version += 1;
+      project.updated_at = isoNow();
+    }
+    this._stopChainSimulation(key);
+    this.emit(EventType.AGENT_TERMINATED, this._agentEvent(record));
+    return ok(this._agentEvent(record));
   }
 
-  private _startChainSimulation(agentName: string): void {
-    this._chainIterations.set(agentName, 0);
+  private _listAgents(projectId: string): CommandOutcome {
+    const project = this.projects.get(projectId);
+    if (!project) return fail(`project not found: ${projectId}`);
+    if (project.archived_at != null) return fail("resource_archived");
+    return ok({
+      agents: this._agentsForProject(projectId)
+        .filter((agent) => agent.runtimeState === "running")
+        .map((agent) => ({
+          project_id: projectId,
+          agent_id: agent.agentId,
+          cluster_id: agent.clusterId,
+          name: agent.name,
+          config: agent.config,
+          runtime_state: agent.runtimeState,
+          runtime_status: agent.runtimeState,
+        })),
+    });
+  }
+
+  private _startChainSimulation(key: string): void {
+    this._chainIterations.set(key, 0);
     const timer = setInterval(() => {
-      if (!this.agents.has(agentName)) {
-        this._stopChainSimulation(agentName);
+      const agent = this.agents.get(key);
+      if (agent?.runtimeState !== "running") {
+        this._stopChainSimulation(key);
         return;
       }
-      const iteration = (this._chainIterations.get(agentName) ?? 0) + 1;
-      this._chainIterations.set(agentName, iteration);
-      const state = this.actionStates.get(agentName);
+      const iteration = (this._chainIterations.get(key) ?? 0) + 1;
+      this._chainIterations.set(key, iteration);
+      const state = this.actionStates.get(key);
       if (!state) return;
       const session = state.sessions.get(state.activeSessionId);
       if (!session) return;
@@ -845,14 +1215,14 @@ export class MockState {
         this.emit(EventType.BRANCH_CREATED, {
           project_id: state.projectId,
           agent_id: state.agentId,
-          agent_name: agentName,
+          agent_name: agent.name,
           session_id: session.session_id,
           branch: retry,
         });
         this.emit(EventType.BRANCH_ACTIVATED, {
           project_id: state.projectId,
           agent_id: state.agentId,
-          agent_name: agentName,
+          agent_name: agent.name,
           session_id: session.session_id,
           branch: retry,
         });
@@ -860,7 +1230,7 @@ export class MockState {
       const node: ActionNode = {
         id: uuid(),
         parent_id: branch.head_node_id,
-        agent_name: agentName,
+        agent_name: agent.name,
         timestamp: isoNow(),
         iteration,
         ability_names: ["think"],
@@ -869,7 +1239,7 @@ export class MockState {
           {
             role: "ai",
             content_blocks: [
-              { type: "text", text: `${agentName} iteration ${iteration}: working...` },
+              { type: "text", text: `${agent.name} iteration ${iteration}: working...` },
             ],
             metadata: {},
           },
@@ -887,18 +1257,46 @@ export class MockState {
       this.emit(EventType.ACTION_CHAIN_UPDATED, {
         project_id: state.projectId,
         agent_id: state.agentId,
-        agent_name: agentName,
+        cluster_id: state.clusterId,
+        agent_name: agent.name,
         node,
       });
     }, this._chainIntervalMs);
-    this._chainTimers.set(agentName, timer);
+    this._chainTimers.set(key, timer);
   }
 
-  private _stopChainSimulation(agentName: string): void {
-    const timer = this._chainTimers.get(agentName);
+  private _stopChainSimulation(key: string): void {
+    const timer = this._chainTimers.get(key);
     if (timer != null) clearInterval(timer);
-    this._chainTimers.delete(agentName);
-    this._chainIterations.delete(agentName);
+    this._chainTimers.delete(key);
+    this._chainIterations.delete(key);
+  }
+
+  private _agentsForProject(projectId: string): AgentRecord[] {
+    return [...this.agents.values()].filter((agent) => agent.projectId === projectId);
+  }
+
+  private _setAgentSpecRuntime(
+    project: ProjectInfoPayload,
+    agentId: string,
+    status: "running" | "stopped",
+  ): void {
+    const spec = project.agents.find((agent) => agent.agent_id === agentId);
+    if (!spec) return;
+    spec.runtime_status = status;
+    spec.runtime_error = "";
+  }
+
+  private _agentEvent(agent: AgentRecord): Record<string, unknown> {
+    return {
+      project_id: agent.projectId,
+      agent_id: agent.agentId,
+      cluster_id: agent.clusterId,
+      name: agent.name,
+      config: agent.config,
+      incarnation_id: "mock",
+      recovery_mode: "",
+    };
   }
 
   // ─── HITL 单路径（core 侧，不模拟 notary） ───
@@ -909,12 +1307,23 @@ export class MockState {
     abilityName: string,
     toolArgs: Record<string, unknown> = {},
     context: Record<string, unknown> = {},
+    projectId?: string,
   ): HITLRequestPayload {
+    const matches = [...this.agents.values()].filter(
+      (agent) =>
+        agent.runtimeState === "running" &&
+        agent.name === agentName &&
+        (projectId === undefined || agent.projectId === projectId),
+    );
+    if (matches.length !== 1) {
+      throw new Error(`agent scope is ambiguous or missing: ${agentName}`);
+    }
+    const agent = matches[0];
     const payload: HITLRequestPayload = {
       promise_id: `hitl-${uuid().replace(/-/g, "").slice(0, 12)}`,
-      agent_id: "",
-      project_id: "",
-      cluster_id: "",
+      agent_id: agent.agentId,
+      project_id: agent.projectId,
+      cluster_id: agent.clusterId,
       agent_name: agentName,
       ability_name: abilityName,
       tool_args: toolArgs,
@@ -936,7 +1345,7 @@ export class MockState {
 
   resolveHitl(promiseId: string, approved: boolean, reason: string | null): CommandOutcome {
     const pending = this.pendingHitl.get(promiseId);
-    if (!pending || pending.status !== "pending") {
+    if (pending?.status !== "pending") {
       return fail(`unknown hitl request: ${promiseId}`);
     }
     pending.status = approved ? "approved" : "rejected";

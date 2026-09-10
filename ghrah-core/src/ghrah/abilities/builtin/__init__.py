@@ -9,6 +9,7 @@
 - EndTaskAbility: 终止循环，生成最终回复
 - ReadFileAbility: 文件读取
 - ListDirectoryAbility: 目录列表
+- SearchFilesAbility: 内容搜索（rg 主路径 + Python 回退）
 - WriteFileAbility: 文件写入（创建/覆盖）
 - EditFileAbility: 文件编辑（精确字符串替换）
 - MoveFileAbility: 文件移动/重命名
@@ -19,8 +20,9 @@
 - QueryAgentsAbility: 查询集群中已注册的 Agent 信息
 - SendMessageAbility: 向指定 Agent 发送消息（支持同步/异步模式）
 - BroadcastMessageAbility: 向所有 Agent 广播消息
-- SpawnAgentAbility: 动态创建 Agent
+- SpawnAgentAbility: 以 manifest 实例化方式动态创建 Agent
 - TerminateAgentAbility: 终止集群中的 Agent
+- QueryManifestsAbility: 只读查询 agent manifest 定义（含能力清单）
 - SendAbility: 向 room 发消息（send 工具：成员展开 + Supervisor 投递 + RoomLog 落账）
 
 权限模块：
@@ -56,7 +58,9 @@ from ghrah.abilities.builtin.fs_permissions import (
 from ghrah.abilities.builtin.list_directory import ListDirectoryAbility
 from ghrah.abilities.builtin.move_file import MoveFileAbility
 from ghrah.abilities.builtin.query_agents import QueryAgentsAbility
+from ghrah.abilities.builtin.query_manifests import QueryManifestsAbility
 from ghrah.abilities.builtin.read_file import ReadFileAbility
+from ghrah.abilities.builtin.search_files import SearchFilesAbility
 from ghrah.abilities.builtin.send import SendAbility
 from ghrah.abilities.builtin.send_message import SendMessageAbility
 from ghrah.abilities.builtin.spawn_agent import SpawnAgentAbility
@@ -74,6 +78,7 @@ __all__ = [
     "EditFileAbility",
     "MoveFileAbility",
     "DeleteFileAbility",
+    "SearchFilesAbility",
     # 命令执行 Ability
     "ExecuteCommandAbility",
     "ExecuteCommandInput",
@@ -83,6 +88,7 @@ __all__ = [
     "BroadcastMessageAbility",
     "SpawnAgentAbility",
     "TerminateAgentAbility",
+    "QueryManifestsAbility",
     "SendAbility",
     # 文件系统权限模块
     "FSPermissionChecker",

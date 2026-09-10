@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from ghrah.abilities.base import Ability
-from ghrah.abilities.builtin._cluster_common import _NO_SUPERVISOR_ERROR
+from ghrah.abilities.builtin._cluster_common import cluster_supervisor_error
 from ghrah.types.results import ActionOutcome, ActionResult
 
 if TYPE_CHECKING:
@@ -63,10 +63,11 @@ class BroadcastMessageAbility(Ability):
         return []
 
     async def execute(self, context: AbilityExecutionContext) -> ActionResult:
-        if context.supervisor is None:
+        error = cluster_supervisor_error(context.supervisor)
+        if error:
             return ActionResult(
                 outcome=ActionOutcome.FAILURE,
-                data={"error": _NO_SUPERVISOR_ERROR},
+                data={"error": error},
             )
 
         tool_args = context.tool_args or context.accumulated_data.get("tool_args", {})

@@ -11,6 +11,9 @@ import {
   type SubscribePayload,
   type TaskPriority,
 } from "@ghrah/protocol";
+import type { AgentTarget, ChainTarget, SessionTarget } from "./scope.js";
+
+export type { AgentTarget, ChainTarget, SessionTarget } from "./scope.js";
 
 export interface CreateProjectOptions {
   description?: string;
@@ -24,7 +27,52 @@ export interface CreateProjectOptions {
   }>;
 }
 
+export interface RoomLifecycleTarget {
+  roomId: string;
+  expectedVersion: number;
+}
+
+export interface ProjectLifecycleTarget {
+  projectId: string;
+  expectedVersion: number;
+}
+
+export interface ProjectDeleteTarget extends ProjectLifecycleTarget {
+  cascadeRooms?: boolean;
+}
+
+export interface ListProjectsOptions {
+  status?: string | null;
+  archived?: boolean | null;
+}
+
+export interface ObserverRequestContext {
+  command: string;
+  payload: Readonly<Record<string, unknown>>;
+}
+
 export class ObserverClient extends ServerClient {
+  private readonly _requestContexts = new Map<string, ObserverRequestContext>();
+
+  override async request(message: ServerMessage, timeout = 30_000): Promise<CommandResultPayload> {
+    const requestId = message.request_id ?? generateRequestId();
+    message.request_id = requestId;
+    this._requestContexts.set(requestId, {
+      command: message.type,
+      payload: { ...message.payload },
+    });
+    try {
+      return await super.request(message, timeout);
+    } finally {
+      this._requestContexts.delete(requestId);
+    }
+  }
+
+  /** Return local request scope while its command-result is being dispatched. */
+  getRequestContext(requestId: string): ObserverRequestContext | undefined {
+    return this._requestContexts.get(requestId);
+  }
+
   async subscribe(agentNames?: string[] | null, eventTypes?: string[] | null): Promise<void> {
     const payload: SubscribePayload = {};
     if (agentNames != null) payload.agent_names = agentNames;
@@ -64,11 +112,12 @@ export class ObserverClient extends ServerClient {
   }
 
   async spawnAgent(
+    projectId: string,
     config: AgentConfigPayload,
     abilities?: AbilityDefinitionPayload[] | null,
     manifestRef?: string | null,
   ): Promise<CommandResultPayload> {
-    const payload: Record<string, unknown> = { config };
+    const payload: Record<string, unknown> = { project_id: projectId, config };
     if (abilities != null) payload["abilities"] = abilities;
     if (manifestRef != null) payload["manifest_ref"] = manifestRef;
 
@@ -81,10 +130,14 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async terminateAgent(name: string): Promise<CommandResultPayload> {
+  async terminateAgent(target: AgentTarget): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.TERMINATE_AGENT,
-      payload: { name },
+      payload: {
+        project_id: target.projectId,
+        agent_id: target.agentId,
+        name: target.agentName,
+      },
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
@@ -92,33 +145,47 @@ export class ObserverClient extends ServerClient {
   }
 
   async sendMessage(
-    target: string,
+    target: AgentTarget,
     content: string,
     sender = "user",
+    options: { timeout?: number | null; metadata?: Record<string, unknown> | null } = {},
   ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = {
+      project_id: target.projectId,
+      agent_id: target.agentId,
+      target: target.agentName,
+      content,
+      sender,
+    };
+    if (options.timeout != null) payload.timeout = options.timeout;
+    if (options.metadata != null) payload.metadata = options.metadata;
     const msg: ServerMessage = {
       type: CommandType.SEND_MESSAGE,
-      payload: { target, content, sender },
+      payload,
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 60_000);
   }
 
-  async broadcastMessage(content: string, sender = "user"): Promise<CommandResultPayload> {
+  async broadcastMessage(
+    projectId: string,
+    content: string,
+    sender = "user",
+  ): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.BROADCAST_MESSAGE,
-      payload: { content, sender },
+      payload: { project_id: projectId, content, sender },
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 30_000);
   }
 
-  async listAgents(): Promise<CommandResultPayload> {
+  async listAgents(projectId: string): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.LIST_AGENTS,
-      payload: {},
+      payload: { project_id: projectId },
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
@@ -148,30 +215,25 @@ export class ObserverClient extends ServerClient {
     await this.send(msg);
   }
 
-  async getAgentInfo(name: string): Promise<CommandResultPayload> {
+  async getAgentInfo(target: AgentTarget): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.GET_AGENT_INFO,
-      payload: { name },
+      payload: {
+        project_id: target.projectId,
+        agent_id: target.agentId,
+        name: target.agentName,
+      },
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 30_000);
   }
 
-  async getChainHistory(
-    agentName: string,
-    projectId: string,
-    agentId: string,
-    sessionId: string,
-    branchId: string,
-    limit?: number,
-  ): Promise<CommandResultPayload> {
+  async getChainHistory(target: ChainTarget, limit?: number): Promise<CommandResultPayload> {
     const payload: Record<string, unknown> = {
-      agent_name: agentName,
-      project_id: projectId,
-      agent_id: agentId,
-      session_id: sessionId,
-      branch_id: branchId,
+      ...agentTargetPayload(target),
+      session_id: target.sessionId,
+      branch_id: target.branchId,
     };
     if (limit != null) payload["limit"] = limit;
 
@@ -184,18 +246,12 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async listSessions(
-    agentName: string,
-    projectId: string,
-    agentId: string,
-  ): Promise<CommandResultPayload> {
-    return this._agentContextRequest(CommandType.SESSION_LIST, agentName, projectId, agentId, {});
+  async listSessions(target: AgentTarget): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.SESSION_LIST, target, {});
   }
 
   async createSession(
-    agentName: string,
-    projectId: string,
-    agentId: string,
+    target: AgentTarget,
     options: {
       originSessionId?: string;
       originNodeId?: string;
@@ -203,7 +259,7 @@ export class ObserverClient extends ServerClient {
       metadata?: Record<string, unknown>;
     } = {},
   ): Promise<CommandResultPayload> {
-    return this._agentContextRequest(CommandType.SESSION_CREATE, agentName, projectId, agentId, {
+    return this._agentContextRequest(CommandType.SESSION_CREATE, target, {
       origin_session_id: options.originSessionId,
       origin_node_id: options.originNodeId,
       system_prompt: options.systemPrompt,
@@ -211,55 +267,32 @@ export class ObserverClient extends ServerClient {
     });
   }
 
-  async activateSession(
-    agentName: string,
-    projectId: string,
-    agentId: string,
-    sessionId: string,
-  ): Promise<CommandResultPayload> {
-    return this._agentContextRequest(CommandType.SESSION_ACTIVATE, agentName, projectId, agentId, {
-      session_id: sessionId,
+  async activateSession(target: SessionTarget): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.SESSION_ACTIVATE, target, {
+      session_id: target.sessionId,
     });
   }
 
-  async archiveSession(
-    agentName: string,
-    projectId: string,
-    agentId: string,
-    sessionId: string,
-  ): Promise<CommandResultPayload> {
-    return this._agentContextRequest(CommandType.SESSION_ARCHIVE, agentName, projectId, agentId, {
-      session_id: sessionId,
+  async archiveSession(target: SessionTarget): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.SESSION_ARCHIVE, target, {
+      session_id: target.sessionId,
     });
   }
 
-  async deleteSession(
-    agentName: string,
-    projectId: string,
-    agentId: string,
-    sessionId: string,
-  ): Promise<CommandResultPayload> {
-    return this._agentContextRequest(CommandType.SESSION_DELETE, agentName, projectId, agentId, {
-      session_id: sessionId,
+  async deleteSession(target: SessionTarget): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.SESSION_DELETE, target, {
+      session_id: target.sessionId,
     });
   }
 
-  async listBranches(
-    agentName: string,
-    projectId: string,
-    agentId: string,
-    sessionId: string,
-  ): Promise<CommandResultPayload> {
-    return this._agentContextRequest(CommandType.BRANCH_LIST, agentName, projectId, agentId, {
-      session_id: sessionId,
+  async listBranches(target: SessionTarget): Promise<CommandResultPayload> {
+    return this._agentContextRequest(CommandType.BRANCH_LIST, target, {
+      session_id: target.sessionId,
     });
   }
 
   async createBranch(
-    agentName: string,
-    projectId: string,
-    agentId: string,
-    sessionId: string,
+    target: SessionTarget,
     name: string,
     options: {
       fromNodeId?: string;
@@ -267,8 +300,8 @@ export class ObserverClient extends ServerClient {
       metadata?: Record<string, unknown>;
     } = {},
   ): Promise<CommandResultPayload> {
-    return this._agentContextRequest(CommandType.BRANCH_CREATE, agentName, projectId, agentId, {
-      session_id: sessionId,
+    return this._agentContextRequest(CommandType.BRANCH_CREATE, target, {
+      session_id: target.sessionId,
       name,
       from_node_id: options.fromNodeId,
       parent_branch_id: options.parentBranchId,
@@ -276,85 +309,38 @@ export class ObserverClient extends ServerClient {
     });
   }
 
-  async activateBranch(
-    agentName: string,
-    projectId: string,
-    agentId: string,
-    sessionId: string,
-    branchId: string,
-  ): Promise<CommandResultPayload> {
-    return this._branchLifecycleRequest(
-      CommandType.BRANCH_ACTIVATE,
-      agentName,
-      projectId,
-      agentId,
-      sessionId,
-      branchId,
-    );
+  async activateBranch(target: ChainTarget): Promise<CommandResultPayload> {
+    return this._branchLifecycleRequest(CommandType.BRANCH_ACTIVATE, target);
   }
 
-  async archiveBranch(
-    agentName: string,
-    projectId: string,
-    agentId: string,
-    sessionId: string,
-    branchId: string,
-  ): Promise<CommandResultPayload> {
-    return this._branchLifecycleRequest(
-      CommandType.BRANCH_ARCHIVE,
-      agentName,
-      projectId,
-      agentId,
-      sessionId,
-      branchId,
-    );
+  async archiveBranch(target: ChainTarget): Promise<CommandResultPayload> {
+    return this._branchLifecycleRequest(CommandType.BRANCH_ARCHIVE, target);
   }
 
-  async deleteBranch(
-    agentName: string,
-    projectId: string,
-    agentId: string,
-    sessionId: string,
-    branchId: string,
-  ): Promise<CommandResultPayload> {
-    return this._branchLifecycleRequest(
-      CommandType.BRANCH_DELETE,
-      agentName,
-      projectId,
-      agentId,
-      sessionId,
-      branchId,
-    );
+  async deleteBranch(target: ChainTarget): Promise<CommandResultPayload> {
+    return this._branchLifecycleRequest(CommandType.BRANCH_DELETE, target);
   }
 
   private _branchLifecycleRequest(
     command: CommandType,
-    agentName: string,
-    projectId: string,
-    agentId: string,
-    sessionId: string,
-    branchId: string,
+    target: ChainTarget,
   ): Promise<CommandResultPayload> {
-    return this._agentContextRequest(command, agentName, projectId, agentId, {
-      session_id: sessionId,
-      branch_id: branchId,
+    return this._agentContextRequest(command, target, {
+      session_id: target.sessionId,
+      branch_id: target.branchId,
     });
   }
 
   private _agentContextRequest(
     command: CommandType,
-    agentName: string,
-    projectId: string,
-    agentId: string,
+    target: AgentTarget,
     extra: Record<string, unknown>,
   ): Promise<CommandResultPayload> {
     return this.request(
       {
         type: command,
         payload: {
-          project_id: projectId,
-          agent_id: agentId,
-          agent_name: agentName,
+          ...agentTargetPayload(target),
           ...extra,
         },
         request_id: generateRequestId(),
@@ -407,40 +393,40 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async createWorkspace(agentName: string): Promise<CommandResultPayload> {
+  async createWorkspace(target: AgentTarget): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.CREATE_WORKSPACE,
-      payload: { agent_name: agentName },
+      payload: agentTargetPayload(target),
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 30_000);
   }
 
-  async destroyWorkspace(agentName: string): Promise<CommandResultPayload> {
+  async destroyWorkspace(target: AgentTarget): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.DESTROY_WORKSPACE,
-      payload: { agent_name: agentName },
+      payload: agentTargetPayload(target),
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 30_000);
   }
 
-  async workspaceSnapshot(agentName: string, message = ""): Promise<CommandResultPayload> {
+  async workspaceSnapshot(target: AgentTarget, message = ""): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.WORKSPACE_SNAPSHOT,
-      payload: { agent_name: agentName, message },
+      payload: { ...agentTargetPayload(target), message },
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 30_000);
   }
 
-  async workspaceRollback(agentName: string, snapshotId: string): Promise<CommandResultPayload> {
+  async workspaceRollback(target: AgentTarget, snapshotId: string): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.WORKSPACE_ROLLBACK,
-      payload: { agent_name: agentName, snapshot_id: snapshotId },
+      payload: { ...agentTargetPayload(target), snapshot_id: snapshotId },
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
@@ -448,10 +434,10 @@ export class ObserverClient extends ServerClient {
   }
 
   async workspaceDiff(
-    agentName: string,
+    target: AgentTarget,
     snapshotId?: string | null,
   ): Promise<CommandResultPayload> {
-    const payload: Record<string, unknown> = { agent_name: agentName };
+    const payload: Record<string, unknown> = agentTargetPayload(target);
     if (snapshotId != null) payload["snapshot_id"] = snapshotId;
 
     const msg: ServerMessage = {
@@ -463,10 +449,10 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async workspaceStatus(agentName: string): Promise<CommandResultPayload> {
+  async workspaceStatus(target: AgentTarget): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.WORKSPACE_STATUS,
-      payload: { agent_name: agentName },
+      payload: agentTargetPayload(target),
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
@@ -525,12 +511,22 @@ export class ObserverClient extends ServerClient {
   // ── 能力管理 + 委托 ──
 
   async registerAbility(
-    agentName: string,
+    target: AgentTarget,
     ability: AbilityDefinitionPayload,
   ): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.REGISTER_ABILITY,
-      payload: { agent_name: agentName, ability },
+      payload: { ...agentTargetPayload(target), ability },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  async unregisterAbility(target: AgentTarget, abilityName: string): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.UNREGISTER_ABILITY,
+      payload: { ...agentTargetPayload(target), ability_name: abilityName },
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
@@ -538,13 +534,26 @@ export class ObserverClient extends ServerClient {
   }
 
   async delegate(
-    fromAgent: string,
-    toAgent: string,
+    fromAgent: AgentTarget,
+    toAgent: AgentTarget,
     content: string,
+    timeout?: number | null,
   ): Promise<CommandResultPayload> {
+    if (fromAgent.projectId !== toAgent.projectId) {
+      throw new Error("Cannot delegate across Projects");
+    }
+    const payload: Record<string, unknown> = {
+      project_id: fromAgent.projectId,
+      from_agent_id: fromAgent.agentId,
+      to_agent_id: toAgent.agentId,
+      from_agent: fromAgent.agentName,
+      to_agent: toAgent.agentName,
+      content,
+    };
+    if (timeout != null) payload.timeout = timeout;
     const msg: ServerMessage = {
       type: CommandType.DELEGATE,
-      payload: { from_agent: fromAgent, to_agent: toAgent, content },
+      payload,
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
@@ -736,27 +745,54 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async deleteRoom(roomId: string, force?: boolean): Promise<CommandResultPayload> {
-    const payload: Record<string, unknown> = { room_id: roomId };
-    if (force != null) payload["force"] = force;
+  async archiveRoom(target: RoomLifecycleTarget): Promise<CommandResultPayload> {
+    return this._roomLifecycle(CommandType.ROOM_ARCHIVE, target);
+  }
 
+  async restoreRoom(target: RoomLifecycleTarget): Promise<CommandResultPayload> {
+    return this._roomLifecycle(CommandType.ROOM_RESTORE, target);
+  }
+
+  async deleteRoom(target: RoomLifecycleTarget): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.ROOM_DELETE,
-      payload,
+      payload: roomLifecyclePayload(target),
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 30_000);
   }
 
+  private _roomLifecycle(
+    command: CommandType,
+    target: RoomLifecycleTarget,
+  ): Promise<CommandResultPayload> {
+    return this.request(
+      {
+        type: command,
+        payload: roomLifecyclePayload(target),
+        request_id: generateRequestId(),
+        client_type: ClientType.OBSERVER,
+      },
+      30_000,
+    );
+  }
+
   async joinRoom(
     roomId: string,
     subject: string,
     subjectType: RoomSubjectType,
+    subjectName?: string,
   ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = {
+      room_id: roomId,
+      subject,
+      subject_type: subjectType,
+    };
+    if (subjectName != null) payload.subject_name = subjectName;
     const msg: ServerMessage = {
       type: CommandType.ROOM_JOIN,
-      payload: { room_id: roomId, subject, subject_type: subjectType },
+      payload,
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
@@ -844,9 +880,10 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async listProjects(status?: string | null): Promise<CommandResultPayload> {
+  async listProjects(options: ListProjectsOptions = {}): Promise<CommandResultPayload> {
     const payload: Record<string, unknown> = {};
-    if (status != null) payload["status"] = status;
+    if (options.status !== undefined) payload.status = options.status;
+    if (options.archived !== undefined) payload.archived = options.archived;
 
     const msg: ServerMessage = {
       type: CommandType.PROJECT_LIST,
@@ -891,22 +928,40 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async deleteProject(
-    projectId: string,
-    force?: boolean,
-    purgeStorage?: boolean,
-  ): Promise<CommandResultPayload> {
-    const payload: Record<string, unknown> = { project_id: projectId };
-    if (force != null) payload["force"] = force;
-    if (purgeStorage != null) payload["purge_storage"] = purgeStorage;
-
+  async deleteProject(target: ProjectDeleteTarget): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.PROJECT_DELETE,
-      payload,
+      payload: {
+        ...projectLifecyclePayload(target),
+        cascade_rooms: target.cascadeRooms ?? false,
+      },
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
     return this.request(msg, 30_000);
+  }
+
+  async archiveProject(target: ProjectLifecycleTarget): Promise<CommandResultPayload> {
+    return this._projectLifecycle(CommandType.PROJECT_ARCHIVE, target);
+  }
+
+  async restoreProject(target: ProjectLifecycleTarget): Promise<CommandResultPayload> {
+    return this._projectLifecycle(CommandType.PROJECT_RESTORE, target);
+  }
+
+  private _projectLifecycle(
+    command: CommandType,
+    target: ProjectLifecycleTarget,
+  ): Promise<CommandResultPayload> {
+    return this.request(
+      {
+        type: command,
+        payload: projectLifecyclePayload(target),
+        request_id: generateRequestId(),
+        client_type: ClientType.OBSERVER,
+      },
+      30_000,
+    );
   }
 
   // ── Task ──
@@ -916,6 +971,7 @@ export class ObserverClient extends ServerClient {
     projectId: string,
     opts?: {
       description?: string;
+      agentId?: string | null;
       agentName?: string | null;
       priority?: TaskPriority;
       parentId?: string | null;
@@ -923,6 +979,7 @@ export class ObserverClient extends ServerClient {
   ): Promise<CommandResultPayload> {
     const payload: Record<string, unknown> = { title, project_id: projectId };
     if (opts?.description != null) payload["description"] = opts.description;
+    if (opts?.agentId != null) payload["agent_id"] = opts.agentId;
     if (opts?.agentName != null) payload["agent_name"] = opts.agentName;
     if (opts?.priority != null) payload["priority"] = opts.priority;
     if (opts?.parentId != null) payload["parent_id"] = opts.parentId;
@@ -938,12 +995,14 @@ export class ObserverClient extends ServerClient {
 
   async listTasks(filter?: {
     projectId?: string | null;
+    agentId?: string | null;
     agentName?: string | null;
     status?: string | string[] | null;
     limit?: number;
   }): Promise<CommandResultPayload> {
     const payload: Record<string, unknown> = {};
     if (filter?.projectId != null) payload["project_id"] = filter.projectId;
+    if (filter?.agentId != null) payload["agent_id"] = filter.agentId;
     if (filter?.agentName != null) payload["agent_name"] = filter.agentName;
     if (filter?.status != null) payload["status"] = filter.status;
     if (filter?.limit != null) payload["limit"] = filter.limit;
@@ -970,8 +1029,14 @@ export class ObserverClient extends ServerClient {
   // ── 内部方法 ──
 
   protected async _syncInitialState(): Promise<void> {
+    let projectIds: string[] = [];
     try {
-      await this.listProjects();
+      const result = await this.listProjects({ archived: false });
+      const projects = (result.data as { projects?: Array<{ project_id?: unknown }> } | null)
+        ?.projects;
+      projectIds = (projects ?? [])
+        .map((project) => project.project_id)
+        .filter((projectId): projectId is string => typeof projectId === "string");
     } catch {
       // 静默忽略初始同步失败
     }
@@ -980,17 +1045,29 @@ export class ObserverClient extends ServerClient {
     } catch {
       // 静默忽略初始同步失败
     }
-    try {
-      await this.listAgents();
-    } catch {
-      // 静默忽略初始同步失败
-    }
-    try {
-      await this.listRooms();
-    } catch {
-      // 静默忽略初始同步失败
-    }
+    await Promise.all(
+      projectIds.flatMap((projectId) => [
+        this.listAgents(projectId).catch(() => undefined),
+        this.listRooms(projectId, "active").catch(() => undefined),
+      ]),
+    );
   }
+}
+
+function agentTargetPayload(target: AgentTarget): Record<string, unknown> {
+  return {
+    project_id: target.projectId,
+    agent_id: target.agentId,
+    agent_name: target.agentName,
+  };
+}
+
+function roomLifecyclePayload(target: RoomLifecycleTarget): Record<string, unknown> {
+  return { room_id: target.roomId, expected_version: target.expectedVersion };
+}
+
+function projectLifecyclePayload(target: ProjectLifecycleTarget): Record<string, unknown> {
+  return { project_id: target.projectId, expected_version: target.expectedVersion };
 }
 
 function arraysEqual(a: string[] | null | undefined, b: string[]): boolean {

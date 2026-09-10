@@ -38,6 +38,8 @@ export const SendMessagePayloadSchema = z.object({
   target: z.string(),
   content: z.string(),
   sender: z.string().optional().default("user"),
+  timeout: z.number().nullable().optional(),
+  metadata: z.record(z.unknown()).nullable().optional(),
 });
 
 export const BroadcastMessagePayloadSchema = z.object({
@@ -73,6 +75,7 @@ export const DelegatePayloadSchema = z.object({
   from_agent: z.string(),
   to_agent: z.string(),
   content: z.string(),
+  timeout: z.number().nullable().optional(),
 });
 
 export const GetAgentInfoPayloadSchema = z.object({
@@ -99,9 +102,13 @@ export const ExecuteAbilityPayloadSchema = z.object({
 });
 
 export const HITLResponsePayloadSchema = z.object({
-  promise_id: z.string(),
+  promise_id: z.string().optional().default(""),
+  agent_name: z.string().optional().default(""),
+  ability_name: z.string().optional().default(""),
+  tool_call_id: z.string().optional().default(""),
   approved: z.boolean(),
   reason: z.string().nullable().optional(),
+  result: z.unknown().nullable().optional(),
 });
 
 export const InitClusterPayloadSchema = z.object({
@@ -211,7 +218,7 @@ export const AgentSpawnedPayloadSchema = z.object({
   name: z.string(),
   agent_id: z.string().optional().default(""),
   incarnation_id: z.string().optional().default(""),
-  recovery_mode: z.string().optional(),
+  recovery_mode: z.string().optional().default(""),
   config: AgentConfigPayloadSchema,
 });
 
@@ -467,6 +474,7 @@ export const ChainHistoryResultPayloadSchema = z.object({
   agent_name: z.string(),
   session_id: z.string(),
   branch_id: z.string(),
+  active_session_id: z.string().optional().default(""),
   nodes: z.array(z.record(z.unknown())).optional().default([]),
 });
 
@@ -588,11 +596,15 @@ export const ManifestResolvePayloadSchema = z.object({
 export const ManifestAbilityEventPayloadSchema = z.object({
   full_name: z.string(),
   namespace: z.string(),
+  manifest: z.record(z.unknown()).nullable().optional(),
+  source: z.string().nullable().optional(),
 });
 
 export const ManifestAgentEventPayloadSchema = z.object({
   full_name: z.string(),
   namespace: z.string(),
+  manifest: z.record(z.unknown()).nullable().optional(),
+  source: z.string().nullable().optional(),
 });
 
 export const CommandResultPayloadSchema = z.object({
@@ -600,6 +612,7 @@ export const CommandResultPayloadSchema = z.object({
   success: z.boolean(),
   data: z.unknown().nullable().optional(),
   error: z.string().nullable().optional(),
+  error_detail: z.string().nullable().optional(),
 });
 
 export const ErrorPayloadSchema = z.object({
@@ -626,6 +639,7 @@ export const TaskInfoPayloadSchema = z.object({
   project_id: z.string(),
   title: z.string(),
   description: z.string().optional().default(""),
+  agent_id: z.string().nullable().optional(),
   agent_name: z.string().nullable().optional(),
   status: TaskStatusSchema.optional().default("pending"),
   priority: TaskPrioritySchema.optional().default("normal"),
@@ -644,6 +658,7 @@ export const TaskCreatePayloadSchema = z.object({
   title: z.string(),
   project_id: z.string(),
   description: z.string().optional().default(""),
+  agent_id: z.string().nullable().optional(),
   agent_name: z.string().nullable().optional(),
   priority: TaskPrioritySchema.optional().default("normal"),
   parent_id: z.string().nullable().optional(),
@@ -655,6 +670,7 @@ export const TaskUpdatePayloadSchema = z.object({
   task_id: z.string(),
   title: z.string().nullable().optional(),
   description: z.string().nullable().optional(),
+  agent_id: z.string().nullable().optional(),
   agent_name: z.string().nullable().optional(),
   status: TaskStatusSchema.nullable().optional(),
   priority: TaskPrioritySchema.nullable().optional(),
@@ -673,6 +689,7 @@ export const TaskIdPayloadSchema = z.object({
 
 export const TaskAssignPayloadSchema = z.object({
   task_id: z.string(),
+  agent_id: z.string().optional().default(""),
   agent_name: z.string(),
 });
 
@@ -697,6 +714,7 @@ export const TaskBlockPayloadSchema = z.object({
 });
 
 export const TaskListPayloadSchema = z.object({
+  agent_id: z.string().nullable().optional(),
   agent_name: z.string().nullable().optional(),
   status: z
     .union([TaskStatusSchema, z.array(TaskStatusSchema)])
@@ -722,6 +740,8 @@ export const TaskEventPayloadSchema = z.object({
   task: TaskInfoPayloadSchema,
   previous_status: TaskStatusSchema.nullable().optional(),
   reason: z.string().nullable().optional(),
+  agent_id: z.string().nullable().optional(),
+  agent_name: z.string().nullable().optional(),
 });
 
 // ─── Project Payloads ───
@@ -757,6 +777,16 @@ export const AgentSpecSchema = z.object({
   system_prompt: z.string().optional().default(""),
   abilities: z.array(z.string()).nullable().optional(),
   path_grants: z.array(PathGrantSchema).optional().default([]),
+  runtime_status: z.string().optional().default("pending"),
+  runtime_error: z.string().optional().default(""),
+});
+
+export const IsolationSpecPayloadSchema = z.object({
+  agent_path_grants: z.record(z.array(PathGrantSchema)).optional().default({}),
+  agent_private_dir: z.boolean().optional().default(true),
+  effect_allowlist: z.array(z.string()).nullable().optional(),
+  hitl_override: z.record(z.unknown()).nullable().optional(),
+  task_scope: z.boolean().optional().default(true),
 });
 
 export const ProjectInfoPayloadSchema = z.object({
@@ -769,6 +799,7 @@ export const ProjectInfoPayloadSchema = z.object({
   workspaces: z.array(WorkspaceMountSchema).optional().default([]),
   agents: z.array(AgentSpecSchema).optional().default([]),
   task_ids: z.array(z.string()).optional().default([]),
+  isolation: IsolationSpecPayloadSchema.optional().default({}),
   status: ProjectStatusSchema.optional().default("active"),
   recovery: RecoveryActionSchema.optional().default("resume"),
   version: z.number().int().optional().default(1),
@@ -1088,6 +1119,7 @@ export type PathGrant = z.infer<typeof PathGrantSchema>;
 export type WorkspaceMount = z.infer<typeof WorkspaceMountSchema>;
 export type WritableWorkspaceSpec = z.infer<typeof WritableWorkspaceSpecSchema>;
 export type AgentSpec = z.infer<typeof AgentSpecSchema>;
+export type IsolationSpecPayload = z.infer<typeof IsolationSpecPayloadSchema>;
 export type ProjectInfoPayload = z.infer<typeof ProjectInfoPayloadSchema>;
 export type ProjectCreatePayload = z.infer<typeof ProjectCreatePayloadSchema>;
 export type ProjectUpdatePayload = z.infer<typeof ProjectUpdatePayloadSchema>;

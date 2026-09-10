@@ -117,6 +117,8 @@ export {
   HITLResponsePayloadSchema,
   type InitClusterPayload,
   InitClusterPayloadSchema,
+  type IsolationSpecPayload,
+  IsolationSpecPayloadSchema,
   type ListAgentsPayload,
   ListAgentsPayloadSchema,
   type ListClustersPayload,

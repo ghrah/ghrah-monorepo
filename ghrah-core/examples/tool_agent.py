@@ -130,12 +130,14 @@ async def demo_supervisor_integration() -> None:
         abilities=[ReadFileAbility(), ConversationAbility(), EndTaskAbility()],
     )
 
-    # 注册使用默认 Ability 的 Agent
+    # 注册使用显式基础两件套的 Agent（spawn 不再做任何隐式注入）
     default_config = AgentConfig(
         name="default-agent",
         description="默认对话 Agent",
     )
-    await supervisor.spawn_agent(default_config)
+    await supervisor.spawn_agent(
+        default_config, abilities=[ConversationAbility(), EndTaskAbility()]
+    )
 
     # 检查 Agent 状态
     agents = await supervisor.list_agents()

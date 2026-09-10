@@ -7,8 +7,6 @@
 解决三个 POSIX 假设：
 - 原子替换：写文件走 同目录 tmp + fsync + ``os.replace``。Windows 上目标被
   AV/索引器短暂占用时 ``os.replace`` 抛 ``PermissionError``，做小步重试。
-- 只读内容删除：git object 等文件为只读，``shutil.rmtree`` 在 Windows 上删除
-  只读项必抛 ``PermissionError``；onerror/onexc 回调先去只读再重试。
 - 可写性探针：``os.access(path, os.W_OK)`` 在 Windows 不查 ACL，语义失真；
   用真实创建临时文件后删除的探针替代。
 """
@@ -16,13 +14,11 @@
 from __future__ import annotations
 
 import os
-import shutil
-import sys
 import tempfile
 import time
 from pathlib import Path
 
-__all__ = ["atomic_write_text", "is_writable", "robust_rmtree"]
+__all__ = ["atomic_write_text", "is_writable"]
 
 _REPLACE_RETRIES = 5
 _REPLACE_RETRY_DELAY_S = 0.05
@@ -69,52 +65,6 @@ def _replace_with_retry(src: Path, dst: Path) -> None:
             time.sleep(_REPLACE_RETRY_DELAY_S)
     assert last_exc is not None
     raise last_exc
-
-
-def robust_rmtree(path: str | Path) -> None:
-    """递归删除目录，容忍只读内容（git object 等）。
-
-    非 POSIX 平台上删除只读文件/目录会抛 ``PermissionError``；此处经
-    onerror/onexc 回调去只读（文件 0o600 / 目录 0o700）后重试，重试仍失败
-    则抛出原异常（与无回调 rmtree 语义一致）。路径不存在时为 no-op。
-    """
-    p = Path(path)
-    if not p.exists() and not p.is_symlink():
-        return
-    if sys.version_info >= (3, 12):
-        shutil.rmtree(p, onexc=_onexc)  # type: ignore[call-overload]
-    else:
-        shutil.rmtree(p, onerror=_onerror)  # type: ignore[call-overload]
-
-
-def _chmod_and_retry(func, path) -> bool:  # noqa: ANN001 — shutil 回调签名
-    """对失败项去只读后重试原操作；成功返回 True。
-
-    unlink/rmdir 需要父目录可写，故目标与父目录都去只读
-    （目录 0o700 / 文件 0o600）。
-    """
-    try:
-        parent = os.path.dirname(path)
-        if parent and os.path.isdir(parent) and not os.access(parent, os.W_OK):
-            os.chmod(parent, 0o700)
-        if os.path.isdir(path) and not os.path.islink(path):
-            os.chmod(path, 0o700)
-        else:
-            os.chmod(path, 0o600)
-        func(path)
-        return True
-    except OSError:
-        return False
-
-
-def _onexc(func, path, excval) -> None:  # noqa: ANN001 — py3.12+ rmtree 回调
-    if not _chmod_and_retry(func, path):
-        raise excval
-
-
-def _onerror(func, path, exc_info) -> None:  # noqa: ANN001 — py3.11 rmtree 回调
-    if not _chmod_and_retry(func, path):
-        raise exc_info[1].with_traceback(exc_info[2])
 
 
 def is_writable(dir_path: str | Path) -> bool:

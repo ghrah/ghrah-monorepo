@@ -22,9 +22,9 @@ from ghrah.subject.project.models import (
     ProjectRecord,
     WorkspaceMount,
 )
+from ghrah.subject.workspace.locator import locator_to_path
 from ghrah.subject.workspace.models import WorkspaceRecord
 from ghrah.subject.workspace.providers.base import WorkspaceCaps
-from ghrah.subject.workspace.providers.git import locator_to_path
 from ghrah.subject.workspace.registry import ProviderRegistry
 
 __all__ = [
@@ -217,7 +217,8 @@ def _normalize_subpath(subpath: str) -> str:
 
 
 def _norm(path: str) -> str:
-    """规范化本地路径：去尾斜杠（保留根 ``/``）。"""
-    if len(path) > 1 and path.endswith("/"):
-        return path.rstrip("/")
-    return path
+    """规范化本地路径：统一分隔符并去尾斜杠（保留根）。"""
+    normalized = path.replace("\\", "/")
+    if len(normalized) > 1 and normalized.endswith("/"):
+        return normalized.rstrip("/")
+    return normalized

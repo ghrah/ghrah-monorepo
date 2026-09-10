@@ -31,7 +31,6 @@ from ghrah.subject.sandbox import (
     SandboxExecutor,
     SandboxExecutorConfig,
     SnapshotError,
-    SnapshotInfo,
     WorkspaceManager,
     WorkspaceStatus,
 )
@@ -64,7 +63,6 @@ __all__ = [
     "SandboxExecutor",
     "SandboxExecutorConfig",
     "SnapshotError",
-    "SnapshotInfo",
     "WorkspaceManager",
     "WorkspaceStatus",
 ]

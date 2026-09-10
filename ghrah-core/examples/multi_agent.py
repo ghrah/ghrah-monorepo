@@ -33,6 +33,8 @@ from __future__ import annotations
 
 import asyncio
 
+from ghrah.abilities.builtin.conversation import ConversationAbility
+from ghrah.abilities.builtin.end_task import EndTaskAbility
 from ghrah.communication import SupervisorActor
 from ghrah.types.config_types import AgentConfig
 
@@ -60,11 +62,13 @@ async def main() -> None:
         ),
     ]
 
-    # 注册所有 Agent（默认注册 ConversationAbility + EndTaskAbility）
+    # 注册所有 Agent（显式基础两件套——spawn 不再做任何隐式注入）
     print("=" * 60)
     print("注册 Agent...")
     for config in agents_config:
-        name = await supervisor.spawn_agent(config)
+        name = await supervisor.spawn_agent(
+            config, abilities=[ConversationAbility(), EndTaskAbility()]
+        )
         print(f"  ✓ Agent 注册成功: {name}")
 
     # 列出所有 Agent

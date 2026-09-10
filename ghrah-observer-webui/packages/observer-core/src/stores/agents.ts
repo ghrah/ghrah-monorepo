@@ -2,95 +2,217 @@ import type {
   AgentConfigPayload,
   AgentSpawnedPayload,
   AgentTerminatedPayload,
+  ProjectInfoPayload,
 } from "@ghrah/protocol";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import {
+  type AgentKey,
+  type AgentTarget,
+  agentKey,
+  hasCompleteAgentKey,
+  sameAgent,
+} from "../scope.js";
 
-export interface AgentInfo {
+export interface AgentListItem {
+  project_id?: string;
+  agent_id?: string;
+  cluster_id?: string;
   name: string;
-  agentId: string;
+  runtime_state?: string;
+  runtime_status?: string;
+  runtime_error?: string;
+  incarnation_id?: string;
+  recovery_mode?: string;
+  config?: AgentConfigPayload;
+}
+
+export interface AgentInfo extends AgentTarget {
+  clusterId: string;
   incarnationId: string;
   recoveryMode: string;
-  config: AgentConfigPayload;
+  runtimeStatus: string;
+  runtimeError: string;
+  config?: AgentConfigPayload;
+  /** @deprecated Use runtimeStatus. Kept until the M4 shell migration. */
   status: "active" | "terminated";
+}
+
+function projectIsOperable(project?: Pick<ProjectInfoPayload, "status" | "archived_at">): boolean {
+  return project?.status === "active" && project.archived_at == null;
+}
+
+function normalizeRuntimeStatus(
+  item: AgentListItem,
+  project?: Pick<ProjectInfoPayload, "status" | "archived_at">,
+): string {
+  if (!projectIsOperable(project)) return "stopped";
+  return item.runtime_state || item.runtime_status || "stopped";
+}
+
+function compatibilityStatus(runtimeStatus: string): AgentInfo["status"] {
+  return runtimeStatus === "running" || runtimeStatus === "active" ? "active" : "terminated";
 }
 
 export const useAgentsStore = defineStore("ghrah-agents", () => {
   const agents = ref<Map<string, AgentInfo>>(new Map());
-  const selectedAgentName = ref<string | null>(null);
+  const selectedAgentTarget = ref<AgentTarget | null>(null);
 
   const activeAgents = computed(() =>
-    Array.from(agents.value.values()).filter((a) => a.status === "active"),
+    Array.from(agents.value.values()).filter((agent) => agent.status === "active"),
   );
-
+  const selectedAgentName = computed(() => selectedAgentTarget.value?.agentName ?? null);
   const selectedAgent = computed(() => {
-    if (!selectedAgentName.value) return null;
-    return agents.value.get(selectedAgentName.value) ?? null;
+    if (!selectedAgentTarget.value) return null;
+    return agents.value.get(agentKey(selectedAgentTarget.value)) ?? null;
   });
 
-  function selectAgent(name: string | null) {
-    selectedAgentName.value = name;
+  function agentsForProject(projectId: string): AgentInfo[] {
+    return [...agents.value.values()].filter((agent) => agent.projectId === projectId);
   }
 
-  function onAgentSpawned(payload: AgentSpawnedPayload) {
-    agents.value.set(payload.name, {
-      name: payload.name,
-      agentId: payload.agent_id ?? payload.config.agent_id ?? "",
-      incarnationId: payload.incarnation_id ?? "",
-      recoveryMode: payload.recovery_mode ?? "",
+  function activeAgentsForProject(projectId: string): AgentInfo[] {
+    return agentsForProject(projectId).filter((agent) => agent.status === "active");
+  }
+
+  function getAgent(target: AgentKey): AgentInfo | undefined {
+    return agents.value.get(agentKey(target));
+  }
+
+  function selectAgent(target: AgentTarget | null) {
+    selectedAgentTarget.value = target;
+  }
+
+  function onAgentSpawned(
+    payload: AgentSpawnedPayload,
+    project?: Pick<ProjectInfoPayload, "status" | "archived_at">,
+  ) {
+    const target: AgentTarget = {
+      projectId: payload.project_id,
+      agentId: payload.agent_id || payload.config.agent_id || "",
+      agentName: payload.name,
+    };
+    if (!hasCompleteAgentKey(target)) return;
+    const runtimeStatus = project && !projectIsOperable(project) ? "stopped" : "running";
+    agents.value.set(agentKey(target), {
+      ...target,
+      clusterId: payload.cluster_id,
+      incarnationId: payload.incarnation_id,
+      recoveryMode: payload.recovery_mode,
+      runtimeStatus,
+      runtimeError: "",
       config: payload.config,
-      status: "active",
+      status: compatibilityStatus(runtimeStatus),
     });
   }
 
-  function onAgentTerminated(payload: AgentTerminatedPayload) {
-    const existing = agents.value.get(payload.name);
+  function onAgentTerminated(payload: AgentTerminatedPayload): AgentTarget | null {
+    const target: AgentTarget = {
+      projectId: payload.project_id,
+      agentId: payload.agent_id,
+      agentName: payload.name,
+    };
+    if (!hasCompleteAgentKey(target)) return null;
+    const existing = agents.value.get(agentKey(target));
     if (existing) {
+      existing.runtimeStatus = "stopped";
       existing.status = "terminated";
     }
-    if (selectedAgentName.value === payload.name) {
-      selectedAgentName.value = null;
-    }
+    if (sameAgent(selectedAgentTarget.value, target)) selectedAgentTarget.value = null;
+    return target;
   }
 
-  function setAgentsFromList(
-    list: Array<{
-      name: string;
-      agent_id?: string;
-      incarnation_id?: string;
-      recovery_mode?: string;
-      config: AgentConfigPayload;
-    }>,
-  ) {
-    agents.value.clear();
+  function replaceProjectAgents(
+    projectId: string,
+    list: AgentListItem[],
+    project?: Pick<ProjectInfoPayload, "status" | "archived_at">,
+  ): AgentTarget[] {
+    const previous = agentsForProject(projectId);
+    const next = new Map(
+      [...agents.value.entries()].filter(([, agent]) => agent.projectId !== projectId),
+    );
+    const retained = new Set<string>();
+
     for (const item of list) {
-      agents.value.set(item.name, {
-        name: item.name,
-        agentId: item.agent_id ?? item.config.agent_id ?? "",
-        incarnationId: item.incarnation_id ?? "",
-        recoveryMode: item.recovery_mode ?? "",
+      const target: AgentTarget = {
+        projectId: item.project_id || projectId,
+        agentId: item.agent_id || item.config?.agent_id || "",
+        agentName: item.name,
+      };
+      if (target.projectId !== projectId || !hasCompleteAgentKey(target)) continue;
+      const runtimeStatus = normalizeRuntimeStatus(item, project);
+      const key = agentKey(target);
+      retained.add(key);
+      next.set(key, {
+        ...target,
+        clusterId: item.cluster_id || "",
+        incarnationId: item.incarnation_id || "",
+        recoveryMode: item.recovery_mode || "",
+        runtimeStatus,
+        runtimeError: item.runtime_error || "",
         config: item.config,
-        status: "active",
+        status: compatibilityStatus(runtimeStatus),
       });
     }
+    agents.value = next;
+
+    const removed = previous
+      .filter((agent) => !retained.has(agentKey(agent)))
+      .map(({ projectId, agentId, agentName }) => ({ projectId, agentId, agentName }));
+    if (
+      selectedAgentTarget.value?.projectId === projectId &&
+      !retained.has(agentKey(selectedAgentTarget.value))
+    ) {
+      selectedAgentTarget.value = null;
+    }
+    return removed;
   }
 
-  function removeAgent(name: string) {
-    agents.value.delete(name);
-    if (selectedAgentName.value === name) {
-      selectedAgentName.value = null;
+  function removeAgent(target: AgentTarget) {
+    agents.value.delete(agentKey(target));
+    if (sameAgent(selectedAgentTarget.value, target)) selectedAgentTarget.value = null;
+  }
+
+  function clearProject(projectId: string) {
+    agents.value = new Map(
+      [...agents.value.entries()].filter(([, agent]) => agent.projectId !== projectId),
+    );
+    if (selectedAgentTarget.value?.projectId === projectId) selectedAgentTarget.value = null;
+  }
+
+  function applyProjectRuntimeState(
+    project: Pick<ProjectInfoPayload, "project_id" | "status" | "archived_at">,
+  ) {
+    if (project.status === "active" && project.archived_at == null) return;
+    const next = new Map(agents.value);
+    for (const [key, agent] of next) {
+      if (agent.projectId !== project.project_id) continue;
+      next.set(key, { ...agent, runtimeStatus: "stopped", status: "terminated" });
     }
+    agents.value = next;
+  }
+
+  function clearAll() {
+    agents.value = new Map();
+    selectedAgentTarget.value = null;
   }
 
   return {
     agents,
+    selectedAgentTarget,
     selectedAgentName,
     activeAgents,
     selectedAgent,
+    agentsForProject,
+    activeAgentsForProject,
+    getAgent,
     selectAgent,
     onAgentSpawned,
     onAgentTerminated,
-    setAgentsFromList,
+    replaceProjectAgents,
     removeAgent,
+    clearProject,
+    applyProjectRuntimeState,
+    clearAll,
   };
 });

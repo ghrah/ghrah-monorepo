@@ -51,6 +51,10 @@ __all__ = [
 
 _MAX_OUTPUT_BYTES = 1_000_000
 
+# stdout 折叠参数：超过 fold_stdout_lines 行时保留 head + tail，中间以标记行省略
+_FOLD_HEAD_LINES = 40
+_FOLD_TAIL_LINES = 40
+
 
 class ExecuteCommandInput(BaseModel):
     command: str
@@ -106,11 +110,14 @@ class ExecuteCommandAbility(Ability):
         command_checker: CommandSafetyChecker | None = None,
         command_runner: CommandRunner | None = None,
         timeout: float = 300.0,
+        fold_stdout_lines: int = 100,
     ) -> None:
         self._hooks = hooks or []
         self._checker = command_checker or CommandSafetyChecker()
         self._command_runner = command_runner
         self._timeout = timeout
+        # 0 = 关闭折叠（保留旧行为：仅字节截断）；stderr 永不折叠
+        self._fold_stdout_lines = fold_stdout_lines
 
     @property
     def name(self) -> str:
@@ -189,7 +196,7 @@ class ExecuteCommandAbility(Ability):
             outcome=ActionOutcome.SUCCESS if result.success else ActionOutcome.FAILURE,
             data={
                 "exit_code": result.exit_code,
-                "stdout": result.stdout,
+                "stdout": self._maybe_fold(result.stdout),
                 "stderr": result.stderr,
                 "timed_out": result.timed_out,
                 "command": command,
@@ -223,7 +230,7 @@ class ExecuteCommandAbility(Ability):
                 data={"error": str(e), "command": command},
             )
 
-        stdout = self._truncate_output(stdout_bytes)
+        stdout = self._truncate_output(self._maybe_fold_bytes(stdout_bytes))
         stderr = self._truncate_output(stderr_bytes)
 
         exit_code = process.returncode if process.returncode is not None else -1
@@ -243,6 +250,20 @@ class ExecuteCommandAbility(Ability):
             data=data,
         )
 
+    def _maybe_fold(self, stdout: str) -> str:
+        """对 stdout 文本应用行数折叠（stderr 永不折叠）。"""
+        if self._fold_stdout_lines <= 0:
+            return stdout
+        return _fold_text(stdout, self._fold_stdout_lines)
+
+    def _maybe_fold_bytes(self, data: bytes) -> bytes:
+        """字节版折叠：subprocess 模式先解码折叠再回到字节（截断仍按字节兜底）。"""
+        if self._fold_stdout_lines <= 0:
+            return data
+        text = data.decode("utf-8", errors="replace")
+        folded = _fold_text(text, self._fold_stdout_lines)
+        return folded.encode("utf-8", errors="replace")
+
     @staticmethod
     def _truncate_output(data: bytes) -> str:
         try:
@@ -252,3 +273,21 @@ class ExecuteCommandAbility(Ability):
         if len(data) > _MAX_OUTPUT_BYTES:
             return text[:_MAX_OUTPUT_BYTES] + f"\n[truncated at {_MAX_OUTPUT_BYTES} bytes]"
         return text
+
+
+def _fold_text(text: str, threshold: int) -> str:
+    """超 threshold 行时保留 head+tail，中间行以标记行省略。
+
+    stderr 永不折叠（错误现场完整是排障刚需），本函数仅用于 stdout。
+    """
+    lines = text.splitlines(keepends=True)
+    if len(lines) <= threshold:
+        return text
+    omitted = len(lines) - _FOLD_HEAD_LINES - _FOLD_TAIL_LINES
+    if omitted <= 0:
+        return text
+    head = lines[:_FOLD_HEAD_LINES]
+    tail = lines[-_FOLD_TAIL_LINES:]
+    eol = "\r\n" if head and head[-1].endswith("\r\n") else "\n"
+    marker = f"[... {omitted} lines omitted ...]{eol}"
+    return "".join(head) + marker + "".join(tail)

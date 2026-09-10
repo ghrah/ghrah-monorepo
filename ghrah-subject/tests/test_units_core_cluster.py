@@ -618,7 +618,14 @@ class TestRealCoreUnitMultiCluster:
         from ghrah.core.unit import CoreUnitConfig, create_core_unit
 
         def factory(cluster_id: str, project_id: str, project_root_locator: str) -> Any:
-            return create_core_unit(CoreUnitConfig(cluster_id=cluster_id, project_id=project_id))
+            return create_core_unit(
+                CoreUnitConfig(
+                    cluster_id=cluster_id,
+                    project_id=project_id,
+                    # C2 fail-closed：无 abilities spawn 须显式声明默认集
+                    default_abilities=("conversation", "end_task"),
+                )
+            )
 
         config = _config(tmp_path)
         unit = CoreClusterRegistryUnit(config, unit_factory=factory)

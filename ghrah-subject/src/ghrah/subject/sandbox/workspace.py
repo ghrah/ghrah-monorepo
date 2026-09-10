@@ -2,17 +2,22 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""兼容 re-export 层 + WorkspaceManager 重构（W5）。
+"""WorkspaceManager：workspace 挂载语义管理器（登记 + 授权 + 解挂）。
 
-- ``AgentWorkspace`` / ``WorkspaceStatus`` / ``SnapshotError`` / ``SnapshotInfo``
-  保留旧 API 表面作为兼容桥，实际 git 实现平移至 GitWorkspaceProvider。
-- ``WorkspaceManager`` 重构为 workspace_id 键控 + ProviderRegistry + WorkspaceStore
-  + start 时加载 store 重建内存索引 + orphan adopt 扫描 + agent_name 兼容桥。
+- ``AgentWorkspace``：WorkspaceRecord + provider 的运行时包装。
+- ``WorkspaceManager``：workspace_id 键控 + ProviderRegistry + WorkspaceStore，
+  ``start()`` 时从 store 重建内存索引，并把 store 未就绪期间内存登记的记录
+  回填 store（store 是唯一注册真相，无 marker 落盘）。
 
-桥的 store 生命周期契约（§四 W5）：
-当 store 未就绪（Manager 未 ``start()``，或未传 db_path 即无持久化）时，
-``create_workspace(agent_name)`` 降级为「仅 init + 内存登记」，待 ``start()`` 时
-由 orphan adopt 扫描补登 store（marker 已落盘，adopt 可重建 record）。
+挂载语义契约：
+
+- ``register_workspace``：登记已有目录，零物理操作（不 git init、不写
+  config、不 add/commit、不落 marker）；目录内容/``.git`` 状态一律不探测
+  不修改，仅做存在性检查（fail-closed）。git provider 类型显式拒绝。
+- ``create_workspace``：ghrah 新建默认目录（``<root>/<agent_name>``、plain），
+  仅此路径允许 mkdir。
+- ``destroy_workspace`` ≡ ``unregister_workspace``：store 软删 + sandbox
+  external root 授权解除，**永不物理删除目录**（rmtree 全域退出）。
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ghrah.subject.workspace import (
-    GitWorkspaceProvider,
+    PlainWorkspaceProvider,
     ProviderRegistry,
     SnapshotError,
     WorkspaceProviderError,
@@ -33,11 +38,8 @@ from ghrah.subject.workspace import (
     locator_to_path,
     path_to_locator,
 )
-from ghrah.subject.workspace import (
-    SnapshotInfo as _NewSnapshotInfo,
-)
-from ghrah.subject.workspace.marker import MARKER_FILENAME
-from ghrah.subject.workspace.providers.base import VersionedWorkspaceProvider
+from ghrah.subject.workspace.models import WorkspaceStatus
+from ghrah.subject.workspace.providers.base import WorkspaceProvider
 
 if TYPE_CHECKING:
     from ghrah.subject.sandbox.executor import SandboxExecutor
@@ -46,7 +48,6 @@ __all__ = [
     "WorkspaceManager",
     "AgentWorkspace",
     "WorkspaceStatus",
-    "SnapshotInfo",
     "SnapshotError",
 ]
 
@@ -54,74 +55,32 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class WorkspaceStatus:
-    """工作区 Git 状态（兼容旧形态）。
-
-    由 :meth:`AgentWorkspace.status` 从 provider 通用 status 的 extra 映射而来，
-    保留 branch/is_clean/staged_files/unstaged_files/untracked_files 字段以维持
-    现有调用方与测试零改动。
-    """
-
-    branch: str
-    is_clean: bool
-    staged_files: list[str]
-    unstaged_files: list[str]
-    untracked_files: list[str]
-
-
-# 兼容旧导入名（指向新包的 pydantic SnapshotInfo）。
-SnapshotInfo = _NewSnapshotInfo
-
-
-@dataclass
 class AgentWorkspace:
-    """单个 Agent 的工作区（兼容桥）。
+    """单个 Agent 的 workspace（挂载登记运行时包装）。
 
-    包装 :class:`WorkspaceRecord` + provider，方法委托至 provider，保留
-    .name/.path/.sandbox 旧字段。
+    包装 :class:`WorkspaceRecord` + provider，保留 .name/.path/.sandbox 旧字段。
     """
 
     name: str
     path: str
     sandbox: SandboxExecutor = field(repr=False)
     record: WorkspaceRecord = field(repr=False)
-    provider: VersionedWorkspaceProvider = field(repr=False)
-
-    async def snapshot(self, message: str = "") -> str:
-        return await self.provider.snapshot(self.record, message=message)
-
-    async def diff(self, snapshot_id: str | None = None) -> str:
-        return await self.provider.diff(self.record, snapshot_id=snapshot_id)
-
-    async def rollback(self, snapshot_id: str) -> None:
-        await self.provider.rollback(self.record, snapshot_id)
+    provider: WorkspaceProvider = field(repr=False)
 
     async def status(self) -> WorkspaceStatus:
-        ws_status = await self.provider.status(self.record)
-        extra = ws_status.extra
-        return WorkspaceStatus(
-            branch=str(extra.get("branch", "main")),
-            is_clean=bool(extra.get("is_clean", True)),
-            staged_files=list(extra.get("staged_files", [])),
-            unstaged_files=list(extra.get("unstaged_files", [])),
-            untracked_files=list(extra.get("untracked_files", [])),
-        )
-
-    async def list_snapshots(self, max_count: int = 50) -> list[SnapshotInfo]:
-        return await self.provider.list_snapshots(self.record, max_count=max_count)
+        return await self.provider.status(self.record)
 
 
 class WorkspaceManager:
-    """Agent 工作区管理器（workspace_id 键控 + 兼容桥）。
+    """Agent workspace 管理器（挂载语义：登记 + 授权 + 解挂）。
 
     持有 WorkspaceStore + ProviderRegistry。``start()`` 时：
     1. 启动 store（若 db_path 提供），加载全部未软删记录重建内存索引；
-    2. 扫描 root_path 子目录做一次 orphan adopt（经 registry.detect + provider.adopt），
-       将有 marker 未注册的目录补登 store + 内存索引。
+    2. 把 store 未就绪期间仅内存登记的记录回填 store。
 
     agent_name 兼容桥：``create_workspace(agent_name)`` 映射为该 agent 的默认
-    workspace（``<root>/<agent_name>``、git 类型、首次访问惰性创建并登记 store）。
-    store 未就绪时降级为「仅 init + 内存登记」（marker 已落盘，待 start adopt 补登）。
+    workspace（``<root>/<agent_name>``、plain 类型、首次访问惰性创建并登记）。
+    store 未就绪时降级为「仅 mkdir + 内存登记」，待 ``start()`` 时回填 store。
     """
 
     def __init__(
@@ -155,9 +114,9 @@ class WorkspaceManager:
             self._store = WorkspaceStore(self._db_path)
             await self._store.start()
         self._started = True
-        # 重建内存索引：先从 store 加载，再 orphan adopt 扫描补登
+        # 重建内存索引：先从 store 加载，再把 store 未就绪期间内存登记的回填
         await self._reload_from_store()
-        await self._scan_orphan_adopt()
+        await self._backfill_store_from_memory()
 
     async def stop(self) -> None:
         self._by_id.clear()
@@ -180,111 +139,74 @@ class WorkspaceManager:
     # ─── 内部：内存索引 / store 一致性 ───
 
     async def _reload_from_store(self) -> None:
+        """从 store 加载全部未软删记录重建内存索引。
+
+        未知 provider_type 的记录跳过 + warning（启动容错，不崩溃）；
+        该 workspace 的后续操作会在取 provider 时 fail-closed 报错。
+        """
         if self._store is None:
             return
         records = await self._store.list_all_active()
         for record in records:
-            self._index_record(record)
-
-    async def _scan_orphan_adopt(self) -> None:
-        """扫描 root_path 子目录，认领有 marker 未注册的目录，补登 store + 内存。
-
-        轻量：仅扫一层子目录。无 marker / 旧格式 / provider_type 不匹配 → 跳过。
-        已注册（store 命中或内存已存在同 workspace_id/locator）→ 跳过。
-        """
-        if self._registry is None or not os.path.isdir(self._root_path):
-            return
-        seen_ids = set(self._by_id.keys())
-        seen_locators = {r.locator for r in (await self._all_records_in_memory())}
-        try:
-            entries = os.listdir(self._root_path)
-        except OSError:
-            return
-        for entry in entries:
-            sub = os.path.join(self._root_path, entry)
-            if not os.path.isdir(sub):
-                continue
-            locator = path_to_locator(sub)
-            if locator in seen_locators:
-                continue
-            provider = self._registry.detect(locator)
+            provider = self._lookup_provider(record.provider_type)
             if provider is None:
                 continue
+            self._index_record(record, provider)
+
+    async def _backfill_store_from_memory(self) -> None:
+        """把 store 未就绪期间仅内存登记的记录回填 store（无 marker 后的补登路径）。
+
+        locator UNIQUE 冲突（另一记录已占用）容忍并 warning，不中断启动。
+        """
+        if self._store is None:
+            return
+        for workspace in list(self._by_id.values()):
+            record = workspace.record
+            existing = await self._store.get(record.workspace_id)
+            if existing is not None:
+                continue
             try:
-                result = await provider.adopt(locator)
-            except Exception:  # noqa: BLE001 — 扫描不因单个目录异常中断
-                logger.warning("Orphan adopt failed for %s", locator, exc_info=True)
-                continue
-            if result is None:
-                continue
-            # marker subject_id 必须匹配本 subject（防误认领其他 subject 目录）
-            if result.subject_id != self._subject_id:
+                await self._store.upsert(record)
                 logger.info(
-                    "Skipping orphan %s: subject_id mismatch (%s != %s)",
-                    locator,
-                    result.subject_id,
-                    self._subject_id,
+                    "Backfilled workspace %s (%s) into store",
+                    record.workspace_id,
+                    record.locator,
                 )
-                continue
-            if result.workspace_id in seen_ids:
-                continue
-            record = self._build_record_from_adopt(result, sub)
-            self._index_record(record)
-            if self._store is not None:
-                try:
-                    await self._store.upsert(record)
-                    logger.info("Orphan adopted into store: %s (%s)", record.workspace_id, locator)
-                except Exception:  # noqa: BLE001
-                    logger.warning("Orphan upsert failed for %s", locator, exc_info=True)
-            seen_ids.add(record.workspace_id)
-            seen_locators.add(record.locator)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Workspace store backfill failed for %s",
+                    record.workspace_id,
+                    exc_info=True,
+                )
 
-    async def _all_records_in_memory(self) -> list[WorkspaceRecord]:
-        return [ws.record for ws in self._by_id.values()]
+    def _lookup_provider(self, provider_type: str) -> WorkspaceProvider | None:
+        """按 provider_type 从 registry 取 provider；未注册返回 None。"""
+        if self._registry is None:
+            return None
+        if not self._registry.has(provider_type):
+            logger.warning(
+                "Unknown workspace provider_type %r for record lookup; skipped",
+                provider_type,
+            )
+            return None
+        return self._registry.get(provider_type)
 
-    def _build_record_from_adopt(self, result: object, dir_path: str) -> WorkspaceRecord:
-        from ghrah.subject.workspace.models import AdoptResult
-
-        assert isinstance(result, AdoptResult)
-        return WorkspaceRecord(
-            workspace_id=result.workspace_id,
-            name=result.name or os.path.basename(dir_path),
-            provider_type=result.provider_type,
-            subject_id=result.subject_id,
-            locator=path_to_locator(dir_path),
-        )
-
-    def _index_record(self, record: WorkspaceRecord) -> None:
+    def _index_record(self, record: WorkspaceRecord, provider: WorkspaceProvider) -> None:
         if record.workspace_id in self._by_id:
             return
-        provider = self._provider_for(record)
         ws_path = locator_to_path(record.locator)
         if self.sandbox is not None:
             self.sandbox.allow_external_workspace(ws_path)
         workspace = AgentWorkspace(
             name=record.name,
             path=ws_path,
-            sandbox=self.sandbox,  # type: ignore[arg-type]
+            sandbox=self.sandbox,
             record=record,
             provider=provider,
         )
         self._by_id[record.workspace_id] = workspace
         # agent_name 索引：默认 workspace 命名约定 <root>/<agent_name>
         self._by_agent[record.name] = record.workspace_id
-
-    def _provider_for(self, record: WorkspaceRecord) -> VersionedWorkspaceProvider:
-        """按 provider_type 从 registry 取 provider；缺则回退 git（兼容桥默认）。"""
-        if self._registry is not None:
-            provider = (
-                self._registry.get(record.provider_type)
-                if self._registry.has(record.provider_type)
-                else None
-            )
-            if provider is not None and isinstance(provider, VersionedWorkspaceProvider):
-                return provider
-        # 兼容桥默认：未配 registry 或非版本 provider 时回退 GitWorkspaceProvider
-        assert self.sandbox is not None
-        return GitWorkspaceProvider(self.sandbox)
 
     async def _persist(self, record: WorkspaceRecord) -> None:
         if self._store is not None:
@@ -300,30 +222,30 @@ class WorkspaceManager:
     # ─── agent_name 兼容桥 ───
 
     async def create_workspace(self, agent_name: str) -> AgentWorkspace:
-        """为 agent 创建默认 workspace（``<root>/<agent_name>``、git）。
+        """为 agent 创建默认 workspace（``<root>/<agent_name>``、plain）。
 
-        幂等：已登记则返回现有。store 未就绪时降级为「仅 init + 内存登记」
-        （marker 已落盘，待 start 时 orphan adopt 补登 store）。
+        幂等：已登记则返回现有。仅此路径允许 mkdir（ghrah 新建目录）。
+        store 未就绪时降级为「仅 mkdir + 内存登记」，待 ``start()`` 时回填 store。
         """
         existing_id = self._by_agent.get(agent_name)
         if existing_id is not None and existing_id in self._by_id:
             return self._by_id[existing_id]
 
         if self.sandbox is None:
-            raise SnapshotError("SandboxExecutor is required for workspace operations")
+            raise WorkspaceProviderError("SandboxExecutor is required for workspace operations")
 
         ws_path = os.path.join(self._root_path, agent_name)
         record = WorkspaceRecord(
             name=agent_name,
-            provider_type="git",
+            provider_type="plain",
             subject_id=self._subject_id,
             locator=path_to_locator(ws_path),
         )
-        provider = GitWorkspaceProvider(self.sandbox)
+        provider = PlainWorkspaceProvider()
         try:
             await provider.init(record)
         except WorkspaceProviderError as exc:
-            raise SnapshotError(str(exc)) from exc
+            raise WorkspaceProviderError(str(exc)) from exc
 
         workspace = AgentWorkspace(
             name=agent_name,
@@ -335,7 +257,7 @@ class WorkspaceManager:
         self._by_id[record.workspace_id] = workspace
         self._by_agent[agent_name] = record.workspace_id
 
-        # store 就绪则补登；未就绪降级（marker 已落盘，待 start adopt）
+        # store 就绪则补登；未就绪降级（待 start() 回填）
         if self._started and self._store is not None:
             await self._persist(record)
 
@@ -343,18 +265,38 @@ class WorkspaceManager:
         return workspace
 
     async def destroy_workspace(self, agent_name: str) -> None:
+        """解挂该 agent 的默认 workspace（永不物理删除目录）。
+
+        等价于 :meth:`unregister_workspace`：store 软删 + sandbox 授权解除。
+        """
         workspace_id = self._by_agent.get(agent_name)
-        workspace = self._by_id.pop(workspace_id, None) if workspace_id else None
-        self._by_agent.pop(agent_name, None)
+        if workspace_id is None:
+            return
+        await self.unregister_workspace(workspace_id)
+
+    async def unregister_workspace(self, workspace_id: str) -> None:
+        """移除注册关系但保留物理目录（永不 rmtree）。
+
+        供 Project 创建失败安全补偿与 destroy_workspace 共用。
+        """
+        workspace = self._by_id.pop(workspace_id, None)
         if workspace is None:
             return
-        await workspace.provider.destroy(workspace.record)
-        if self._store is not None and workspace_id is not None:
+        if self.sandbox is not None:
+            self.sandbox.disallow_external_workspace(workspace.path)
+        stale_names = [name for name, wid in self._by_agent.items() if wid == workspace_id]
+        for name in stale_names:
+            self._by_agent.pop(name, None)
+        if self._store is not None:
             try:
                 await self._store.soft_delete(workspace_id)
             except Exception:  # noqa: BLE001
                 logger.warning("Soft-delete failed for %s", workspace_id, exc_info=True)
-        logger.info("Destroyed workspace for agent '%s' at %s", agent_name, workspace.path)
+        logger.info(
+            "Unregistered workspace %s (%s); directory preserved",
+            workspace_id,
+            workspace.record.locator,
+        )
 
     def get_workspace(self, agent_name: str) -> AgentWorkspace | None:
         workspace_id = self._by_agent.get(agent_name)
@@ -365,7 +307,7 @@ class WorkspaceManager:
     def list_workspaces(self) -> list[str]:
         return list(self._by_agent.keys())
 
-    # ─── workspace_id 一等接口（W5/W6 对接点）───
+    # ─── workspace_id 一等接口 ───
 
     def get_workspace_by_id(self, workspace_id: str) -> AgentWorkspace | None:
         return self._by_id.get(workspace_id)
@@ -389,73 +331,69 @@ class WorkspaceManager:
     ) -> AgentWorkspace:
         """把已有目录登记为 workspace（workspace_register 命令后端）。
 
-        provider_type 给定则用该 provider；否则由 registry.detect 探测。经 provider
-        init（目录不存在则创建）或 adopt（有 marker 则认领）登记 store + 内存。
+        挂载语义：仅登记 + 授权，对目录零物理操作——不 git init、不写
+        config、不 add/commit、不落 marker；目录内容/``.git`` 状态一律不探测
+        不修改。
+
+        Args:
+            locator: file:// URI（裸路径自动归一）。
+            name: 人类可读名，默认从路径末段推断。
+            provider_type: 显式 provider 类型；``"git"`` 一律拒绝（fail-closed，
+                legacy GitWorkspaceProvider 已移除），None 由 registry.detect
+                分派（当前恒 plain）。
+
+        Raises:
+            WorkspaceProviderError: locator 非法、目录不存在、provider 类型
+                不受支持或 provider_type 为 "git"。
         """
         if self._registry is None:
-            raise SnapshotError(
+            raise WorkspaceProviderError(
                 "WorkspaceManager not started: registry unavailable for register_workspace"
             )
-        pt = provider_type
-        provider = self._registry.get(pt) if pt is not None else self._registry.detect(locator)
-        if provider is None:
-            raise SnapshotError(f"Cannot detect provider for locator: {locator}")
-        # 先尝试 adopt（认领已有 marker 目录），失败则 init（新建/重写）
+        if provider_type == "git":
+            raise WorkspaceProviderError(
+                "git workspace provider is no longer supported; "
+                "workspaces are registered by mounting (read/write authorization) "
+                "with zero physical writes — use the default plain provider. "
+                "Snapshot needs are tracked as a harness-side shadow-git "
+                "checkpoint backlog."
+            )
         try:
-            adopt_result = await provider.adopt(locator)
-        except Exception as exc:  # noqa: BLE001
-            raise SnapshotError(f"adopt failed: {exc}") from exc
-        if adopt_result is not None and adopt_result.subject_id == self._subject_id:
             ws_path = locator_to_path(locator)
-            record = WorkspaceRecord(
-                workspace_id=adopt_result.workspace_id,
-                name=name or adopt_result.name or os.path.basename(ws_path),
-                provider_type=adopt_result.provider_type,
-                subject_id=adopt_result.subject_id,
-                locator=locator,
-            )
+        except ValueError as exc:
+            raise WorkspaceProviderError(str(exc)) from exc
+        # fail-closed：只做存在性检查，不创建、不探测内容
+        if not os.path.isdir(ws_path):
+            raise WorkspaceProviderError(f"workspace directory does not exist: {ws_path}")
+
+        if provider_type is not None:
+            if not self._registry.has(provider_type):
+                raise WorkspaceProviderError(f"Unknown workspace provider type: {provider_type!r}")
+            provider = self._registry.get(provider_type)
         else:
-            ws_path = locator_to_path(locator)
-            record = WorkspaceRecord(
-                name=name or os.path.basename(ws_path),
-                provider_type=provider.provider_type,
-                subject_id=self._subject_id,
-                locator=locator,
-            )
-            try:
-                if self.sandbox is not None:
-                    self.sandbox.allow_external_workspace(ws_path)
-                await provider.init(record)
-            except WorkspaceProviderError as exc:
-                if self.sandbox is not None:
-                    self.sandbox.disallow_external_workspace(ws_path)
-                raise SnapshotError(str(exc)) from exc
-        # 去重：同 workspace_id 已登记则返回现有
-        existing = self._by_id.get(record.workspace_id)
-        if existing is not None:
-            return existing
-        self._index_record(record)
+            provider = self._registry.detect(locator)
+            if provider is None:
+                raise WorkspaceProviderError(f"Cannot detect provider for locator: {locator}")
+
+        # 幂等去重：同 locator 已登记（store 或内存）则返回现有
+        if self._store is not None:
+            existing_record = await self._store.get_by_locator(locator)
+            if existing_record is not None:
+                existing = self._by_id.get(existing_record.workspace_id)
+                if existing is not None:
+                    return existing
+        for ws in self._by_id.values():
+            if ws.record.locator == locator:
+                return ws
+
+        record = WorkspaceRecord(
+            name=name or os.path.basename(ws_path),
+            provider_type=provider.provider_type,
+            subject_id=self._subject_id,
+            locator=locator,
+        )
+        self._index_record(record, provider)
         if self._store is not None:
             await self._persist(record)
         logger.info("Registered workspace %s (%s)", record.workspace_id, locator)
         return self._by_id[record.workspace_id]
-
-    async def unregister_workspace(self, workspace_id: str) -> None:
-        """移除注册关系但保留物理目录，供 Project 创建失败安全补偿。"""
-        workspace = self._by_id.pop(workspace_id, None)
-        if workspace is None:
-            return
-        if self.sandbox is not None:
-            self.sandbox.disallow_external_workspace(workspace.path)
-        stale_names = [name for name, wid in self._by_agent.items() if wid == workspace_id]
-        for name in stale_names:
-            self._by_agent.pop(name, None)
-        if self._store is not None:
-            await self._store.soft_delete(workspace_id)
-        try:
-            os.unlink(os.path.join(workspace.path, MARKER_FILENAME))
-        except FileNotFoundError:
-            pass
-        except OSError:
-            logger.warning("Failed to remove workspace marker for %s", workspace_id)
-        logger.info("Unregistered workspace %s (%s)", workspace_id, workspace.record.locator)

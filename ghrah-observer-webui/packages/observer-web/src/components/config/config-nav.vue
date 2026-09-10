@@ -1,31 +1,34 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { useRoute } from "vue-router";
+import SidebarList from "@/components/ui/sidebar-list.vue";
+import SidebarRow from "@/components/ui/sidebar-row.vue";
 
-const route = useRoute();
 const { t } = useI18n();
+type Section = "general" | "agents" | "abilities" | "archived";
+defineProps<{ activeSection: Section }>();
+defineEmits<{ select: [section: Section] }>();
 
 const links = [
-  { to: "/config/general", labelKey: "config.nav.general" },
-  { to: "/config/agents", labelKey: "config.nav.agents" },
-  { to: "/config/abilities", labelKey: "config.nav.abilities" },
+  { id: "general", labelKey: "config.nav.general" },
+  { id: "agents", labelKey: "config.nav.agents" },
+  { id: "abilities", labelKey: "config.nav.abilities" },
+  { id: "archived", labelKey: "config.nav.archived" },
 ] as const;
 </script>
 
 <template>
-  <nav class="flex flex-col py-2">
-    <RouterLink
-      v-for="link in links"
-      :key="link.to"
-      :to="link.to"
-      :class="[
-        'px-4 py-2 text-sm transition-colors',
-        route.path === link.to
-          ? 'bg-blue-50 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium border-r-2 border-blue-600'
-          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800',
-      ]"
-    >
-      {{ t(link.labelKey) }}
-    </RouterLink>
+  <nav class="config-section-nav" :aria-label="t('config.nav.label')">
+    <SidebarList>
+      <SidebarRow
+        v-for="link in links"
+        :key="link.id"
+        class="config-section-link"
+        :active="activeSection === link.id"
+        @select="$emit('select', link.id)"
+      >
+        <template #leading><span class="config-section-icon">{{ link.id.slice(0, 1).toUpperCase() }}</span></template>
+        {{ t(link.labelKey) }}
+      </SidebarRow>
+    </SidebarList>
   </nav>
 </template>

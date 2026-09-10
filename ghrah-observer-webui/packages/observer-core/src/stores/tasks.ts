@@ -38,6 +38,12 @@ export const useTasksStore = defineStore("ghrah-tasks", () => {
     tasks.value = new Map(list.map((t) => [t.task_id, t]));
   }
 
+  function clearProject(projectId: string) {
+    tasks.value = new Map(
+      [...tasks.value.entries()].filter(([, task]) => task.project_id !== projectId),
+    );
+  }
+
   function clearAll() {
     tasks.value = new Map();
   }
@@ -49,6 +55,7 @@ export const useTasksStore = defineStore("ghrah-tasks", () => {
     removeTask,
     onTaskEvent,
     setTasksFromList,
+    clearProject,
     clearAll,
   };
 });

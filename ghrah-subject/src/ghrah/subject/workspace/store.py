@@ -5,8 +5,7 @@
 """WorkspaceStore：aiosqlite 独立连接，幂等 DDL，CRUD + 软删。
 
 store 持久化 :class:`WorkspaceRecord`，幂等 DDL（同 TaskStore 范式）。
-
-marker 携带 subject_id 用于认领三要素校验，store 同步存储以便重启重建）：
+store 是唯一注册真相（挂载语义下无 marker 落盘）：
 
     CREATE TABLE IF NOT EXISTS subject_workspaces (
         workspace_id  TEXT PRIMARY KEY,
@@ -19,9 +18,9 @@ marker 携带 subject_id 用于认领三要素校验，store 同步存储以便�
         deleted_at    TEXT
     );
 
-marker JSON（.ghrah-workspace）三要素校验由 :mod:`ghrah.subject.workspace.marker`
-提供：read_marker 解析 workspace_id/provider_type/subject_id；旧格式（一行注释）
-不可机读 → None，不自动认领。
+legacy 迁移：start() 将存量 ``provider_type='git'`` 记录一次性 retag 为
+'plain'（legacy GitWorkspaceProvider 已移除，注册面不再接受 git 类型；
+软删记录一并迁移，避免复活路径命中未知 provider）。
 """
 
 from __future__ import annotations
@@ -96,6 +95,12 @@ class WorkspaceStore:
             db.row_factory = aiosqlite.Row
             await db.execute("PRAGMA journal_mode=WAL")
             await db.executescript(_DDL)
+            # legacy retag：存量 git provider 记录迁移为 plain（幂等；hotfix：
+            # GitWorkspaceProvider 已删除，保留 git 记录会让 reload 命中未知
+            # provider）。软删记录一并迁移，防复活路径命中未知 provider。
+            await db.execute(
+                "UPDATE subject_workspaces SET provider_type = 'plain' WHERE provider_type = 'git'"
+            )
             self._db = db
         logger.debug("WorkspaceStore started (db=%s)", self._db_path)
 

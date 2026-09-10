@@ -4,5 +4,6 @@
   "agent_name": "agent-1",
   "session_id": "session-001",
   "branch_id": "branch-main",
+  "active_session_id": "",
   "nodes": []
 }

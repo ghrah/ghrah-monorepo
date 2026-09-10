@@ -12,7 +12,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-from ghrah.subject.workspace.providers.git import locator_to_path, path_to_locator
+from ghrah.subject.workspace.locator import locator_to_path, path_to_locator
 
 __all__ = [
     "ProjectPaths",

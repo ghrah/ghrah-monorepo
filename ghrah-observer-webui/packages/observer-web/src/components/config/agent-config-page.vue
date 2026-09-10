@@ -6,16 +6,33 @@ import AgentManifestCard from "@/components/config/agent-manifest-card.vue";
 import AgentManifestDetail from "@/components/config/agent-manifest-detail.vue";
 import NewAgentManifestDialog from "@/components/config/new-agent-manifest-dialog.vue";
 import SpawnFromManifestDialog from "@/components/config/spawn-from-manifest-dialog.vue";
+import ConfirmDialog from "@/components/ui/confirm-dialog.vue";
 import { useObserver } from "@/composables/useObserver";
 
 const { manifests, listManifestAgents, deleteAgent } = useObserver();
 const { t } = useI18n();
+const emit = defineEmits<{ dirtyChange: [dirty: boolean] }>();
 
 const selected = ref<AgentManifestInfo | null>(null);
 const showSpawnDialog = ref(false);
 const showNewDialog = ref(false);
 const loading = ref(false);
 const error = ref<string | null>(null);
+const deleteTarget = ref<string | null>(null);
+
+function setDialogDirty(dirty: boolean) {
+  emit("dirtyChange", dirty);
+}
+
+function closeSpawnDialog() {
+  showSpawnDialog.value = false;
+  setDialogDirty(false);
+}
+
+function closeNewDialog() {
+  showNewDialog.value = false;
+  setDialogDirty(false);
+}
 
 onMounted(async () => {
   if (manifests.agentList.length === 0) {
@@ -36,8 +53,10 @@ function handleEdit(manifest: AgentManifestInfo) {
   window.postMessage?.({ type: "openFile", fullName: manifest.full_name, kind: "agent" });
 }
 
-async function handleDelete(fullName: string) {
-  if (!confirm(t("config.agent.deleteConfirm"))) return;
+async function confirmDelete() {
+  const fullName = deleteTarget.value;
+  if (!fullName) return;
+  deleteTarget.value = null;
   loading.value = true;
   error.value = null;
   const result = await deleteAgent(fullName);
@@ -77,18 +96,33 @@ async function handleDelete(fullName: string) {
         @select="handleSelect(m)"
         @spawn="handleSpawn(m)"
         @edit="handleEdit(m)"
-        @delete="handleDelete(m.full_name)"
+        @delete="deleteTarget = m.full_name"
       />
     </div>
 
-    <AgentManifestDetail :manifest="selected" @spawn="handleSpawn(selected!)" @edit="handleEdit(selected!)" @delete="handleDelete(selected!.full_name)" />
+    <AgentManifestDetail :manifest="selected" @spawn="handleSpawn(selected!)" @edit="handleEdit(selected!)" @delete="deleteTarget = selected!.full_name" />
 
     <SpawnFromManifestDialog
       v-if="showSpawnDialog && selected"
       :manifest="selected"
-      @close="showSpawnDialog = false"
+      @dirty-change="setDialogDirty"
+      @close="closeSpawnDialog"
     />
 
-    <NewAgentManifestDialog v-if="showNewDialog" @close="showNewDialog = false" />
+    <NewAgentManifestDialog
+      v-if="showNewDialog"
+      @dirty-change="setDialogDirty"
+      @close="closeNewDialog"
+    />
+
+    <ConfirmDialog
+      v-if="deleteTarget"
+      :title="t('config.agent.deleteTitle')"
+      :message="t('config.agent.deleteConfirm')"
+      :confirm-label="t('config.agent.delete')"
+      danger
+      @cancel="deleteTarget = null"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>

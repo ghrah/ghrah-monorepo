@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from ghrah.abilities.base import Ability
-from ghrah.abilities.builtin._cluster_common import _NO_SUPERVISOR_ERROR
+from ghrah.abilities.builtin._cluster_common import cluster_supervisor_error
 from ghrah.core.room_protocol import (
     ROOM_BRIDGE_UNAVAILABLE_ERROR,
     RoomBridgeProtocol,
@@ -85,10 +85,11 @@ class SendAbility(Ability):
 
     async def execute(self, context: AbilityExecutionContext) -> ActionResult:
         supervisor = context.supervisor
-        if supervisor is None:
+        error = cluster_supervisor_error(supervisor)
+        if error:
             return ActionResult(
                 outcome=ActionOutcome.FAILURE,
-                data={"error": _NO_SUPERVISOR_ERROR},
+                data={"error": error},
             )
         bridge: RoomBridgeProtocol | None = getattr(supervisor, "room_bridge", None)
         if bridge is None:

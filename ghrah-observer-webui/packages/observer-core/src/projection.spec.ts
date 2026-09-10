@@ -225,8 +225,8 @@ describe("roomLogToChatEntries", () => {
     };
   }
 
-  it("agent entry → conversation, content from data.message", () => {
-    const e = roomLogToChatEntries(makeRoomEntry());
+  it("agent entry → conversation with structured Project/Agent scope", () => {
+    const e = roomLogToChatEntries(makeRoomEntry(), { projectId: "p1", agentId: "a1" });
     expect(e).toMatchObject({
       from: "agent-1",
       to: "r1",
@@ -235,6 +235,8 @@ describe("roomLogToChatEntries", () => {
       nodeId: "e1",
       childSeq: 3,
       agentName: "agent-1",
+      projectId: "p1",
+      agentId: "a1",
       roomId: "r1",
     });
     expect(e.timestamp).toBe(new Date(1750000000 * 1000).toISOString());

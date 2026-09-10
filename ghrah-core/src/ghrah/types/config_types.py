@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+DEFAULT_WINDOW_MAX_TOKENS = 32768
+
 
 @dataclass
 class WindowConfig:
@@ -17,14 +19,15 @@ class WindowConfig:
     控制如何将对话历史压缩到 LLM 的 token 预算内。
 
     Attributes:
-        max_tokens: LLM 上下文窗口大小（token 预算）
+        max_tokens: LLM 上下文窗口大小（token 预算），默认
+            DEFAULT_WINDOW_MAX_TOKENS（32768）；manifest/wire 显式覆盖优先
         strategies: 策略名称列表，按执行顺序排列
             可选值: "tool_call_fold", "sliding_window", "truncation", "llm_summary"
         tool_call_max_length: ToolCallFoldStrategy 的最大 content 长度
         sliding_window_size: SlidingWindowStrategy 的窗口大小
     """
 
-    max_tokens: int = 4096
+    max_tokens: int = DEFAULT_WINDOW_MAX_TOKENS
     strategies: list[str] = field(default_factory=lambda: ["tool_call_fold", "truncation"])
     tool_call_max_length: int = 500
     sliding_window_size: int = 20
@@ -101,6 +104,9 @@ class AgentConfig:
         context: ContextManager 配置，None 表示使用默认值
         model_overrides: Manifest 模型配置覆盖值
         workspace_root: 工作区根目录，用于将相对路径解析到沙盒内（None 表示不限制）
+        cluster_context_injection: 集群身份注入开关——True 时 AgentBuilder
+            在 system_prompt 头部拼接 [Cluster Context] 段（cluster_id +
+            成员清单）。默认 False（零隐式：prompt 内容不因挂进集群而变化）
     """
 
     name: str
@@ -115,6 +121,7 @@ class AgentConfig:
     context: ContextConfig | None = None
     model_overrides: ModelOverrides | None = None
     workspace_root: str | None = None
+    cluster_context_injection: bool = False
 
     @property
     def effective_agent_config_name(self) -> str:

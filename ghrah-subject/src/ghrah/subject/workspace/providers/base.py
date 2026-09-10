@@ -2,20 +2,20 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""WorkspaceProvider 抽象基类 + 能力位 + 窄化版本接口。
+"""WorkspaceProvider 抽象基类 + 能力位。
 
-跨 git / plain / 其他 VCS / NFS / 数据表的公共分母只有
-身份、定位、初始化、认领、状态、销毁。版本控制能力（snapshot/rollback/diff）
-是 git 特有能力，**不进基类签名**，经 :class:`WorkspaceCaps` capability 位 +
-:class:`VersionedWorkspaceProvider` 窄化接口暴露。
+挂载语义下 workspace 收敛为「登记 + 授权 + 解挂」三件事，对挂载目录零
+物理操作。provider 只承载两类职责：
 
-调用方（命令 handler）按 ``isinstance(provider, VersionedWorkspaceProvider)``
-或 capability 位判定分派；不支持时返回 CAPABILITY_NOT_SUPPORTED error，
-而非 AttributeError。
+- ``init``：create_workspace 路径的目录创建（ghrah 新建默认 workspace）；
+- ``status``：存在性/可写性查询。
 
-locator 语义：基类不假设文件系统。FILESYSTEM_BACKED capability 为真时 locator
-必为 ``file://`` 且可解析出本地路径（供 sandbox cwd / Foxtrail 裁决）；非文件系统
-后端的 grant subpath 语义由 provider 自定义（MVP 不实现但模型不堵死）。
+版本控制能力（snapshot/rollback/diff）已随 legacy GitWorkspaceProvider
+整体移除：注册面对挂载目录结构性零写入，快照需求由 harness 侧
+shadow-git checkpoint 库承接（backlog）。
+
+locator 语义：FILESYSTEM_BACKED capability 为真时 locator 必为
+``file://`` 且可解析出本地路径（供 sandbox cwd 裁决）。
 """
 
 from __future__ import annotations
@@ -25,17 +25,11 @@ from enum import Flag, auto
 from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
-    from ghrah.subject.workspace.models import (
-        AdoptResult,
-        SnapshotInfo,
-        WorkspaceRecord,
-        WorkspaceStatus,
-    )
+    from ghrah.subject.workspace.models import WorkspaceRecord, WorkspaceStatus
 
 __all__ = [
     "WorkspaceCaps",
     "WorkspaceProvider",
-    "VersionedWorkspaceProvider",
 ]
 
 
@@ -44,27 +38,22 @@ class WorkspaceCaps(Flag):
 
     Attributes:
         FILESYSTEM_BACKED: 有真实文件系统根，locator 为 file://，
-            可参与 sandbox cwd 限制与 Foxtrail 路径裁决。
-        SNAPSHOT: 支持状态快照（VersionedWorkspaceProvider.snapshot）。
-        ROLLBACK: 支持回滚（VersionedWorkspaceProvider.rollback）。
-        DIFF: 支持差异查看（VersionedWorkspaceProvider.diff）。
+            可参与 sandbox cwd 限制与路径裁决。
     """
 
     FILESYSTEM_BACKED = auto()
-    SNAPSHOT = auto()
-    ROLLBACK = auto()
-    DIFF = auto()
 
 
 class WorkspaceProvider(ABC):
     """Workspace 物理后端 provider 抽象基类。
 
     子类通过类变量声明身份与能力：
-        - :attr:`provider_type`: provider 注册表分派键（如 "git"、"plain"）。
+        - :attr:`provider_type`: provider 注册表分派键（如 "plain"）。
         - :attr:`capabilities`: capability 位组合。
 
-    生命周期：init（创建/初始化）→ adopt（扫描认领已有目录）→ status（查询）
-    → destroy（销毁）。
+    生命周期：init（仅 create_workspace 路径的目录创建）→ status（查询）。
+    解挂（store 软删 + sandbox 授权解除）由 manager 承担，provider 无
+    destroy 语义——挂载目录永不因 workspace 生命周期被物理删除。
     """
 
     provider_type: ClassVar[str]
@@ -72,72 +61,17 @@ class WorkspaceProvider(ABC):
 
     @abstractmethod
     async def init(self, record: WorkspaceRecord) -> None:
-        """按 locator 初始化物理空间 + 写结构化 marker。
+        """按 locator 创建目录（幂等，目录已存在则直接返回）。
 
-        幂等：locator 已存在且 marker 匹配（三要素一致）则认领式返回，不破坏
-        现有内容；locator 不存在则按 provider 语义创建（如 git: mkdir + git init +
-        initial commit；plain: mkdir）。
+        仅 create_workspace（ghrah 新建默认 workspace）路径调用；
+        register_workspace 登记已有目录，不触本方法。
 
         Raises:
-            ProviderError: 初始化失败（locator 冲突、不可写等）。
-        """
-        raise NotImplementedError
-
-    @abstractmethod
-    async def adopt(self, locator: str) -> AdoptResult | None:
-        """扫描 locator，读 marker 校验三要素（workspace_id / provider_type /
-        subject_id），匹配则返回可重建 WorkspaceRecord 的信息；无 marker 或
-        不匹配返回 None（不误认领）。
-
-        旧格式 marker（一行注释，不可机读）视为不可认领，返回 None（由调用方
-        log 提示并提供 workspace_register 手动登记路径）。
-
-        Args:
-            locator: URI 形态定位（MVP file:///abs/path）。
-
-        Returns:
-            认领结果，或 None（无 marker / 不匹配 / 旧格式）。
+            ProviderError: 创建失败（不可写等）。
         """
         raise NotImplementedError
 
     @abstractmethod
     async def status(self, record: WorkspaceRecord) -> WorkspaceStatus:
         """查询物理后端状态（存在性/可写性 + provider 自定义状态键）。"""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def destroy(self, record: WorkspaceRecord) -> None:
-        """销毁物理空间（按 provider 语义，如递归删除目录）。"""
-        raise NotImplementedError
-
-
-class VersionedWorkspaceProvider(WorkspaceProvider, ABC):
-    """带版本控制能力的 provider 窄化接口（git 等实现）。
-
-    基类不假设版本能力；此接口在 :class:`WorkspaceProvider` 之上叠加
-    snapshot/rollback/diff/list_snapshots。调用方按 ``isinstance`` 或
-    capability 位（SNAPSHOT/ROLLBACK/DIFF）判定是否支持，不支持时返回
-    CAPABILITY_NOT_SUPPORTED error，而非 AttributeError。
-    """
-
-    @abstractmethod
-    async def snapshot(self, record: WorkspaceRecord, message: str = "") -> str:
-        """创建状态快照，返回快照 id（如 git commit hash）。"""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def rollback(self, record: WorkspaceRecord, snapshot_id: str) -> None:
-        """回滚到指定快照（如 git checkout + git clean）。"""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def diff(self, record: WorkspaceRecord, snapshot_id: str | None = None) -> str:
-        """获取 diff（与指定快照或工作区对比），返回 diff 文本。"""
-        raise NotImplementedError
-
-    @abstractmethod
-    async def list_snapshots(
-        self, record: WorkspaceRecord, max_count: int = 50
-    ) -> list[SnapshotInfo]:
-        """列出快照历史（最多 max_count 条）。"""
         raise NotImplementedError

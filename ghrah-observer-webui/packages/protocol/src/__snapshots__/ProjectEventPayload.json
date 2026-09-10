@@ -15,6 +15,7 @@
     ],
     "agents": [
       {
+        "agent_id": "",
         "name": "architect",
         "cluster_id": "cluster-1",
         "manifest_ref": "ghrah/architect",
@@ -26,10 +27,19 @@
             "workspace_id": "ws-001",
             "subpath": "docs"
           }
-        ]
+        ],
+        "runtime_status": "pending",
+        "runtime_error": ""
       }
     ],
     "task_ids": ["task-001"],
+    "isolation": {
+      "agent_path_grants": {},
+      "agent_private_dir": true,
+      "effect_allowlist": null,
+      "hitl_override": null,
+      "task_scope": true
+    },
     "status": "paused",
     "recovery": "resume",
     "version": 4,

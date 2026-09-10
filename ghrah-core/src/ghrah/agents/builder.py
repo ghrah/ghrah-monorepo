@@ -32,13 +32,20 @@ from ghrah.types.config_types import AgentConfig, WindowConfig
 logger = logging.getLogger(__name__)
 
 
-def _build_window_manager(config: WindowConfig) -> WindowManager:
+def _build_window_manager(
+    config: WindowConfig,
+    summary_llm_factory: Callable[[], LLMProtocol] | None = None,
+) -> WindowManager:
     """从 WindowConfig 构建 WindowManager 实例。
 
     根据配置中的策略名称列表，创建对应的策略实例并组合到 WindowManager 中。
+    ``summary_llm_factory`` 传入时，llm_summary 策略以惰性工厂回调持有 LLM 创建入口
+    （首次 apply 时解析，memoize 成功结果），解除策略装配先于 LLM 创建的时序耦合。
 
     Args:
         config: 窗口管理配置
+        summary_llm_factory: 可选的零参 LLM 工厂回调（闭包在
+            ``_build_context_manager`` 处捕获 AgentConfig，见 D1 设计）
 
     Returns:
         配置好的 WindowManager 实例
@@ -58,7 +65,11 @@ def _build_window_manager(config: WindowConfig) -> WindowManager:
             max_content_length=config.tool_call_max_length,
             message_factory=msg_factory,
         ),
-        "llm_summary": lambda: LLMSummaryStrategy(llm=None, message_factory=msg_factory),
+        "llm_summary": lambda: LLMSummaryStrategy(
+            llm=None,
+            llm_factory=summary_llm_factory,
+            message_factory=msg_factory,
+        ),
     }
 
     strategies = []
@@ -76,14 +87,55 @@ def _build_window_manager(config: WindowConfig) -> WindowManager:
     )
 
 
+def _render_cluster_context_section(cluster_context: dict[str, Any]) -> str:
+    """渲染 [Cluster Context] prompt 注入段。
+
+    形状（截断上限已在 SupervisorActor.get_cluster_context 侧落实）：
+        [Cluster Context]
+        cluster_id: <id>
+        members:
+        - name: <name> | description: <desc> | tags: [a, b]
+
+    Args:
+        cluster_context: ``supervisor.get_cluster_context()`` 的返回
+
+    Returns:
+        渲染后的 prompt 段（不含尾随空行，由拼接方决定间距）
+    """
+    cluster_id = cluster_context.get("cluster_id", "")
+    members = cluster_context.get("members", [])
+    lines = ["[Cluster Context]", f"cluster_id: {cluster_id or 'unknown'}"]
+    if members:
+        lines.append("members:")
+        for m in members:
+            tags = ", ".join(m.get("tags", []))
+            tag_part = f" | tags: [{tags}]" if tags else ""
+            lines.append(
+                f"- name: {m.get('name', '')} | description: {m.get('description', '')}{tag_part}"
+            )
+    else:
+        lines.append("members: (empty cluster)")
+    return "\n".join(lines)
+
+
 def _build_context_manager(
     config: AgentConfig,
     persistence_factory: Callable[[AgentConfig], Any] | None = None,
+    llm_factory: Callable[[AgentConfig], LLMProtocol] | None = None,
+    supervisor: Any = None,
 ) -> ContextManager:
     """从 AgentConfig 构建 ContextManager（含 WindowManager + Persistence）。
 
     ``persistence_factory`` 为 per-agent 注入点：传入时以工厂构造持久化后端
     （替代默认 ``create_persistence``）；None 时维持默认行为。
+
+    ``llm_factory`` 以零参闭包（捕获此处作用域的 AgentConfig）注入 WindowManager
+    的 llm_summary 策略，供其惰性解析 LLM。
+
+    集群身份注入（``config.cluster_context_injection=True`` 且 supervisor
+    提供 ``get_cluster_context``）时，[Cluster Context] 段前置拼接
+    system_prompt 头部；supervisor 不可用或缺方法 → 跳过注入 + warning
+    （不阻断——structural typing 的 Subject 侧实现可能未提供该方法）。
 
     auto_persist 默认值（per-agent 注入语义）：``persistence_factory`` 注入
     即表达持久化意图（Subject 生产路径），无 context_config 显式声明时
@@ -92,9 +144,30 @@ def _build_context_manager(
     """
     from ghrah.chat.factory import ChatMessageFactory
 
+    system_prompt = config.system_prompt
+    if config.cluster_context_injection:
+        get_ctx = getattr(supervisor, "get_cluster_context", None)
+        if callable(get_ctx):
+            try:
+                section = _render_cluster_context_section(get_ctx())
+                system_prompt = f"{section}\n\n{system_prompt}" if system_prompt else section
+            except Exception:
+                logger.warning(
+                    "Cluster context injection failed for agent '%s' — skipping",
+                    config.name,
+                    exc_info=True,
+                )
+        else:
+            logger.warning(
+                "cluster_context_injection=True but supervisor unavailable "
+                "or lacks get_cluster_context — skipping injection for '%s'",
+                config.name,
+            )
+
     window_manager = None
     if config.window is not None:
-        window_manager = _build_window_manager(config.window)
+        summary_llm_factory = (lambda: llm_factory(config)) if llm_factory is not None else None
+        window_manager = _build_window_manager(config.window, summary_llm_factory)
 
     context_config = config.context
     persistence = None
@@ -114,7 +187,7 @@ def _build_context_manager(
         # 否则同一 Project 的不同 cluster 中同名 agent 会覆盖彼此快照。
         agent_name=config.effective_agent_id,
         initial_state={},
-        system_prompt=config.system_prompt,
+        system_prompt=system_prompt,
         window_manager=window_manager,
         persistence=persistence,
         snapshot_interval=context_config.snapshot_interval if context_config else 5,
@@ -170,10 +243,19 @@ class AgentBuilder:
         """
         from ghrah.agents.base import ActorAgent
 
-        context_manager = _build_context_manager(config, persistence_factory)
+        resolved_llm_factory = llm_factory or _default_llm_factory
+
+        context_manager = _build_context_manager(
+            config, persistence_factory, llm_factory=resolved_llm_factory, supervisor=supervisor
+        )
 
         def _cm_factory() -> ContextManager:
-            return _build_context_manager(config, persistence_factory)
+            return _build_context_manager(
+                config,
+                persistence_factory,
+                llm_factory=resolved_llm_factory,
+                supervisor=supervisor,
+            )
 
         if ability_executor is None:
             ability_executor = LocalAbilityExecutor(
@@ -190,7 +272,7 @@ class AgentBuilder:
             context_manager_factory=_cm_factory,
             supervisor=supervisor,
             event_publisher=event_publisher,
-            llm_factory=llm_factory or _default_llm_factory,
+            llm_factory=resolved_llm_factory,
         )
 
         if abilities is not None:

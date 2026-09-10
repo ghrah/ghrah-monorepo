@@ -2,6 +2,7 @@
 import type { ChatEntry } from "@ghrah/observer-core";
 import {
   roomLogToChatEntries,
+  useAgentsStore,
   useChatStore,
   useConnectionStore,
   useRoomsStore,
@@ -14,6 +15,7 @@ import { useObserver } from "@/composables/useObserver";
 import MessageInput from "./message-input.vue";
 
 const chat = useChatStore();
+const agents = useAgentsStore();
 const rooms = useRoomsStore();
 const connection = useConnectionStore();
 const { roomSend } = useObserver();
@@ -25,10 +27,23 @@ const messageContainer = ref<HTMLElement | null>(null);
 /** active room 历史（room log 投影） + 本 room 的 pending/error 乐观层，按序合并。 */
 const roomEntries = computed<ChatEntry[]>(() => {
   const roomId = rooms.activeRoomId;
-  if (!roomId) return [];
-  const history = rooms.activeRoomLog.map(roomLogToChatEntries);
+  const projectId = rooms.activeRoom?.project_id;
+  if (!roomId || !projectId) return [];
+  const projectAgents = agents.agentsForProject(projectId);
+  const history = rooms.activeRoomLog.map((entry) => {
+    const agentId =
+      entry.author_type === "agent"
+        ? projectAgents.find(
+            (agent) => agent.agentId === entry.author || agent.agentName === entry.author,
+          )?.agentId
+        : undefined;
+    return roomLogToChatEntries(entry, { projectId, agentId });
+  });
   const pending = chat.allEntries.filter(
-    (e) => (e.pending === true || e.error !== undefined) && e.roomId === roomId,
+    (e) =>
+      (e.pending === true || e.error !== undefined) &&
+      e.projectId === projectId &&
+      e.roomId === roomId,
   );
   return [...history, ...pending];
 });
@@ -37,20 +52,16 @@ const canChat = computed(() => rooms.activeRoomId !== null && connection.state =
 
 async function handleSend(targets: string[], content: string) {
   const roomId = rooms.activeRoomId;
-  if (!roomId || !content) return;
-  chat.addPendingEntry({ to: roomId, content, agentName: "", roomId, targets });
+  const projectId = rooms.activeRoom?.project_id;
+  if (!roomId || !projectId || !content) return;
+  const target = { projectId, roomId };
+  chat.addPendingEntry({ projectId, to: roomId, content, agentName: "", roomId, targets });
   roomSend(roomId, content, targets)
     .then((r) => {
-      if (r === null)
-        chat.markPendingError(roomId, content, t("chat.sendFailedDisconnected"), roomId);
+      if (r === null) chat.markPendingError(target, content, t("chat.sendFailedDisconnected"));
     })
     .catch((e) =>
-      chat.markPendingError(
-        roomId,
-        content,
-        t("chat.sendFailed", { msg: String(e ?? "") }),
-        roomId,
-      ),
+      chat.markPendingError(target, content, t("chat.sendFailed", { msg: String(e ?? "") })),
     );
   await nextTick(() => scrollToBottom());
 }

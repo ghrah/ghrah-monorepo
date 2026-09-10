@@ -1,83 +1,79 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue";
-import { useI18n } from "vue-i18n";
-import { useRoute } from "vue-router";
+import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useObserver } from "@/composables/useObserver";
+import Dashboard from "@/pages/dashboard.vue";
+import InstanceSettings from "@/pages/instance-settings.vue";
 
-const route = useRoute();
-const { t } = useI18n();
-const { connection, error, autoConnect, disconnect } = useObserver();
+type SettingsSection = "general" | "agents" | "abilities";
+const { error, autoConnect, disconnect } = useObserver();
+const settingsOpen = ref(false);
+const settingsSection = ref<SettingsSection>("general");
+const visibleError = ref<string | null>(null);
+let errorTimer: ReturnType<typeof setTimeout> | undefined;
+let settingsOpener: HTMLElement | null = null;
+
+watch(
+  error,
+  (nextError) => {
+    if (errorTimer) clearTimeout(errorTimer);
+    visibleError.value = nextError;
+    if (nextError) {
+      errorTimer = setTimeout(() => {
+        visibleError.value = null;
+        errorTimer = undefined;
+      }, 8000);
+    }
+  },
+  { immediate: true },
+);
 
 onMounted(async () => {
   await autoConnect();
 });
 
 onUnmounted(() => {
+  if (errorTimer) clearTimeout(errorTimer);
   disconnect();
 });
 
-const statusClass: Record<string, string> = {
-  connected: "bg-green-200 text-green-900",
-  connecting: "bg-yellow-200 text-yellow-900",
-  reconnecting: "bg-yellow-200 text-yellow-900",
-  disconnected: "bg-red-200 text-red-900",
-};
+function openSettings(section: SettingsSection = "general") {
+  settingsOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  settingsSection.value = section;
+  settingsOpen.value = true;
+}
 
-const statusDot: Record<string, string> = {
-  connected: "bg-green-500",
-  connecting: "bg-yellow-500 animate-pulse",
-  reconnecting: "bg-yellow-500 animate-pulse",
-  disconnected: "bg-red-500",
-};
+async function closeSettings() {
+  settingsOpen.value = false;
+  await nextTick();
+  settingsOpener?.focus();
+  settingsOpener = null;
+}
 
-function statusLabel(state: string) {
-  return t(`app.status.${state}`);
+function dismissError() {
+  if (errorTimer) clearTimeout(errorTimer);
+  errorTimer = undefined;
+  visibleError.value = null;
 }
 </script>
 
 <template>
-  <div class="app-frame h-screen flex flex-col text-gray-900 dark:text-gray-100">
-    <header class="app-header">
-      <div class="brand-lockup">
-        <span class="brand-mark">G</span>
-        <div>
-          <h1>{{ t("app.title") }}</h1>
-          <span>{{ t("app.subtitle") }}</span>
-        </div>
-        <span :class="['badge', statusClass[connection.state]]">
-          <span :class="['inline-block w-2 h-2 rounded-full mr-1', statusDot[connection.state]]" />
-          {{ statusLabel(connection.state) }}
-        </span>
-      </div>
-      <nav class="top-nav">
-        <RouterLink to="/" :class="['px-3 py-1 rounded transition-colors', route.path === '/' ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800']">{{ t("app.nav.dashboard") }}</RouterLink>
-        <RouterLink to="/changes" :class="['px-3 py-1 rounded transition-colors', route.path === '/changes' ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800']">{{ t("app.nav.changes") }}</RouterLink>
-        <RouterLink to="/config" :class="['px-3 py-1 rounded transition-colors', route.path.startsWith('/config') ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800']">{{ t("app.nav.config") }}</RouterLink>
-      </nav>
-      <div class="connection-tools">
-        <span class="server-address">{{ connection.serverUrl }}</span>
-        <button
-          v-if="connection.state === 'connected'"
-          class="btn-secondary"
-          @click="disconnect"
-        >
-          {{ t("app.disconnect") }}
-        </button>
-        <button
-          v-else
-          class="btn-primary"
-          :disabled="connection.state === 'connecting' || connection.state === 'reconnecting'"
-          @click="autoConnect()"
-        >
-          {{ t("app.connect") }}
-        </button>
-      </div>
-    </header>
-    <div v-if="error" class="px-4 py-1 bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200 text-xs">
-      {{ error }}
+  <div class="app-frame h-screen text-gray-900 dark:text-gray-100">
+    <Dashboard
+      class="app-workspace"
+      :aria-hidden="settingsOpen ? 'true' : undefined"
+      :inert="settingsOpen"
+      @open-settings="openSettings"
+    />
+    <div v-if="visibleError" class="app-error-toast" role="alert">
+      <span class="app-error-message">{{ visibleError }}</span>
+      <button type="button" class="app-error-dismiss" :aria-label="$t('common.close')" @click="dismissError">
+        <span aria-hidden="true">×</span>
+      </button>
     </div>
-    <main class="flex-1 min-h-0">
-      <RouterView />
-    </main>
+    <InstanceSettings
+      v-if="settingsOpen"
+      :initial-section="settingsSection"
+      @close="closeSettings"
+    />
   </div>
 </template>

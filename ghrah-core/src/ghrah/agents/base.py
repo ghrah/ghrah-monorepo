@@ -854,6 +854,7 @@ class ActorAgent:
             last_action_result=self._iteration_state.last_action_result,
             supervisor=self._supervisor,
             agent_name=self.config.name,
+            manifest_store=getattr(self._supervisor, "manifest_store", None),
         )
 
     def _build_ability_context(
@@ -885,6 +886,7 @@ class ActorAgent:
             last_action_result=self._iteration_state.last_action_result,
             supervisor=self._supervisor,
             agent_name=self.config.name,
+            manifest_store=getattr(self._supervisor, "manifest_store", None),
         )
 
     def _build_response(self, original: AgentMessage) -> AgentMessage:
@@ -1193,6 +1195,11 @@ class ActorAgent:
 
         # 重建 ContextManager（通过注入的 factory 回调）
         self._context_manager = self._context_manager_factory()
+
+        # 新 ContextManager 的 llm_summary 策略未持有 LLM；LLM 已缓存时
+        # 重新回填，避免 reset 后摘要静默退化为截断
+        if self._llm is not None:
+            self._inject_llm_into_summary_strategy(self._llm)
 
         # 重新写入所有 ability 的默认状态（一次性收集，避免多次 update_state）
         default_states: dict[str, dict[str, Any]] = {}

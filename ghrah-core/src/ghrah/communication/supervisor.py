@@ -34,6 +34,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# [Cluster Context] 注入段截断上限（prompt 固定开销守恒）
+_MAX_CONTEXT_MEMBERS = 20
+_MAX_CONTEXT_DESCRIPTION = 200
+
 
 class SupervisorActor:
     """监控和管理所有 Agent 的生命周期。
@@ -44,13 +48,22 @@ class SupervisorActor:
     - 广播消息
     - 健康检查
 
+    能力语义（fail-closed，零隐式）：
+    - ``abilities`` 显式非空列表 → 照常注册；
+    - ``[]`` → raise（僵尸闸门：零能力 agent 无法回复消息，
+      ConversationDoneHook 永不触发，只会烧满 max_iterations）；
+    - ``None`` 且已配置 ``default_abilities`` → 注入配置集
+      （部署方显式声明；unknown 名 fail-closed 抛 RegistryError）；
+    - ``None`` 且未配置 → raise，错误指路 manifest_ref 或
+      default_abilities。绝不静默注入任何隐式默认集。
+
     用法:
         # 创建 Supervisor
         supervisor = SupervisorActor()
 
         # 注册 Agent
         config = AgentConfig(name="planner", description="任务规划")
-        await supervisor.spawn_agent(config)
+        await supervisor.spawn_agent(config, abilities=[ConversationAbility()])
 
         # 发送消息
         response = await supervisor.send("planner", "设计一个方案")
@@ -65,17 +78,44 @@ class SupervisorActor:
         cluster_id: str | None = None,
         event_publisher: EventPublisher | None = None,
         room_bridge: Any | None = None,
+        default_abilities: list[str] | None = None,
+        max_cluster_members: int = 20,
+        manifest_store: Any | None = None,
     ) -> None:
+        """初始化 Supervisor。
+
+        Args:
+            default_timeout: Agent 间通信默认超时（秒）
+            cluster_id: 集群标识
+            event_publisher: 事件发布器
+            room_bridge: Room 桥（duck-typed）
+            default_abilities: spawn 未显式传 abilities（None）时注入的
+                能力名列表——部署方的显式声明（可审计），非隐式兜底；
+                unknown 名在 spawn 期 fail-closed 抛 RegistryError。
+            max_cluster_members: 集群成员上限（spawn 时超限 raise，
+                硬阻断，防止集群宽度爆炸）。
+            manifest_store: ManifestStore 服务（duck-typed），供
+                spawn/query_manifests 等 manifest 类工具经
+                AbilityExecutionContext.services 显式接线；
+                None = 未接线（对应工具显式 FAILURE 指路）。
+        """
         self._event_publisher = event_publisher
         self._cluster_id = cluster_id
         # RoomBridgeProtocol | None（send 工具用；duck-typed，避免反向依赖）
         self.room_bridge = room_bridge
+        # duck-typed ManifestStoreProtocol | None（装配期显式注入）
+        self.manifest_store = manifest_store
         self._registry = AgentRegistry()
         self._router = MessageRouter(self._registry, default_timeout=default_timeout)
+        self._default_ability_names = (
+            list(default_abilities) if default_abilities is not None else None
+        )
+        self._max_cluster_members = max_cluster_members
         logger.info(
             f"SupervisorActor initialized"
             f"{' cluster_id=' + cluster_id if cluster_id else ''}"
             f" default_timeout={default_timeout}"
+            f" max_cluster_members={max_cluster_members}"
         )
 
     async def spawn_agent(
@@ -84,45 +124,82 @@ class SupervisorActor:
         abilities: list[AbilityProtocol] | None = None,
         *,
         persistence_factory: Callable[[AgentConfig], Any] | None = None,
+        tags: list[str] | None = None,
     ) -> str:
         """创建并注册一个 Agent，返回 agent name。
 
         创建 Agent 实例并注入自身引用，使 Agent 可以通过
         Supervisor 与其他 Agent 通信。
 
-        Ability 注册策略：
-        1. 如果传入 abilities 参数，使用用户指定的 Ability 列表
-        2. 否则注册默认的基础 Ability 组合（ConversationAbility + EndTaskAbility）
+        Ability 注册策略（fail-closed 四态，零隐式）：
+        1. 显式非空列表（manifest 物化/程序化）→ 照常注册
+        2. ``[]`` → raise（僵尸闸门：零能力 agent 无法协作）
+        3. ``None`` 且已配置 ``default_abilities`` → 注入配置集
+           （unknown 名 fail-closed 抛 RegistryError）
+        4. ``None`` 且未配置 → raise，指路 manifest_ref/default_abilities
 
         Args:
             config: Agent 配置
-            abilities: 可选的自定义 Ability 列表。
-                       None 表示注册默认基础 Ability。
+            abilities: Ability 列表。None 表示走 default_abilities 配置集
+                （未配置则 raise）；空列表视为装配错误 raise。
             persistence_factory: 可选的 per-agent 持久化后端工厂
                 （透传 AgentBuilder.from_config；None 走 Core 内建默认）。
+            tags: 可选的 manifest AgentDef 标签透传（注册进 AgentInfo，
+                供集群身份注入段展示；无 manifest 路径不传）。
 
         Returns:
             Agent 名称
 
         Raises:
-            RegistryError: 如果同名 Agent 已注册
+            RegistryError: 同名 Agent 已注册、能力语义非法
+                （空列表/未配置默认集/unknown 能力名）、或集群成员超限
         """
         if self._registry.exists(config.name):
             raise RegistryError(f"Agent already registered: {config.name}")
 
+        if self._max_cluster_members > 0 and len(self._registry) >= self._max_cluster_members:
+            raise RegistryError(
+                f"Cluster member limit reached: {len(self._registry)}/"
+                f"{self._max_cluster_members} — terminate an agent or raise "
+                f"max_cluster_members before spawning '{config.name}'"
+            )
+
         supervisor_handle = self
 
-        # 构建默认 Ability 列表
+        # 能力语义 fail-closed 判定（四态收敛，单一 chokepoint）
+        if abilities is not None and len(abilities) == 0:
+            raise RegistryError(
+                f"Refusing to spawn agent '{config.name}' with zero abilities — "
+                f"an agent with no ConversationAbility can never reply and will "
+                f"only burn max_iterations. Pass a non-empty abilities list, "
+                f"or omit abilities to use configured default_abilities, "
+                f"or spawn via manifest_ref."
+            )
         if abilities is None:
-            from ghrah.abilities.builtin.conversation import ConversationAbility
-            from ghrah.abilities.builtin.end_task import EndTaskAbility
+            if self._default_ability_names is None:
+                raise RegistryError(
+                    f"Agent '{config.name}' spawned without explicit abilities and "
+                    f"no default_abilities configured — pass a non-empty abilities "
+                    f"list, configure SupervisorActor(default_abilities=[...]), "
+                    f"or spawn via manifest_ref. Refusing implicit defaults."
+                )
+            from ghrah.abilities.registry import AbilityRegistry
 
-            abilities = [ConversationAbility(), EndTaskAbility()]
+            abilities = []
+            for ability_type in self._default_ability_names:
+                try:
+                    abilities.append(AbilityRegistry.create(ability_type))
+                except KeyError as exc:
+                    raise RegistryError(
+                        f"default_abilities contains unknown ability type "
+                        f"'{ability_type}' — assembly error must fail at "
+                        f"spawn time, not silently skip (agent: {config.name})"
+                    ) from exc
             logger.info(
-                "Supervisor auto-registered %d default abilities for agent: %s — abilities=%s",
+                "Supervisor injected %d configured default abilities for agent: %s — abilities=%s",
                 len(abilities),
                 config.name,
-                [a.name for a in abilities],
+                self._default_ability_names,
             )
         else:
             logger.info(
@@ -159,6 +236,7 @@ class SupervisorActor:
                 name=config.name,
                 config=config,
                 actor_handle=actor_handle,
+                tags=tags,
             )
         except Exception:
             await self._close_agent_persistence(actor_handle, config.name)
@@ -263,6 +341,30 @@ class SupervisorActor:
         """
         agents = self._registry.list_agents()
         return [info.to_dict() for info in agents]
+
+    def get_cluster_context(self) -> dict[str, Any]:
+        """返回集群上下文（供 [Cluster Context] 注入段渲染）。
+
+        成员/描述截断上限：注入段是 prompt 上下文的固定开销，
+        超大集群取前 N 个成员即失去可读性，截断是诚实行为
+        （完整清单 agent 可经 query_agents 获取）。
+
+        Returns:
+            ``{"cluster_id": str, "members": [{"name", "description", "tags"}]}``
+        """
+        members = []
+        for info in self._registry.list_agents()[:_MAX_CONTEXT_MEMBERS]:
+            members.append(
+                {
+                    "name": info.name,
+                    "description": (info.config.description or "")[:_MAX_CONTEXT_DESCRIPTION],
+                    "tags": list(info.tags),
+                }
+            )
+        return {
+            "cluster_id": self._cluster_id or "",
+            "members": members,
+        }
 
     async def route_message(
         self, message: AgentMessage, timeout: float | None = None

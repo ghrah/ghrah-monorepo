@@ -158,6 +158,7 @@ class ManifestResolver:
         return AgentConfig(
             name=name,
             agent_config_name=agent_config_name,
+            description=manifest.description,
             system_prompt=system_prompt,
             max_iterations=max_iterations,
             communication_timeout=communication_timeout,

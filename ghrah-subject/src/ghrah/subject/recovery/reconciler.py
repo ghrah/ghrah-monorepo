@@ -388,7 +388,7 @@ class ReconciliationService:
                     await self._project_mgr.mark_agent_runtime(
                         project.project_id,
                         agent.agent_id,
-                        error or "spawn failed",
+                        spawn_error or "spawn failed",
                     )
 
     async def _spawn_agent(

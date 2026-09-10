@@ -2,39 +2,23 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""WorkspaceStore + 结构化 marker 单测。
+"""WorkspaceStore 单测（挂载语义）。
 
 覆盖：
 - 持久化往返（upsert/get/get_by_locator/list，含重启重建）；
 - 软删（soft_delete 排除、重复返回 False、include_deleted 取回）；
-- marker JSON 读写 + 三要素校验（adopt_marker_matches）；
-- 旧格式 marker 不自动认领；
-- provider.adopt provider_type 误认领防护（git 拒认领 plain marker 目录）。
+- legacy git 记录 start() 自动 retag 为 plain。
 """
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from ghrah.subject.sandbox.executor import SandboxExecutor
-from ghrah.subject.workspace import (
-    GitWorkspaceProvider,
-    PlainWorkspaceProvider,
-    WorkspaceRecord,
-    WorkspaceStore,
-    path_to_locator,
-)
-from ghrah.subject.workspace.marker import (
-    MARKER_FILENAME,
-    adopt_marker_matches,
-    read_marker,
-    write_marker,
-)
+from ghrah.subject.workspace import WorkspaceRecord, WorkspaceStore, path_to_locator
 
 # ─── fixtures / helpers ───
 
@@ -53,7 +37,7 @@ def _record(
     *,
     workspace_id: str = "wid-1",
     name: str = "agent-x",
-    provider_type: str = "git",
+    provider_type: str = "plain",
     subject_id: str = "default",
     locator: str | None = None,
 ) -> WorkspaceRecord:
@@ -80,7 +64,7 @@ class TestStoreRoundtrip:
         got = await store.get("wid-1")
         assert got is not None
         assert got.workspace_id == "wid-1"
-        assert got.provider_type == "git"
+        assert got.provider_type == "plain"
         assert got.subject_id == "default"
         assert got.locator == path_to_locator("/abs/a")
 
@@ -101,7 +85,7 @@ class TestStoreRoundtrip:
         rec2 = WorkspaceRecord(
             workspace_id="wid-1",
             name="new",
-            provider_type="git",
+            provider_type="plain",
             subject_id="default",
             locator=path_to_locator("/abs/agent-x"),
             updated_at=_now(),
@@ -112,20 +96,20 @@ class TestStoreRoundtrip:
         assert got.name == "new"
 
     async def test_list_filters_by_provider_type(self, store: WorkspaceStore) -> None:
-        await store.upsert(_record(workspace_id="g1", locator=path_to_locator("/abs/g1")))
+        await store.upsert(_record(workspace_id="a1", locator=path_to_locator("/abs/a1")))
         await store.upsert(
             _record(
-                workspace_id="p1",
-                provider_type="plain",
-                locator=path_to_locator("/abs/p1"),
+                workspace_id="b1",
+                provider_type="backup",
+                locator=path_to_locator("/abs/b1"),
             )
         )
-        gits = await store.list(provider_type="git")
-        assert {r.workspace_id for r in gits} == {"g1"}
         plains = await store.list(provider_type="plain")
-        assert {r.workspace_id for r in plains} == {"p1"}
+        assert {r.workspace_id for r in plains} == {"a1"}
+        others = await store.list(provider_type="backup")
+        assert {r.workspace_id for r in others} == {"b1"}
         all_active = await store.list_all_active()
-        assert {r.workspace_id for r in all_active} == {"g1", "p1"}
+        assert {r.workspace_id for r in all_active} == {"a1", "b1"}
 
     async def test_list_filters_by_subject_id(self, store: WorkspaceStore) -> None:
         await store.upsert(
@@ -191,158 +175,48 @@ class TestStoreRestart:
         await store.stop()
 
 
-# ─── D. 结构化 marker 读写 + 三要素校验 ───
+# ─── D. legacy git 记录自动 retag ───
 
 
-class TestMarker:
-    def test_write_and_read_roundtrip(self, tmp_path: Path) -> None:
-        rec = _record(locator=path_to_locator(str(tmp_path / "ws")))
-        d = str(tmp_path / "ws")
-        os.makedirs(d)
-        write_marker(d, rec)
-        marker = read_marker(d)
-        assert marker is not None
-        assert marker.workspace_id == rec.workspace_id
-        assert marker.provider_type == "git"
-        assert marker.subject_id == "default"
-        assert marker.name == "agent-x"
-
-    def test_read_missing_returns_none(self, tmp_path: Path) -> None:
-        assert read_marker(str(tmp_path / "nope")) is None
-
-    def test_legacy_marker_returns_none(self, tmp_path: Path) -> None:
-        d = str(tmp_path / "legacy")
-        os.makedirs(d)
-        with open(os.path.join(d, MARKER_FILENAME), "w") as f:
-            f.write("# Workspace for agent: legacy\n")
-        assert read_marker(d) is None
-
-    def test_corrupt_json_returns_none(self, tmp_path: Path) -> None:
-        d = str(tmp_path / "corrupt")
-        os.makedirs(d)
-        with open(os.path.join(d, MARKER_FILENAME), "w") as f:
-            f.write("{not json")
-        assert read_marker(d) is None
-
-    def test_missing_fields_returns_none(self, tmp_path: Path) -> None:
-        d = str(tmp_path / "partial")
-        os.makedirs(d)
-        with open(os.path.join(d, MARKER_FILENAME), "w") as f:
-            f.write('{"workspace_id": "x"}\n')
-        assert read_marker(d) is None
-
-
-class TestAdoptMarkerMatches:
-    def test_full_match(self) -> None:
-        from ghrah.subject.workspace.marker import MarkerData
-
-        marker = MarkerData(
-            workspace_id="wid",
-            provider_type="git",
-            subject_id="default",
-            created_at=None,
-            name="x",
-        )
-        assert adopt_marker_matches(
-            marker, workspace_id="wid", provider_type="git", subject_id="default"
-        )
-
-    def test_workspace_id_mismatch_rejects(self) -> None:
-        from ghrah.subject.workspace.marker import MarkerData
-
-        marker = MarkerData(
-            workspace_id="wid",
-            provider_type="git",
-            subject_id="default",
-            created_at=None,
-            name=None,
-        )
-        assert not adopt_marker_matches(marker, workspace_id="other")
-
-    def test_provider_type_mismatch_rejects(self) -> None:
-        from ghrah.subject.workspace.marker import MarkerData
-
-        marker = MarkerData(
-            workspace_id="wid",
-            provider_type="plain",
-            subject_id="default",
-            created_at=None,
-            name=None,
-        )
-        assert not adopt_marker_matches(marker, provider_type="git")
-
-    def test_subject_id_mismatch_rejects(self) -> None:
-        from ghrah.subject.workspace.marker import MarkerData
-
-        marker = MarkerData(
-            workspace_id="wid",
-            provider_type="git",
-            subject_id="other",
-            created_at=None,
-            name=None,
-        )
-        assert not adopt_marker_matches(marker, subject_id="default")
-
-    def test_none_marker_rejects(self) -> None:
-        assert not adopt_marker_matches(None, provider_type="git")
-
-    def test_partial_check_only_given(self) -> None:
-        from ghrah.subject.workspace.marker import MarkerData
-
-        marker = MarkerData(
-            workspace_id="wid",
-            provider_type="git",
-            subject_id="other",
-            created_at=None,
-            name=None,
-        )
-        # 只校验 provider_type，subject_id 差异忽略
-        assert adopt_marker_matches(marker, provider_type="git")
-
-
-# ─── E. provider.adopt 误认领防护 ───
-
-
-class TestAdoptProviderTypeMismatch:
-    async def test_git_rejects_plain_marker_dir(self, tmp_path: Path) -> None:
-        root = str(tmp_path / "root")
-        os.makedirs(root)
-        sandbox = SandboxExecutor(workspace_root=root)
-        await sandbox.start()
-        try:
-            git_provider = GitWorkspaceProvider(sandbox)
-            plain_provider = PlainWorkspaceProvider()
-            d = str(tmp_path / "root" / "plaindir")
-            os.makedirs(d)
-            plain_rec = _record(
-                workspace_id="p1",
-                provider_type="plain",
-                locator=path_to_locator(d),
+class TestLegacyGitRetag:
+    async def test_git_records_retagged_to_plain_on_start(self, tmp_path: Path) -> None:
+        db = tmp_path / "ws.db"
+        store = WorkspaceStore(db)
+        await store.start()
+        await store.upsert(
+            _record(
+                workspace_id="g1",
+                provider_type="git",
+                locator=path_to_locator("/abs/g1"),
             )
-            await plain_provider.init(plain_rec)
-            # git provider 不应认领带 plain marker 的目录
-            assert await git_provider.adopt(path_to_locator(d)) is None
-            # plain provider 应认领
-            result = await plain_provider.adopt(path_to_locator(d))
-            assert result is not None
-            assert result.provider_type == "plain"
-        finally:
-            await sandbox.stop()
+        )
+        # 软删的 git 记录一并迁移（防复活路径命中未知 provider）
+        await store.upsert(
+            _record(workspace_id="g2", provider_type="git", locator=path_to_locator("/abs/g2"))
+        )
+        await store.soft_delete("g2")
+        await store.stop()
 
-    async def test_plain_rejects_git_marker_dir(self, tmp_path: Path) -> None:
-        root = str(tmp_path / "root")
-        os.makedirs(root)
-        sandbox = SandboxExecutor(workspace_root=root)
-        await sandbox.start()
+        store2 = WorkspaceStore(db)
+        await store2.start()
         try:
-            git_provider = GitWorkspaceProvider(sandbox)
-            plain_provider = PlainWorkspaceProvider()
-            d = str(tmp_path / "root" / "gitdir")
-            git_rec = _record(workspace_id="g1", provider_type="git", locator=path_to_locator(d))
-            await git_provider.init(git_rec)
-            assert await plain_provider.adopt(path_to_locator(d)) is None
-            result = await git_provider.adopt(path_to_locator(d))
-            assert result is not None
-            assert result.provider_type == "git"
+            active = await store2.get("g1")
+            assert active is not None
+            assert active.provider_type == "plain"
+            deleted = await store2.get("g2", include_deleted=True)
+            assert deleted is not None
+            assert deleted.provider_type == "plain"
         finally:
-            await sandbox.stop()
+            await store2.stop()
+
+    async def test_retag_idempotent_across_restarts(self, tmp_path: Path) -> None:
+        db = tmp_path / "ws.db"
+        for _ in range(2):
+            store = WorkspaceStore(db)
+            await store.start()
+            await store.stop()
+        store = WorkspaceStore(db)
+        await store.start()
+        got = await store.get("nope")
+        assert got is None
+        await store.stop()

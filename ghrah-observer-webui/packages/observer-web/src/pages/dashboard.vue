@@ -1,26 +1,64 @@
 <script setup lang="ts">
-import { useAgentsStore, useRoomsStore } from "@ghrah/observer-core";
-import { computed, ref } from "vue";
+import {
+  type AgentTarget,
+  agentKey,
+  branchKey,
+  type ChainTarget,
+  sameAgent,
+  sessionKey,
+  useAgentsStore,
+  useBranchesStore,
+  useProjectsStore,
+  useRoomsStore,
+  useSessionsStore,
+} from "@ghrah/observer-core";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import ActionChainPanel from "@/components/action-chain/action-chain-panel.vue";
 import AgentList from "@/components/agent-list.vue";
+import AgentsOverviewPanel from "@/components/agents-overview-panel.vue";
 import ChatPanel from "@/components/chat/chat-panel.vue";
 import HitlInbox from "@/components/hitl/hitl-inbox.vue";
+import InstanceProfileControl from "@/components/instance-profile-control.vue";
+import ProjectFixedNav from "@/components/nav/project-fixed-nav.vue";
 import ProjectSelector from "@/components/nav/project-selector.vue";
 import RoomSelector from "@/components/nav/room-selector.vue";
+import ProjectChangesPanel from "@/components/project-changes-panel.vue";
+import ProjectSettingsPanel from "@/components/project-settings-panel.vue";
+import RoomAdminPanel from "@/components/room-admin-panel.vue";
 import { useObserver } from "@/composables/useObserver";
 
-type WorkspaceTab = {
+type RoomTab = {
   id: string;
-  kind: "room" | "agent";
-  target: string;
-  label: string;
+  kind: "room";
+  target: { projectId: string; roomId: string };
+  fallbackLabel: string;
 };
+type AgentTab = {
+  id: string;
+  kind: "agent";
+  target: { agent: AgentTarget; chain: ChainTarget | null };
+  fallbackLabel: string;
+};
+type ProjectTab = {
+  id: string;
+  kind: "changes" | "project" | "agents";
+  target: { projectId: string };
+  fallbackLabel: string;
+};
+type WorkspaceTab = RoomTab | AgentTab | ProjectTab;
+type ProjectViewKind = ProjectTab["kind"];
 
+const emit = defineEmits<{
+  openSettings: [section: "general" | "agents" | "abilities"];
+}>();
 const rooms = useRoomsStore();
 const agents = useAgentsStore();
+const projects = useProjectsStore();
+const sessions = useSessionsStore();
+const branches = useBranchesStore();
 const { t } = useI18n();
-const { switchRoom } = useObserver();
+const { switchRoom, switchProject, selectAgent } = useObserver();
 const tabs = ref<WorkspaceTab[]>([]);
 const activeTabId = ref<string | null>(null);
 
@@ -28,112 +66,240 @@ const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeTabId
 const activePanel = computed(() => {
   if (activeTab.value?.kind === "room") return ChatPanel;
   if (activeTab.value?.kind === "agent") return ActionChainPanel;
+  if (activeTab.value?.kind === "changes") return ProjectChangesPanel;
+  if (activeTab.value?.kind === "project") return ProjectSettingsPanel;
+  if (activeTab.value?.kind === "agents") return AgentsOverviewPanel;
   return null;
 });
+const activePanelProps = computed(() => {
+  const tab = activeTab.value;
+  return tab && tab.kind !== "room" && tab.kind !== "agent"
+    ? { projectId: tab.target.projectId }
+    : {};
+});
 
-function openRoom(room: { room_id: string; name: string }) {
-  const id = `room:${room.room_id}`;
-  if (!tabs.value.some((tab) => tab.id === id)) {
-    tabs.value.push({ id, kind: "room", target: room.room_id, label: room.name });
-  }
-  activeTabId.value = id;
+function projectIdOf(tab: WorkspaceTab): string {
+  return tab.kind === "agent" ? tab.target.agent.projectId : tab.target.projectId;
 }
 
-function openAgent(agentName: string) {
-  const id = `agent:${agentName}`;
-  if (!tabs.value.some((tab) => tab.id === id)) {
-    tabs.value.push({ id, kind: "agent", target: agentName, label: agentName });
+function tabLabel(tab: WorkspaceTab): string {
+  if (tab.kind === "room") {
+    const room = rooms.activeRooms.get(tab.target.roomId);
+    return room?.project_id === tab.target.projectId ? room.name : tab.fallbackLabel;
   }
-  activeTabId.value = id;
+  if (tab.kind === "agent") {
+    return agents.getAgent(tab.target.agent)?.agentName ?? tab.fallbackLabel;
+  }
+  const projectName = projects.projects.get(tab.target.projectId)?.name ?? tab.fallbackLabel;
+  if (tab.kind === "changes") return t("dashboard.tabChanges", { project: projectName });
+  if (tab.kind === "agents") return t("dashboard.tabAgents", { project: projectName });
+  return t("dashboard.tabProject", { project: projectName });
+}
+
+function tabIcon(kind: WorkspaceTab["kind"]): string {
+  return { room: "#", agent: "◎", changes: "△", agents: "◆", project: "▣" }[kind];
+}
+
+function currentChain(agent: AgentTarget): ChainTarget | null {
+  const sessionId = sessions.activeSessionId(agent);
+  if (!sessionId) return null;
+  const session = { ...agent, sessionId };
+  const branchId = branches.activeBranchId(session);
+  return branchId ? { ...session, branchId } : null;
+}
+
+function openRoom(room: { room_id: string; project_id: string; name: string }) {
+  const id = `room:${room.project_id}:${room.room_id}`;
+  let tab = tabs.value.find((item) => item.id === id);
+  if (!tab) {
+    tab = {
+      id,
+      kind: "room",
+      target: { projectId: room.project_id, roomId: room.room_id },
+      fallbackLabel: room.name,
+    };
+    tabs.value.push(tab);
+  }
+  void activateTab(tab);
+}
+
+function openAgent(target: AgentTarget | ChainTarget) {
+  const resolved = agents.getAgent(target) ?? target;
+  const agent: AgentTarget = {
+    projectId: resolved.projectId,
+    agentId: resolved.agentId,
+    agentName: resolved.agentName,
+  };
+  const chain: ChainTarget | null =
+    "sessionId" in target
+      ? { ...agent, sessionId: target.sessionId, branchId: target.branchId }
+      : currentChain(agent);
+  const id = chain ? `chain:${branchKey(chain)}` : `agent:${agentKey(agent)}`;
+  let tab = tabs.value.find((item) => item.id === id);
+  if (!tab && chain) {
+    const contextTab = tabs.value.find(
+      (item) =>
+        item.kind === "agent" && item.target.chain === null && sameAgent(item.target.agent, agent),
+    );
+    if (contextTab) {
+      const wasActive = activeTabId.value === contextTab.id;
+      contextTab.id = id;
+      contextTab.target = { agent, chain };
+      contextTab.fallbackLabel = agent.agentName;
+      if (wasActive) activeTabId.value = id;
+      tab = contextTab;
+    }
+  }
+  if (!tab) {
+    tab = { id, kind: "agent", target: { agent, chain }, fallbackLabel: agent.agentName };
+    tabs.value.push(tab);
+  }
+  void activateTab(tab);
+}
+
+function openProjectView(view: { kind: ProjectViewKind; projectId: string }) {
+  const id = `${view.kind}:${view.projectId}`;
+  let tab = tabs.value.find((item) => item.id === id);
+  if (!tab) {
+    tab = {
+      id,
+      kind: view.kind,
+      target: { projectId: view.projectId },
+      fallbackLabel: projects.projects.get(view.projectId)?.name ?? view.projectId,
+    };
+    tabs.value.push(tab);
+  }
+  void activateTab(tab);
 }
 
 async function activateTab(tab: WorkspaceTab) {
+  const projectId = projectIdOf(tab);
+  if (projects.activeProjectId !== projectId) await switchProject(projectId);
   activeTabId.value = tab.id;
-  if (tab.kind === "room" && rooms.activeRoomId !== tab.target) {
-    await switchRoom(tab.target);
+  if (tab.kind === "room") {
+    if (rooms.activeRoomId !== tab.target.roomId) await switchRoom(tab.target.roomId);
+    return;
   }
-  if (tab.kind === "agent" && agents.selectedAgentName !== tab.target) {
-    agents.selectAgent(tab.target);
+  if (tab.kind === "agent") {
+    const resolved = agents.getAgent(tab.target.agent) ?? tab.target.agent;
+    const currentAgent: AgentTarget = {
+      projectId: resolved.projectId,
+      agentId: resolved.agentId,
+      agentName: resolved.agentName,
+    };
+    if (!sameAgent(agents.selectedAgentTarget, currentAgent)) selectAgent(currentAgent);
+    if (tab.target.chain) {
+      sessions.setActiveSession(currentAgent, tab.target.chain.sessionId);
+      branches.setActiveBranch(tab.target.chain, tab.target.chain.branchId);
+    }
   }
 }
 
-function closeTab(tab: WorkspaceTab) {
+async function closeTab(tab: WorkspaceTab) {
   const index = tabs.value.findIndex((item) => item.id === tab.id);
   if (index < 0) return;
   const wasActive = activeTabId.value === tab.id;
   tabs.value.splice(index, 1);
-  if (wasActive) {
-    const next = tabs.value[Math.min(index, tabs.value.length - 1)];
-    activeTabId.value = next?.id ?? null;
-    if (next) void activateTab(next);
+  if (!wasActive) return;
+  if (tab.kind === "room" && rooms.activeRoomId === tab.target.roomId) await switchRoom(null);
+  if (tab.kind === "agent" && sameAgent(agents.selectedAgentTarget, tab.target.agent)) {
+    selectAgent(null);
   }
+  const next = tabs.value[Math.min(index, tabs.value.length - 1)];
+  activeTabId.value = next?.id ?? null;
+  if (next) await activateTab(next);
 }
+
+async function removeTabs(isInvalid: (tab: WorkspaceTab) => boolean) {
+  const previous = tabs.value;
+  const activeIndex = previous.findIndex((tab) => tab.id === activeTabId.value);
+  const activeInvalid = activeIndex >= 0 && isInvalid(previous[activeIndex]);
+  const remaining = previous.filter((tab) => !isInvalid(tab));
+  if (remaining.length === previous.length) return;
+  tabs.value = remaining;
+  if (!activeInvalid) return;
+  const next =
+    previous.slice(activeIndex + 1).find((tab) => !isInvalid(tab)) ??
+    previous
+      .slice(0, activeIndex)
+      .reverse()
+      .find((tab) => !isInvalid(tab));
+  activeTabId.value = next?.id ?? null;
+  if (next) await activateTab(next);
+}
+
+function invalidateRoom(target: { projectId: string; roomId: string }) {
+  return removeTabs(
+    (tab) =>
+      tab.kind === "room" &&
+      tab.target.projectId === target.projectId &&
+      tab.target.roomId === target.roomId,
+  );
+}
+
+watch(
+  () => ({
+    roomKeys: rooms.roomList.map((room) => `${room.project_id}:${room.room_id}`),
+    projectIds: projects.projectList.map((project) => project.project_id),
+    agentKeys: [...agents.agents.keys()],
+    sessionKeys: [...sessions.sessions.keys()],
+    branchKeys: [...branches.branches.keys()],
+  }),
+  ({ roomKeys, projectIds, agentKeys, sessionKeys, branchKeys }) => {
+    const validRooms = new Set(roomKeys);
+    const validProjects = new Set(projectIds);
+    const validAgents = new Set(agentKeys);
+    const validSessions = new Set(sessionKeys);
+    const validBranches = new Set(branchKeys);
+    void removeTabs((tab) => {
+      if (!validProjects.has(projectIdOf(tab))) return true;
+      if (tab.kind === "room") {
+        return !validRooms.has(`${tab.target.projectId}:${tab.target.roomId}`);
+      }
+      if (tab.kind !== "agent") return false;
+      if (!validAgents.has(agentKey(tab.target.agent))) return true;
+      if (!tab.target.chain) return false;
+      return (
+        !validSessions.has(sessionKey(tab.target.chain)) ||
+        !validBranches.has(branchKey(tab.target.chain))
+      );
+    });
+  },
+);
 </script>
 
 <template>
   <div class="workspace-shell">
-    <aside class="project-rail workspace-column" :aria-label="t('dashboard.projects')">
-      <ProjectSelector />
-    </aside>
-
+    <aside class="project-rail workspace-column" :aria-label="t('dashboard.projects')"><ProjectSelector /></aside>
     <aside class="room-sidebar workspace-column" :aria-label="t('dashboard.rooms')">
-      <RoomSelector @open-room="openRoom" />
+      <div class="room-sidebar-scroll"><RoomSelector @open-room="openRoom" @room-invalidated="invalidateRoom" /></div>
+      <ProjectFixedNav @open-project-view="openProjectView" />
+      <InstanceProfileControl @open-settings="emit('openSettings', 'general')" />
     </aside>
-
     <section class="workspace-main" :aria-label="t('dashboard.workspaceTabs')">
       <div class="workspace-tabs" role="tablist" :aria-label="t('dashboard.openViews')">
         <div class="tabs-scroll">
-          <button
-            v-for="tab in tabs"
-            :key="tab.id"
-            type="button"
-            :class="['workspace-tab', { active: activeTabId === tab.id }]"
-            role="tab"
-            :aria-selected="activeTabId === tab.id"
-            @click="activateTab(tab)"
-          >
-            <span :class="['tab-kind', tab.kind]">{{ tab.kind === "room" ? "#" : "◎" }}</span>
-            <span class="tab-label">{{ tab.label }}</span>
-            <span
-              class="tab-close"
-              role="button"
-              tabindex="0"
-              :aria-label="t('dashboard.closeTab', { label: tab.label })"
-              @click.stop="closeTab(tab)"
-              @keydown.enter.stop="closeTab(tab)"
-            >×</span>
+          <button v-for="tab in tabs" :key="tab.id" type="button" :class="['workspace-tab', { active: activeTabId === tab.id }]" role="tab" :aria-selected="activeTabId === tab.id" @click="activateTab(tab)">
+            <span :class="['tab-kind', tab.kind]">{{ tabIcon(tab.kind) }}</span><span class="tab-label">{{ tabLabel(tab) }}</span>
+            <span class="tab-close" role="button" tabindex="0" :aria-label="t('dashboard.closeTab', { label: tabLabel(tab) })" @click.stop="void closeTab(tab)" @keydown.enter.stop="void closeTab(tab)">×</span>
           </button>
         </div>
         <span class="tab-count">{{ t("dashboard.openCount", { count: tabs.length }) }}</span>
       </div>
-
       <div class="workspace-content">
-        <!-- KeepAlive 保留 ActionChain 增量缓存，同时让隐藏面板停止渲染更新。
-             key 必须绑定 tab id：KeepAlive 以 vnode.key 为缓存键，若 key 恒为 0，
-             ChatPanel 与 ActionChainPanel 会互相覆盖缓存条目，切回时 type 与
-             component 不匹配，activate 分支 unmount 旧组件时
-             parentComponent.ctx.deactivate 不存在 → TypeError，界面卡死。 -->
         <KeepAlive>
-          <component :is="activePanel" v-if="activePanel" :key="activeTab?.id" />
+          <component :is="activePanel" v-if="activePanel" :key="activeTab?.id" v-bind="activePanelProps" @open-agent="openAgent" />
         </KeepAlive>
         <div v-if="!activeTab" class="workspace-empty">
-          <div class="empty-mark">⌘</div>
-          <h2>{{ t("dashboard.readyTitle") }}</h2>
-          <p>{{ t("dashboard.readyBody") }}</p>
-          <div class="empty-shortcuts">
-            <span class="shortcut-pill"><kbd>#</kbd> {{ t("dashboard.roomConversation") }}</span>
-            <span class="shortcut-pill"><kbd>◎</kbd> {{ t("dashboard.agentActionChain") }}</span>
-          </div>
+          <div class="empty-mark">⌘</div><h2>{{ t("dashboard.readyTitle") }}</h2><p>{{ t("dashboard.readyBody") }}</p>
+          <div class="empty-shortcuts"><span class="shortcut-pill"><kbd>#</kbd> {{ t("dashboard.roomConversation") }}</span><span class="shortcut-pill"><kbd>◎</kbd> {{ t("dashboard.agentActionChain") }}</span></div>
         </div>
       </div>
-
-      <footer class="hitl-dock">
-        <HitlInbox />
-      </footer>
+      <footer class="hitl-dock"><HitlInbox /></footer>
     </section>
-
-    <aside class="agent-sidebar workspace-column" :aria-label="t('dashboard.agents')">
-      <AgentList @open-agent="openAgent" />
+    <aside class="right-sidebar workspace-column" :aria-label="t('dashboard.contextSidebar')">
+      <section class="room-admin-region" :aria-label="t('roomAdmin.title')"><RoomAdminPanel @room-invalidated="invalidateRoom" /></section>
+      <section class="agent-region" :aria-label="t('dashboard.agents')"><AgentList @open-agent="openAgent" @open-settings="emit('openSettings', $event)" /></section>
     </aside>
   </div>
 </template>

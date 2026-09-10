@@ -230,6 +230,10 @@ class SubjectConfig:
     # 非 slice 的新字段（有默认值，可直接构造）。
     transport: TransportKindConfig = field(default_factory=TransportKindConfig)
     enabled_third_party_units: list[str] = field(default_factory=list)
+    # spawn 默认能力集——部署方的显式声明（C2 fail-closed 兼容通道）：
+    # Observer 无 abilities 快速 spawn 经 CoreUnitConfig.default_abilities
+    # 注入此集；置空列表 = 关闭快速 spawn（必须 manifest_ref/显式 abilities）。
+    default_spawn_abilities: list[str] = field(default_factory=lambda: ["conversation", "end_task"])
 
     # private backing（init=False，__post_init__ 后必有值；保证 property 非 Optional）。
     _persistence: PersistenceConfig = field(init=False)

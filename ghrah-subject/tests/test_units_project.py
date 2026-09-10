@@ -28,7 +28,7 @@ from ghrah.subject.unit.base import RouteSpec, SubjectUnit, UnitMeta
 from ghrah.subject.units import mount_builtin_units
 from ghrah.subject.units.project import ProjectUnit
 from ghrah.subject.units.recovery import RecoveryUnit
-from ghrah.subject.workspace.providers.git import path_to_locator
+from ghrah.subject.workspace.locator import path_to_locator
 
 
 class _FakeCoreUnit(SubjectUnit):
@@ -126,6 +126,8 @@ class TestUnitsAssembly:
 
     async def test_project_create_command_via_dispatcher(self, tmp_path: Path) -> None:
         async with _boot(tmp_path) as (ctx, _, _):
+            # 挂载语义：project_create 登记已有目录，不预创建（fail-closed）
+            (tmp_path / "p2").mkdir()
             result = await bridge_command(
                 ctx,
                 "project_create",

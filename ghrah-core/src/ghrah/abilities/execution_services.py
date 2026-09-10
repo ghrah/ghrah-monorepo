@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 __all__ = [
     "AGENT_NAME",
     "CONTEXT_MANAGER",
+    "MANIFEST_STORE",
     "SUPERVISOR",
     "ExecutionServices",
     "ServiceKey",
@@ -72,3 +73,6 @@ class ExecutionServices:
 CONTEXT_MANAGER: ServiceKey[ContextManagerProtocol] = ServiceKey("context_manager")
 SUPERVISOR: ServiceKey[SupervisorProtocol] = ServiceKey("supervisor")
 AGENT_NAME = ServiceKey[str]("agent_name", str)
+# duck-typed ManifestStoreProtocol（load_agent/list_agents）；
+# None = 未接线（manifest 类工具须显式 FAILURE 指路，绝不猜测）。
+MANIFEST_STORE = ServiceKey[Any]("manifest_store")

@@ -548,3 +548,132 @@ class TestLLMSummaryStrategy:
         # 没有 factory，摘要生成失败，回退到截断
         assert len(result) < len(msgs)
         llm.generate.assert_not_called()
+
+
+# ----------------------------------------------------------------
+# TestLLMSummaryFactoryAndRetry
+# ----------------------------------------------------------------
+
+
+class TestLLMSummaryFactoryAndRetry:
+    """LLMSummaryStrategy 惰性工厂注入、失败重试与 compaction 记录测试。"""
+
+    @staticmethod
+    def _over_budget_messages() -> list[ChatMessage]:
+        return [_human(f"Msg {i} " + "x" * 100) for i in range(20)]
+
+    @pytest.mark.asyncio
+    async def test_factory_lazy_resolution_and_memoize(self) -> None:
+        """apply 时才解析 factory，成功结果 memoize（factory 只调用一次）。"""
+        mock_response = LLMResponse(content_blocks=[TextBlock(text="Summary.")])
+        llm = MagicMock(spec=ChatFormat)
+        llm.generate = AsyncMock(return_value=mock_response)
+        factory = MagicMock(return_value=llm)
+        strategy = LLMSummaryStrategy(llm_factory=factory, message_factory=ChatMessageFactory())
+        msgs = self._over_budget_messages()
+
+        result = await strategy.apply(msgs, token_budget=200)
+
+        factory.assert_called_once()
+        assert any("[Context Summary]" in m.text for m in result)
+
+        await strategy.apply(msgs, token_budget=200)
+        factory.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_explicit_llm_takes_precedence_over_factory(self) -> None:
+        """显式注入的 llm 优先，factory 不被调用。"""
+        explicit_llm = MagicMock(spec=ChatFormat)
+        explicit_llm.generate = AsyncMock(
+            return_value=LLMResponse(content_blocks=[TextBlock(text="Explicit.")])
+        )
+        factory = MagicMock(return_value=MagicMock(spec=ChatFormat))
+        strategy = LLMSummaryStrategy(
+            llm=explicit_llm, llm_factory=factory, message_factory=ChatMessageFactory()
+        )
+        msgs = self._over_budget_messages()
+
+        result = await strategy.apply(msgs, token_budget=200)
+
+        factory.assert_not_called()
+        explicit_llm.generate.assert_awaited_once()
+        assert any("[Context Summary] Explicit." == m.text for m in result)
+
+    @pytest.mark.asyncio
+    async def test_factory_failure_falls_back_and_not_cached(self) -> None:
+        """factory 抛异常时回退截断，失败不缓存（下次 apply 重试解析）。"""
+        factory = MagicMock(side_effect=RuntimeError("agentconf missing"))
+        strategy = LLMSummaryStrategy(llm_factory=factory, message_factory=ChatMessageFactory())
+        msgs = self._over_budget_messages()
+
+        result = await strategy.apply(msgs, token_budget=200)
+
+        assert len(result) < len(msgs)
+        assert not any("[Context Summary]" in m.text for m in result)
+
+        await strategy.apply(msgs, token_budget=200)
+        assert factory.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_generate_retry_once_succeeds(self) -> None:
+        """generate 首次失败重试一次后成功。"""
+        llm = MagicMock(spec=ChatFormat)
+        llm.generate = AsyncMock(
+            side_effect=[
+                RuntimeError("transient"),
+                LLMResponse(content_blocks=[TextBlock(text="Summary.")]),
+            ]
+        )
+        strategy = LLMSummaryStrategy(llm=llm, message_factory=ChatMessageFactory())
+        msgs = self._over_budget_messages()
+
+        result = await strategy.apply(msgs, token_budget=200)
+
+        assert llm.generate.await_count == 2
+        assert any("[Context Summary]" in m.text for m in result)
+
+    @pytest.mark.asyncio
+    async def test_generate_retry_exhausted_falls_back(self) -> None:
+        """generate 两次均失败后回退截断。"""
+        llm = MagicMock(spec=ChatFormat)
+        llm.generate = AsyncMock(side_effect=[RuntimeError("a"), RuntimeError("b")])
+        strategy = LLMSummaryStrategy(llm=llm, message_factory=ChatMessageFactory())
+        msgs = self._over_budget_messages()
+
+        result = await strategy.apply(msgs, token_budget=200)
+
+        assert llm.generate.await_count == 2
+        assert not any("[Context Summary]" in m.text for m in result)
+        assert len(result) < len(msgs)
+
+    @pytest.mark.asyncio
+    async def test_compaction_record_drained(self) -> None:
+        """成功摘要产生 compaction 记录，drain 后清空。"""
+        llm = MagicMock(spec=ChatFormat)
+        llm.generate = AsyncMock(
+            return_value=LLMResponse(content_blocks=[TextBlock(text="Summary.")])
+        )
+        strategy = LLMSummaryStrategy(llm=llm, message_factory=ChatMessageFactory())
+        msgs = self._over_budget_messages()
+
+        await strategy.apply(msgs, token_budget=200)
+
+        record = strategy.drain_compaction_record()
+        assert record is not None
+        assert record["strategy"] == "llm_summary"
+        assert record["summarized_messages"] > 0
+        assert record["tokens_before"] > record["tokens_after"]
+        assert record["summary"].startswith("[Context Summary] ")
+        assert strategy.drain_compaction_record() is None
+
+    @pytest.mark.asyncio
+    async def test_failed_summary_leaves_no_compaction_record(self) -> None:
+        """摘要失败不产生 compaction 记录。"""
+        llm = MagicMock(spec=ChatFormat)
+        llm.generate = AsyncMock(side_effect=[RuntimeError("a"), RuntimeError("b")])
+        strategy = LLMSummaryStrategy(llm=llm, message_factory=ChatMessageFactory())
+        msgs = self._over_budget_messages()
+
+        await strategy.apply(msgs, token_budget=200)
+
+        assert strategy.drain_compaction_record() is None

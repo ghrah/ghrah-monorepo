@@ -70,15 +70,17 @@ describe("createCommandResult", () => {
       success: true,
       data: { name: "agent-1" },
       error: null,
+      error_detail: null,
     });
   });
 
   it("creates a failure result", () => {
-    const msg = createCommandResult("req-002", false, undefined, "Not found");
+    const msg = createCommandResult("req-002", false, undefined, "not_found", "Agent missing");
     expect(msg.type).toBe(SystemType.COMMAND_RESULT);
     expect(msg.payload.success).toBe(false);
     expect(msg.payload.data).toBeNull();
-    expect(msg.payload.error).toBe("Not found");
+    expect(msg.payload.error).toBe("not_found");
+    expect(msg.payload.error_detail).toBe("Agent missing");
   });
 });
 

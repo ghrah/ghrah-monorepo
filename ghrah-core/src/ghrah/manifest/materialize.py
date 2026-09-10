@@ -17,12 +17,18 @@ CoreUnit 与 ManifestStore 同进程，无需序列化成 wire 格式再反序�
 非 builtin 能力（``implementation.type != "builtin"`` 或无 ``handler``）
 跳过 + warning（保留 subject 侧物化器宽松语义，区别于独立库 runner 的
 ``raise ValueError``——避免一个非 builtin 中断整个 spawn）。
+
+HITL 接线（通用分支）：FS/command 分支之外的 ability，若 manifest 声明
+``permissions.require_hitl=True``，经 ``_HITLRequiredAbility`` 包装挂
+PRE_EXECUTE HITL hook——否则该声明会被兜底分支裸实例化**静默忽略**
+（纸面门禁）。优先级链与 FS/command 分支一致：
+``auto_approve > manifest require_hitl > 兜底默认``。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ghrah.abilities import (
     FS_ABILITY_TYPES,
@@ -32,12 +38,78 @@ from ghrah.abilities import (
     FSPermissionChecker,
     resolve_fs_permission_paths,
 )
+from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 from ghrah.core.ability_protocol import AbilityProtocol
 from ghrah.manifest.resolver import ResolvedAbility
+
+if TYPE_CHECKING:
+    from ghrah.abilities.context import AbilityExecutionContext
+    from ghrah.types.results import ActionResult
 
 __all__ = ["instantiate_resolved_abilities"]
 
 logger = logging.getLogger(__name__)
+
+
+class _HITLApprovalHook(Hook):
+    """通用 PRE_EXECUTE HITL 审批 Hook。
+
+    拦截宿主 ability 的每次执行，要求人工审批（复用 executor 的
+    ``handle_hitl_hook_result`` → HITLFutureStore → receive_hitl_response
+    全链路）。审批消息携带 ability 名与 tool 参数摘要，供人审判断。
+    """
+
+    hook_point = HookPoint.PRE_EXECUTE
+
+    def __init__(self, ability_name: str, reason: str) -> None:
+        self._ability_name = ability_name
+        self._reason = reason
+
+    async def should_trigger(self, context: AbilityExecutionContext) -> bool:
+        return context.current_ability_name == self._ability_name
+
+    async def execute(
+        self, context: AbilityExecutionContext, result: ActionResult | None
+    ) -> HookResult:
+        tool_args = context.tool_args or {}
+        summary = str(tool_args)[:200]
+        return HookResult.hitl(
+            message=f"{self._reason} — ability='{self._ability_name}' args={summary}"
+        )
+
+
+class _HITLRequiredAbility(AbilityProtocol):
+    """require_hitl 包装：委托宿主 ability，追加 PRE_EXECUTE HITL hook。
+
+    组合而非继承——不破坏宿主 ability 的属性访问（checker/runner 等
+    测试断言直接穿透）。
+    """
+
+    def __init__(self, inner: AbilityProtocol, ability_name: str, reason: str) -> None:
+        self._inner = inner
+        self._hitl_hook = _HITLApprovalHook(ability_name, reason)
+
+    @property
+    def name(self) -> str:
+        return self._inner.name
+
+    async def execute(self, context: AbilityExecutionContext) -> ActionResult:
+        return await self._inner.execute(context)
+
+    def get_hooks(self) -> list[Hook]:
+        return [*self._inner.get_hooks(), self._hitl_hook]
+
+    def bind_tool(self) -> dict[str, Any] | None:
+        return self._inner.bind_tool()
+
+    def get_default_state(self) -> dict[str, Any]:
+        return self._inner.get_default_state()
+
+    def to_prompt_description(self) -> str:
+        return self._inner.to_prompt_description()
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._inner, item)
 
 
 def instantiate_resolved_abilities(
@@ -137,7 +209,16 @@ def _instantiate_ability(
             params["command_runner"] = command_runner
         return AbilityRegistry.create("execute_command", **params)
 
-    return AbilityRegistry.create(handler)
+    ability = AbilityRegistry.create(handler)
+    # 通用 HITL 接线：非 FS/非 command ability 的 require_hitl 声明必须
+    # 实际生效——裸实例化会静默忽略该声明（纸面门禁）。
+    if not auto_approved and bool(permissions.require_hitl):
+        return _HITLRequiredAbility(
+            ability,
+            ability_name=handler,
+            reason=f"manifest requires HITL approval for '{handler}'",
+        )
+    return ability
 
 
 def _has_fs_permission_fields(permissions: Any) -> bool:

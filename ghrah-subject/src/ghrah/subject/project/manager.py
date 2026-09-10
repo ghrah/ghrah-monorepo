@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -67,7 +68,7 @@ from ghrah.subject.project.store import (
     ProjectNotFoundError,
     ProjectStore,
 )
-from ghrah.subject.workspace.providers.git import path_to_locator
+from ghrah.subject.workspace.locator import locator_to_path, path_to_locator
 
 if TYPE_CHECKING:
     from ghrah.subject.manifest_store.store import ManifestStore
@@ -137,6 +138,11 @@ def _normalize_locator(locator: str) -> str:
     if "://" in locator:
         return locator
     return path_to_locator(locator)
+
+
+def _locator_dirname(locator: str) -> str:
+    """bootstrap workspace locator → 本地目录路径（makedirs 用）。"""
+    return locator_to_path(locator)
 
 
 class ProjectManager:
@@ -1011,6 +1017,9 @@ class ProjectManager:
         cluster_attempted = False
         try:
             receipt = project_paths.initialize(record.project_id)
+            # bootstrap workspace 指向 ghrah 自有的 workspace_root/projects/default，
+            # 显式创建合法（register_workspace 挂载语义仅登记已有目录，不 mkdir）。
+            os.makedirs(_locator_dirname(locator), exist_ok=True)
             known_ids = {r.workspace_id for r in self._workspace_mgr.list_records()}
             ws = await self._workspace_mgr.register_workspace(locator, name="default")
             if ws.record.workspace_id not in known_ids:

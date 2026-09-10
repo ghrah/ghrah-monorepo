@@ -103,3 +103,30 @@ async def test_observer_router_unknown_command_delegates_to_engine() -> None:
     assert result is not None
     assert result.payload.success is False
     assert result.payload.error == "Unknown command: frobnicate"
+
+
+async def test_observer_router_preserves_stable_error_detail() -> None:
+    engine = _FakeEngine(
+        {
+            "success": False,
+            "data": None,
+            "error": "project_version_conflict",
+            "error_detail": "expected version 2, got 3",
+        }
+    )
+    connection_manager = ConnectionManager()
+    event_bus = EventBus(connection_manager)
+    router = ObserverRouter(connection_manager, event_bus, engine=engine)  # type: ignore[arg-type]
+
+    result = await router.handle_command(
+        Message(
+            type=CommandType.PROJECT_ARCHIVE.value,
+            payload={"project_id": "p1", "expected_version": 2},
+            request_id="req-4",
+        ),
+        session_id="session-4",
+    )
+
+    assert result is not None
+    assert result.payload.error == "project_version_conflict"
+    assert result.payload.error_detail == "expected version 2, got 3"

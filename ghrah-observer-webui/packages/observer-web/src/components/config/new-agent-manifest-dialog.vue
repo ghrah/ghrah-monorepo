@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { computed, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import BaseModal from "@/components/ui/base-modal.vue";
+import ConfirmDialog from "@/components/ui/confirm-dialog.vue";
 import { useObserver } from "@/composables/useObserver";
 
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; dirtyChange: [dirty: boolean] }>();
 
 const { putAgent, listManifestAgents } = useObserver();
 const { t } = useI18n();
 
 const loading = ref(false);
 const error = ref<string | null>(null);
+const dirty = ref(false);
+const confirmDiscardOpen = ref(false);
 
 // ── Form state ──
 
@@ -49,6 +53,32 @@ const canSubmit = computed(() => {
     form.abilities.every((a) => a.value.trim() !== "")
   );
 });
+
+watch(
+  form,
+  () => {
+    if (dirty.value) return;
+    dirty.value = true;
+    emit("dirtyChange", true);
+  },
+  { deep: true },
+);
+
+function requestClose() {
+  if (dirty.value) confirmDiscardOpen.value = true;
+  else finishClose();
+}
+
+function finishClose() {
+  dirty.value = false;
+  emit("dirtyChange", false);
+  emit("close");
+}
+
+function discardAndClose() {
+  confirmDiscardOpen.value = false;
+  finishClose();
+}
 
 // ── Abilities ──
 
@@ -150,24 +180,21 @@ async function handleSubmit() {
   } else {
     await listManifestAgents();
     window.postMessage?.({ type: "openFile", fullName, kind: "agent" });
-    emit("close");
+    finishClose();
   }
 }
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" @click.self="$emit('close')">
-    <div class="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
-      <!-- Header -->
-      <div class="px-6 pt-5 pb-3 border-b border-gray-200 dark:border-gray-700">
-        <h2 class="text-lg font-semibold">{{ t("config.manifest.dialogTitle") }}</h2>
+  <BaseModal :title="t('config.manifest.dialogTitle')" size="lg" @request-close="requestClose">
+    <template #subtitle>
         <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
           {{ t("config.manifest.subtitle") }}
         </p>
-      </div>
+    </template>
 
       <!-- Scrollable form body -->
-      <form class="flex-1 overflow-y-auto px-6 py-4 space-y-5" @submit.prevent="handleSubmit">
+      <form class="manifest-create-form space-y-5" @submit.prevent="handleSubmit">
         <div v-if="error" class="text-red-600 dark:text-red-400 text-sm bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded">
           {{ error }}
         </div>
@@ -182,6 +209,7 @@ async function handleSubmit() {
               </label>
               <input
                 v-model="form.namespace"
+                data-autofocus
                 type="text"
                 required
                 pattern="^[a-z][a-z0-9_.]*[a-z0-9]$"
@@ -345,12 +373,20 @@ async function handleSubmit() {
 
         <!-- Actions -->
         <div class="flex justify-end gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-          <button type="button" class="btn-secondary" :disabled="loading" @click="$emit('close')">{{ t("common.cancel") }}</button>
+          <button type="button" class="btn-secondary" :disabled="loading" @click="requestClose">{{ t("common.cancel") }}</button>
           <button type="submit" class="btn-primary" :disabled="loading || !canSubmit">
             {{ loading ? t("config.manifest.creating") : t("config.manifest.create") }}
           </button>
         </div>
       </form>
-    </div>
-  </div>
+  </BaseModal>
+  <ConfirmDialog
+    v-if="confirmDiscardOpen"
+    :title="t('config.unsavedTitle')"
+    :message="t('config.unsavedConfirm')"
+    :confirm-label="t('config.discardChanges')"
+    danger
+    @cancel="confirmDiscardOpen = false"
+    @confirm="discardAndClose"
+  />
 </template>

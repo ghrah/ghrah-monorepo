@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { connectStores } from "./bind.js";
 import { ObserverClient } from "./client.js";
 import { createFrameBatcher, createSyncBatcher, type FrameBatcher } from "./frame-batcher.js";
+import type { ChainTarget } from "./scope.js";
 import { useActionChainsStore } from "./stores/action-chains.js";
 import { useAgentsStore } from "./stores/agents.js";
+import { useBranchesStore } from "./stores/branches.js";
 import { useChangesStore } from "./stores/changes.js";
 import { useChatStore } from "./stores/chat.js";
 import { useConnectionStore } from "./stores/connection.js";
@@ -14,6 +16,7 @@ import { useHitlStore } from "./stores/hitl.js";
 import { useManifestsStore } from "./stores/manifests.js";
 import { useProjectsStore } from "./stores/projects.js";
 import { useRoomsStore } from "./stores/rooms.js";
+import { useSessionsStore } from "./stores/sessions.js";
 import { useTasksStore } from "./stores/tasks.js";
 
 const WS_OPEN = 1;
@@ -47,7 +50,49 @@ function makeMsg(
   payload: Record<string, unknown>,
   extra?: Partial<ServerMessage>,
 ): ServerMessage {
+  if (type === EventType.ACTION_CHAIN_UPDATED) {
+    const agentName = String(payload.agent_name ?? "agent-1");
+    payload = {
+      project_id: "p1",
+      agent_id: `id-${agentName}`,
+      cluster_id: "c1",
+      ...payload,
+      node: {
+        session_id: "s1",
+        created_on_branch_id: "b1",
+        ...((payload.node as Record<string, unknown> | undefined) ?? {}),
+      },
+    };
+  }
+  if (type === EventType.HITL_REQUEST) {
+    payload = { project_id: "p1", agent_id: "a1", cluster_id: "c1", ...payload };
+  }
+  if (type === SystemType.COMMAND_RESULT && payload.original_command === CommandType.LIST_AGENTS) {
+    const data = payload.data as { agents?: Array<Record<string, unknown>> } | undefined;
+    if (Array.isArray(data?.agents)) {
+      data.agents = data.agents.map((agent) => ({
+        project_id: "p1",
+        agent_id:
+          agent.agent_id ??
+          (agent.config as Record<string, unknown> | undefined)?.agent_id ??
+          `id-${String(agent.name)}`,
+        runtime_state: "running",
+        ...agent,
+      }));
+    }
+  }
   return { type, payload, ...extra };
+}
+
+function chainTarget(agentName: string, overrides: Partial<ChainTarget> = {}): ChainTarget {
+  return {
+    projectId: "p1",
+    agentId: `id-${agentName}`,
+    agentName,
+    sessionId: "s1",
+    branchId: "b1",
+    ...overrides,
+  };
 }
 
 function internals(c: ObserverClient): ClientInternals {
@@ -134,33 +179,47 @@ describe("connectStores", () => {
       internals(client)._dispatch(
         EventType.AGENT_SPAWNED,
         makeMsg(EventType.AGENT_SPAWNED, {
+          project_id: "p1",
+          agent_id: "a1",
+          cluster_id: "c1",
+          incarnation_id: "i1",
+          recovery_mode: "fresh",
           name: "agent-1",
           config: { ...DEFAULT_CONFIG, name: "agent-1", system_prompt: "test" },
         }),
       );
 
-      expect(store.agents.has("agent-1")).toBe(true);
-      expect(store.agents.get("agent-1")?.status).toBe("active");
+      expect(store.getAgent({ projectId: "p1", agentId: "a1" })?.status).toBe("active");
     });
 
     it("marks agent terminated on agent_terminated", async () => {
       await connectClient();
       const store = useAgentsStore();
+      const target = chainTarget("agent-1", { agentId: "a1" });
       store.onAgentSpawned({
         name: "agent-1",
-        agent_id: "",
-        project_id: "",
-        cluster_id: "",
-        incarnation_id: "",
+        agent_id: "a1",
+        project_id: "p1",
+        cluster_id: "c1",
+        incarnation_id: "i1",
+        recovery_mode: "",
         config: { ...DEFAULT_CONFIG, name: "agent-1" },
       });
+      useActionChainsStore().setChain(target, [{ id: "n1" } as never]);
 
       internals(client)._dispatch(
         EventType.AGENT_TERMINATED,
-        makeMsg(EventType.AGENT_TERMINATED, { name: "agent-1" }),
+        makeMsg(EventType.AGENT_TERMINATED, {
+          project_id: "p1",
+          agent_id: "a1",
+          cluster_id: "c1",
+          incarnation_id: "i1",
+          name: "agent-1",
+        }),
       );
 
-      expect(store.agents.get("agent-1")?.status).toBe("terminated");
+      expect(store.getAgent({ projectId: "p1", agentId: "a1" })?.status).toBe("terminated");
+      expect(useActionChainsStore().getChain(target)).toHaveLength(0);
     });
   });
 
@@ -222,6 +281,48 @@ describe("connectStores", () => {
       expect(store.rooms.has("r1")).toBe(false);
     });
 
+    it("archive clears active Room state and restore accepts an unarchived stopped Project", async () => {
+      await connectClient();
+      const store = useRoomsStore();
+      const chatStore = useChatStore();
+      useProjectsStore().setProjectsFromList([
+        {
+          project_id: "p1",
+          name: "p1",
+          status: "stopped",
+          archived_at: null,
+        } as never,
+      ]);
+      store.onRoomCreated({ room: makeRoom("r1") as never });
+      store.setActiveRoom("r1");
+      store.setRoomLog("r1", [makeLogEntry("r1") as never]);
+      chatStore.addPendingEntry({
+        projectId: "p1",
+        to: "r1",
+        content: "pending",
+        agentName: "",
+        roomId: "r1",
+      });
+
+      internals(client)._dispatch(
+        EventType.ROOM_ARCHIVED,
+        makeMsg(EventType.ROOM_ARCHIVED, { room: makeRoom("r1", { status: "archived" }) }),
+      );
+
+      expect(store.activeRooms.has("r1")).toBe(false);
+      expect(store.archivedRooms.has("r1")).toBe(true);
+      expect(store.logs.has("r1")).toBe(false);
+      expect(store.activeRoomId).toBeNull();
+      expect(chatStore.allEntries).toHaveLength(0);
+
+      internals(client)._dispatch(
+        EventType.ROOM_RESTORED,
+        makeMsg(EventType.ROOM_RESTORED, { room: makeRoom("r1") }),
+      );
+      expect(store.activeRooms.has("r1")).toBe(true);
+      expect(store.archivedRooms.has("r1")).toBe(false);
+    });
+
     it("room_member_joined / room_member_left upsert envelope room", async () => {
       await connectClient();
       const store = useRoomsStore();
@@ -262,7 +363,14 @@ describe("connectStores", () => {
     it("room_log_appended confirms matching human pending in chat store", async () => {
       await connectClient();
       const chatStore = useChatStore();
-      chatStore.addPendingEntry({ to: "r1", content: "hello", agentName: "", roomId: "r1" });
+      useRoomsStore().onRoomCreated({ room: makeRoom("r1") as never });
+      chatStore.addPendingEntry({
+        projectId: "p1",
+        to: "r1",
+        content: "hello",
+        agentName: "",
+        roomId: "r1",
+      });
       expect(chatStore.allEntries).toHaveLength(1);
 
       internals(client)._dispatch(
@@ -364,6 +472,204 @@ describe("connectStores", () => {
       expect(store.projects.get("p1")?.agents).toHaveLength(1);
     });
 
+    it("project_restored resyncs definitions and action summaries while Agents stay stopped", async () => {
+      await connectClient();
+      const restoredProject = makeProject("p1", { status: "stopped", archived_at: null });
+      const session = {
+        project_id: "p1",
+        agent_id: "a1",
+        cluster_id: "c1",
+        agent_name: "same",
+        session_id: "s1",
+        root_node_id: "root",
+        active_branch_id: "b1",
+        state: "active",
+        system_prompt: "",
+        created_at: "",
+        metadata: {},
+        message_count: 0,
+        iteration_count: 0,
+      };
+      const branch = {
+        branch_id: "b1",
+        session_id: "s1",
+        name: "main",
+        head_node_id: "root",
+        created_at: "",
+        metadata: {},
+      };
+      vi.spyOn(client, "listAgents").mockImplementation(async () => {
+        internals(client)._dispatch(
+          SystemType.COMMAND_RESULT,
+          makeMsg(SystemType.COMMAND_RESULT, {
+            request_id: "restore-agents",
+            success: true,
+            original_command: CommandType.LIST_AGENTS,
+            data: {
+              agents: [
+                {
+                  project_id: "p1",
+                  agent_id: "a1",
+                  name: "same",
+                  runtime_state: "running",
+                },
+              ],
+            },
+          }),
+        );
+        return { request_id: "restore-agents", success: true, data: { agents: [] } } as never;
+      });
+      const listRooms = vi.spyOn(client, "listRooms").mockResolvedValue({
+        request_id: "restore-rooms",
+        success: true,
+        data: { rooms: [] },
+      } as never);
+      vi.spyOn(client, "listSessions").mockResolvedValue({
+        request_id: "restore-sessions",
+        success: true,
+        data: { sessions: [session] },
+      } as never);
+      vi.spyOn(client, "listBranches").mockResolvedValue({
+        request_id: "restore-branches",
+        success: true,
+        data: { branches: [branch] },
+      } as never);
+      const history = vi.spyOn(client, "getChainHistory").mockResolvedValue({
+        request_id: "restore-history",
+        success: true,
+        data: { nodes: [], active_session_id: "s1" },
+      } as never);
+
+      internals(client)._dispatch(
+        EventType.PROJECT_RESTORED,
+        makeMsg(EventType.PROJECT_RESTORED, { project: restoredProject }),
+      );
+
+      await vi.waitFor(() => expect(history).toHaveBeenCalled());
+      expect(listRooms).toHaveBeenCalledWith("p1", "active");
+      expect(useAgentsStore().getAgent({ projectId: "p1", agentId: "a1" })?.status).toBe(
+        "terminated",
+      );
+      expect(
+        useSessionsStore().sessionsForAgent(chainTarget("same", { agentId: "a1" })),
+      ).toHaveLength(1);
+      expect(
+        useBranchesStore().branchesForSession({
+          projectId: "p1",
+          agentId: "a1",
+          agentName: "same",
+          sessionId: "s1",
+        }),
+      ).toHaveLength(1);
+    });
+
+    it("project_deleted clears all p1-derived state without relying on Room events", async () => {
+      await connectClient();
+      const projectsStore = useProjectsStore();
+      const agentsStore = useAgentsStore();
+      const roomsStore = useRoomsStore();
+      const sessionsStore = useSessionsStore();
+      const branchesStore = useBranchesStore();
+      const chainsStore = useActionChainsStore();
+      const p1 = chainTarget("same", { agentId: "a1" });
+      const p2 = { ...p1, projectId: "p2", agentId: "a2" };
+      const agentList = (projectId: string, agentId: string) => [
+        {
+          project_id: projectId,
+          agent_id: agentId,
+          name: "same",
+          runtime_state: "running",
+        },
+      ];
+      projectsStore.setProjectsFromList([makeProject("p1"), makeProject("p2")] as never);
+      agentsStore.replaceProjectAgents("p1", agentList("p1", "a1"), {
+        status: "active",
+        archived_at: null,
+      });
+      agentsStore.replaceProjectAgents("p2", agentList("p2", "a2"), {
+        status: "active",
+        archived_at: null,
+      });
+      const makeRoom = (roomId: string, projectId: string) => ({
+        room_id: roomId,
+        project_id: projectId,
+        name: roomId,
+        status: "active" as const,
+        members: [],
+        seq_watermark: 0,
+        version: 1,
+        created_at: "",
+        updated_at: "",
+        archived_at: null,
+      });
+      roomsStore.replaceProjectRooms("p1", [makeRoom("r1", "p1")], "active");
+      roomsStore.replaceProjectRooms("p2", [makeRoom("r2", "p2")], "active");
+      sessionsStore.replaceAgentSessions(p1, [
+        {
+          project_id: "p1",
+          agent_id: "a1",
+          agent_name: "same",
+          session_id: "s1",
+          root_node_id: "root",
+          active_branch_id: "b1",
+        } as never,
+      ]);
+      branchesStore.replaceSessionBranches(p1, [
+        { branch_id: "b1", session_id: "s1", name: "main", head_node_id: "root" } as never,
+      ]);
+      chainsStore.setChain(p1, [{ id: "n1" } as never]);
+      chainsStore.setChain(p2, [{ id: "n2" } as never]);
+      useChangesStore().onActionChainNode(p1, {
+        id: "n1",
+        action_results: [
+          {
+            ability_name: "write_file",
+            action_result: { outcome: "success", data: { file_path: "/p1" } },
+          },
+        ],
+      } as never);
+      useHitlStore().onHitlRequest({
+        promise_id: "hitl-p1",
+        project_id: "p1",
+        agent_id: "a1",
+        agent_name: "same",
+        ability_name: "write_file",
+        tool_args: {},
+        context: {},
+      } as never);
+      useChatStore().addPendingEntry({
+        projectId: "p1",
+        to: "r1",
+        content: "pending",
+        agentName: "",
+        roomId: "r1",
+      });
+      useTasksStore().setTasksFromList([
+        { task_id: "t1", project_id: "p1" } as never,
+        { task_id: "t2", project_id: "p2" } as never,
+      ]);
+
+      internals(client)._dispatch(
+        EventType.PROJECT_DELETED,
+        makeMsg(EventType.PROJECT_DELETED, { project: makeProject("p1") }),
+      );
+
+      expect(projectsStore.projects.has("p1")).toBe(false);
+      expect(agentsStore.agentsForProject("p1")).toHaveLength(0);
+      expect(agentsStore.agentsForProject("p2")).toHaveLength(1);
+      expect(roomsStore.roomsForProject("p1")).toHaveLength(0);
+      expect(roomsStore.roomsForProject("p2")).toHaveLength(1);
+      expect(sessionsStore.sessionsForAgent(p1)).toHaveLength(0);
+      expect(branchesStore.branchesForSession(p1)).toHaveLength(0);
+      expect(chainsStore.getChain(p1)).toHaveLength(0);
+      expect(chainsStore.getChain(p2)).toHaveLength(1);
+      expect(useChangesStore().changes).toHaveLength(0);
+      expect(useHitlStore().requests).toHaveLength(0);
+      expect(useChatStore().allEntries).toHaveLength(0);
+      expect(useTasksStore().tasks.has("t1")).toBe(false);
+      expect(useTasksStore().tasks.has("t2")).toBe(true);
+    });
+
     it("project_deleted removes project", async () => {
       await connectClient();
       const store = useProjectsStore();
@@ -374,6 +680,101 @@ describe("connectStores", () => {
         makeMsg(EventType.PROJECT_DELETED, { project: makeProject("p1") }),
       );
       expect(store.projects.has("p1")).toBe(false);
+    });
+  });
+
+  describe("session and branch events", () => {
+    const sessionInfo = {
+      project_id: "p1",
+      agent_id: "a1",
+      agent_name: "agent-1",
+      session_id: "s1",
+      root_node_id: "root",
+      active_branch_id: "b1",
+      state: "active",
+      system_prompt: "",
+      created_at: "",
+      metadata: {},
+      message_count: 0,
+      iteration_count: 0,
+    };
+    const branchInfo = {
+      branch_id: "b1",
+      session_id: "s1",
+      name: "main",
+      head_node_id: "root",
+      created_at: "",
+      metadata: {},
+    };
+
+    it("projects active Session and clears its Branches and chains when archived", async () => {
+      await connectClient();
+      const sessionsStore = useSessionsStore();
+      const branchesStore = useBranchesStore();
+      const chainsStore = useActionChainsStore();
+      const target = chainTarget("agent-1", { agentId: "a1" });
+
+      internals(client)._dispatch(
+        EventType.SESSION_ACTIVATED,
+        makeMsg(EventType.SESSION_ACTIVATED, {
+          project_id: "p1",
+          agent_id: "a1",
+          agent_name: "agent-1",
+          session: sessionInfo,
+        }),
+      );
+      branchesStore.replaceSessionBranches(target, [branchInfo]);
+      chainsStore.setChain(target, [{ id: "n1" } as never]);
+      expect(sessionsStore.activeSessionId(target)).toBe("s1");
+
+      internals(client)._dispatch(
+        EventType.SESSION_ARCHIVED,
+        makeMsg(EventType.SESSION_ARCHIVED, {
+          project_id: "p1",
+          agent_id: "a1",
+          agent_name: "agent-1",
+          session_id: "s1",
+        }),
+      );
+
+      expect(sessionsStore.sessionsForAgent(target)).toHaveLength(0);
+      expect(sessionsStore.activeSessionId(target)).toBeNull();
+      expect(branchesStore.branchesForSession(target)).toHaveLength(0);
+      expect(chainsStore.getChain(target)).toHaveLength(0);
+    });
+
+    it("projects active Branch and clears only its chain when deleted", async () => {
+      await connectClient();
+      const branchesStore = useBranchesStore();
+      const chainsStore = useActionChainsStore();
+      const target = chainTarget("agent-1", { agentId: "a1" });
+
+      internals(client)._dispatch(
+        EventType.BRANCH_ACTIVATED,
+        makeMsg(EventType.BRANCH_ACTIVATED, {
+          project_id: "p1",
+          agent_id: "a1",
+          agent_name: "agent-1",
+          branch: branchInfo,
+        }),
+      );
+      chainsStore.setChain(target, [{ id: "n1" } as never]);
+      expect(branchesStore.activeBranchId(target)).toBe("b1");
+
+      internals(client)._dispatch(
+        EventType.BRANCH_DELETED,
+        makeMsg(EventType.BRANCH_DELETED, {
+          project_id: "p1",
+          agent_id: "a1",
+          agent_name: "agent-1",
+          session_id: "s1",
+          branch_id: "b1",
+        }),
+      );
+
+      expect(branchesStore.branchesForSession(target)).toHaveLength(0);
+      expect(branchesStore.activeBranchId(target)).toBeNull();
+      expect(chainsStore.getChain(target)).toHaveLength(0);
     });
   });
 
@@ -465,7 +866,7 @@ describe("connectStores", () => {
         }),
       );
 
-      expect(store.getChain("agent-1")).toHaveLength(1);
+      expect(store.getChain(chainTarget("agent-1"))).toHaveLength(1);
     });
   });
 
@@ -564,7 +965,7 @@ describe("connectStores", () => {
         makeMsg(EventType.ACTION_CHAIN_UPDATED, { agent_name: "agent-1", node }),
       );
 
-      expect(chainStore.getChain("agent-1")).toHaveLength(1);
+      expect(chainStore.getChain(chainTarget("agent-1"))).toHaveLength(1);
       expect(changesStore.changes).toHaveLength(1);
     });
 
@@ -634,8 +1035,8 @@ describe("connectStores", () => {
       );
 
       // chain 分桶：每 agent 1 条
-      expect(chainStore.getChain("agent-A")).toHaveLength(1);
-      expect(chainStore.getChain("agent-B")).toHaveLength(1);
+      expect(chainStore.getChain(chainTarget("agent-A"))).toHaveLength(1);
+      expect(chainStore.getChain(chainTarget("agent-B"))).toHaveLength(1);
     });
   });
 
@@ -660,8 +1061,123 @@ describe("connectStores", () => {
       );
 
       expect(agentsStore.agents.size).toBe(2);
-      expect(agentsStore.agents.has("agent-1")).toBe(true);
-      expect(agentsStore.agents.has("agent-2")).toBe(true);
+      expect(agentsStore.getAgent({ projectId: "p1", agentId: "id-agent-1" })).toBeDefined();
+      expect(agentsStore.getAgent({ projectId: "p1", agentId: "id-agent-2" })).toBeDefined();
+    });
+
+    it("uses request context to clear only the requested Project on an empty agent list", async () => {
+      await connectClient();
+      const agentsStore = useAgentsStore();
+      const sessionsStore = useSessionsStore();
+      const chainsStore = useActionChainsStore();
+      const p1 = chainTarget("same", { agentId: "a1" });
+      const p2 = { ...p1, projectId: "p2", agentId: "a2" };
+      const activeProject = { status: "active" as const, archived_at: null };
+      agentsStore.replaceProjectAgents(
+        "p1",
+        [{ project_id: "p1", agent_id: "a1", name: "same", runtime_state: "running" }],
+        activeProject,
+      );
+      agentsStore.replaceProjectAgents(
+        "p2",
+        [{ project_id: "p2", agent_id: "a2", name: "same", runtime_state: "running" }],
+        activeProject,
+      );
+      sessionsStore.replaceAgentSessions(p1, [
+        {
+          project_id: "p1",
+          agent_id: "a1",
+          cluster_id: "c1",
+          agent_name: "same",
+          session_id: "s1",
+          root_node_id: "root",
+          active_branch_id: "b1",
+          state: "active",
+          system_prompt: "",
+          created_at: "",
+          metadata: {},
+          message_count: 0,
+          iteration_count: 0,
+        },
+      ]);
+      chainsStore.setChain(p1, [{ id: "n1" } as never]);
+      chainsStore.setChain(p2, [{ id: "n2" } as never]);
+      vi.spyOn(client, "getRequestContext").mockReturnValue({
+        command: CommandType.LIST_AGENTS,
+        payload: { project_id: "p1" },
+      });
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "empty-p1",
+          success: true,
+          data: { agents: [] },
+        }),
+      );
+
+      expect(agentsStore.agentsForProject("p1")).toHaveLength(0);
+      expect(agentsStore.agentsForProject("p2")).toHaveLength(1);
+      expect(sessionsStore.sessionsForAgent(p1)).toHaveLength(0);
+      expect(chainsStore.getChain(p1)).toHaveLength(0);
+      expect(chainsStore.getChain(p2)).toHaveLength(1);
+    });
+
+    it("uses request context to replace only the requested active Room bucket with empty", async () => {
+      await connectClient();
+      const roomsStore = useRoomsStore();
+      const room = (roomId: string, projectId: string, status: "active" | "archived") => ({
+        room_id: roomId,
+        project_id: projectId,
+        name: roomId,
+        status,
+        members: [],
+        seq_watermark: 0,
+        version: 1,
+        created_at: "",
+        updated_at: "",
+        archived_at: status === "archived" ? "2026-09-09" : null,
+      });
+      roomsStore.replaceProjectRooms("p1", [room("r1", "p1", "active")], "active");
+      roomsStore.replaceProjectRooms("p2", [room("r2", "p2", "active")], "active");
+      roomsStore.replaceProjectRooms("p1", [room("ra", "p1", "archived")], "archived");
+      roomsStore.setRoomLog("r1", [
+        {
+          id: "e1",
+          room_id: "r1",
+          seq: 1,
+          author: "user",
+          author_type: "human",
+          timestamp: 1,
+          data: { message: "pending" },
+        },
+      ]);
+      useChatStore().addPendingEntry({
+        projectId: "p1",
+        to: "r1",
+        content: "pending",
+        agentName: "",
+        roomId: "r1",
+      });
+      vi.spyOn(client, "getRequestContext").mockReturnValue({
+        command: CommandType.ROOM_LIST,
+        payload: { project_id: "p1", status: "active" },
+      });
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "empty-rooms-p1",
+          success: true,
+          data: { rooms: [] },
+        }),
+      );
+
+      expect(roomsStore.roomsForProject("p1", "active")).toHaveLength(0);
+      expect(roomsStore.roomsForProject("p2", "active")).toHaveLength(1);
+      expect(roomsStore.roomsForProject("p1", "archived")).toHaveLength(1);
+      expect(roomsStore.logs.has("r1")).toBe(false);
+      expect(useChatStore().allEntries).toHaveLength(0);
     });
 
     it("F2: list_agents command_result triggers chain history initial sync", async () => {
@@ -688,6 +1204,8 @@ describe("connectStores", () => {
               instance_manifest_path: "",
               system_prompt: "",
               path_grants: [],
+              runtime_status: "running",
+              runtime_error: "",
             },
             {
               name: "agent-2",
@@ -697,9 +1215,18 @@ describe("connectStores", () => {
               instance_manifest_path: "",
               system_prompt: "",
               path_grants: [],
+              runtime_status: "running",
+              runtime_error: "",
             },
           ],
           task_ids: [],
+          isolation: {
+            agent_path_grants: {},
+            agent_private_dir: true,
+            effect_allowlist: null,
+            hitl_override: null,
+            task_scope: true,
+          },
           status: "active",
           recovery: "resume",
           version: 1,
@@ -709,23 +1236,23 @@ describe("connectStores", () => {
           deleted_at: null,
         },
       ]);
-      vi.spyOn(client, "listSessions").mockImplementation((name: string) =>
+      vi.spyOn(client, "listSessions").mockImplementation((target) =>
         Promise.resolve({
           request_id: "s",
           success: true,
-          data: { sessions: [{ session_id: `s-${name}` }] },
+          data: { sessions: [{ session_id: `s-${target.agentName}` }] },
         } as Awaited<ReturnType<typeof client.listSessions>>),
       );
-      vi.spyOn(client, "listBranches").mockImplementation((name: string) =>
+      vi.spyOn(client, "listBranches").mockImplementation((target) =>
         Promise.resolve({
           request_id: "b",
           success: true,
-          data: { branches: [{ branch_id: `b-${name}` }] },
+          data: { branches: [{ branch_id: `b-${target.agentName}` }] },
         } as Awaited<ReturnType<typeof client.listBranches>>),
       );
 
-      const spy = vi.spyOn(client, "getChainHistory").mockImplementation((name: string) => {
-        const nodes = name === "agent-1" ? [nodeA] : [nodeB];
+      const spy = vi.spyOn(client, "getChainHistory").mockImplementation((target) => {
+        const nodes = target.agentName === "agent-1" ? [nodeA] : [nodeB];
         return Promise.resolve({
           request_id: "r",
           success: true,
@@ -759,12 +1286,34 @@ describe("connectStores", () => {
 
       // fire-and-forget：等待两个 getChainHistory 完成
       await vi.waitFor(() => {
-        expect(spy).toHaveBeenCalledWith("agent-1", "p1", "a1", "s-agent-1", "b-agent-1");
-        expect(spy).toHaveBeenCalledWith("agent-2", "p1", "a2", "s-agent-2", "b-agent-2");
+        expect(spy).toHaveBeenCalledWith({
+          agentName: "agent-1",
+          projectId: "p1",
+          agentId: "a1",
+          sessionId: "s-agent-1",
+          branchId: "b-agent-1",
+        });
+        expect(spy).toHaveBeenCalledWith({
+          agentName: "agent-2",
+          projectId: "p1",
+          agentId: "a2",
+          sessionId: "s-agent-2",
+          branchId: "b-agent-2",
+        });
       });
-      expect(chainStore.getChain("agent-1")).toHaveLength(1);
-      expect(chainStore.getChain("agent-1")[0].id).toBe("na");
-      expect(chainStore.getChain("agent-2")[0].id).toBe("nb");
+      const firstTarget = chainTarget("agent-1", {
+        agentId: "a1",
+        sessionId: "s-agent-1",
+        branchId: "b-agent-1",
+      });
+      const secondTarget = chainTarget("agent-2", {
+        agentId: "a2",
+        sessionId: "s-agent-2",
+        branchId: "b-agent-2",
+      });
+      expect(chainStore.getChain(firstTarget)).toHaveLength(1);
+      expect(chainStore.getChain(firstTarget)[0].id).toBe("na");
+      expect(chainStore.getChain(secondTarget)[0].id).toBe("nb");
     });
 
     it("F2: initial chain sync waits for complete project and agent scope", async () => {
@@ -1031,7 +1580,7 @@ describe("connectStores", () => {
       const listProjectsSpy = vi.spyOn(c, "listProjects").mockResolvedValue({
         request_id: "r2",
         success: true,
-        data: { projects: [] },
+        data: { projects: [{ project_id: "p1" }] },
       } satisfies CommandResultPayload);
       const listRoomsSpy = vi.spyOn(c, "listRooms").mockResolvedValue({
         request_id: "r3",
@@ -1089,14 +1638,18 @@ describe("connectStores", () => {
       const manual = makeManualBatcher();
       await connectClient({ batcher: manual.batcher });
       const roomsStore = useRoomsStore();
-      roomsStore.setRoomsFromList([
-        {
-          room_id: "r1",
-          project_id: "p1",
-          name: "arch",
-          members: [],
-        } as never,
-      ]);
+      roomsStore.replaceProjectRooms(
+        "p1",
+        [
+          {
+            room_id: "r1",
+            project_id: "p1",
+            name: "arch",
+            members: [],
+          } as never,
+        ],
+        "active",
+      );
 
       for (let i = 1; i <= 20; i++) {
         internals(client)._dispatch(
@@ -1139,9 +1692,9 @@ describe("connectStores", () => {
           }),
         );
       }
-      expect(chainsStore.getChain("agent-1")).toHaveLength(0);
+      expect(chainsStore.getChain(chainTarget("agent-1"))).toHaveLength(0);
       manual.drain();
-      expect(chainsStore.getChain("agent-1")).toHaveLength(10);
+      expect(chainsStore.getChain(chainTarget("agent-1"))).toHaveLength(10);
     });
 
     it("unbind cancels pending batched events (no store writes after disconnect)", async () => {

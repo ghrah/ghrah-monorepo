@@ -8,37 +8,49 @@ import type {
 } from "@ghrah/protocol";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import type { RoomTarget } from "../scope.js";
 
-/** room log 缓存上限：最多保留最近访问的 N 个 room（LRU）。 */
+/** room log cache limit (least recently used room is evicted first). */
 export const MAX_CACHED_ROOM_LOGS = 10;
 
 export const useRoomsStore = defineStore("ghrah-rooms", () => {
-  const rooms = ref<Map<string, RoomInfoPayload>>(new Map());
-  /** logs 的 Map 插入序即 LRU 序（最近访问的在尾部）。 */
+  const activeRooms = ref<Map<string, RoomInfoPayload>>(new Map());
+  const archivedRooms = ref<Map<string, RoomInfoPayload>>(new Map());
+  /** Compatibility alias: the shell only consumes active rooms before M4. */
+  const rooms = activeRooms;
   const logs = ref<Map<string, RoomLogEntryPayload[]>>(new Map());
   const activeRoomId = ref<string | null>(null);
 
-  const roomList = computed(() => [...rooms.value.values()]);
-
-  const activeRoom = computed(() => {
-    if (!activeRoomId.value) return null;
-    return rooms.value.get(activeRoomId.value) ?? null;
-  });
-
+  const roomList = computed(() => [...activeRooms.value.values()]);
+  const archivedRoomList = computed(() => [...archivedRooms.value.values()]);
+  const activeRoom = computed(() =>
+    activeRoomId.value ? (activeRooms.value.get(activeRoomId.value) ?? null) : null,
+  );
   const activeRoomLog = computed<RoomLogEntryPayload[]>(() => {
     if (!activeRoomId.value) return [];
-    const list = logs.value.get(activeRoomId.value);
-    if (!list) return [];
-    return [...list].sort((a, b) => a.seq - b.seq);
+    return [...(logs.value.get(activeRoomId.value) ?? [])].sort((a, b) => a.seq - b.seq);
   });
 
-  function upsertRoom(room: RoomInfoPayload) {
-    const next = new Map(rooms.value);
-    next.set(room.room_id, room);
-    rooms.value = next;
+  function roomsForProject(projectId: string, status: "active" | "archived" = "active") {
+    const source = status === "active" ? activeRooms.value : archivedRooms.value;
+    return [...source.values()].filter((room) => room.project_id === projectId);
   }
 
-  /** LRU touch：把 roomId 移到 Map 尾部；超限淘汰最久未访问的（不淘汰 active room）。 */
+  function upsertRoom(room: RoomInfoPayload, allowRestore = true) {
+    const active = new Map(activeRooms.value);
+    const archived = new Map(archivedRooms.value);
+    if (room.status === "archived") {
+      active.delete(room.room_id);
+      archived.set(room.room_id, room);
+      if (activeRoomId.value === room.room_id) activeRoomId.value = null;
+    } else if (allowRestore) {
+      archived.delete(room.room_id);
+      active.set(room.room_id, room);
+    }
+    activeRooms.value = active;
+    archivedRooms.value = archived;
+  }
+
   function touchLog(roomId: string) {
     const map = logs.value;
     const list = map.get(roomId);
@@ -66,14 +78,36 @@ export const useRoomsStore = defineStore("ghrah-rooms", () => {
     upsertRoom(payload.room);
   }
 
+  function onRoomArchived(payload: RoomEventPayload) {
+    upsertRoom({ ...payload.room, status: "archived" });
+  }
+
+  function onRoomRestored(payload: RoomEventPayload, projectOperable: boolean) {
+    upsertRoom({ ...payload.room, status: "active" }, projectOperable);
+  }
+
+  function clearRoom(target: RoomTarget) {
+    const room = activeRooms.value.get(target.roomId) ?? archivedRooms.value.get(target.roomId);
+    if (room && room.project_id !== target.projectId) return;
+    const active = new Map(activeRooms.value);
+    const archived = new Map(archivedRooms.value);
+    active.delete(target.roomId);
+    archived.delete(target.roomId);
+    activeRooms.value = active;
+    archivedRooms.value = archived;
+    logs.value.delete(target.roomId);
+    if (activeRoomId.value === target.roomId) activeRoomId.value = null;
+  }
+
+  function clearRoomLog(target: RoomTarget) {
+    const room = activeRooms.value.get(target.roomId) ?? archivedRooms.value.get(target.roomId);
+    if (room && room.project_id !== target.projectId) return;
+    logs.value.delete(target.roomId);
+    if (activeRoomId.value === target.roomId) activeRoomId.value = null;
+  }
+
   function onRoomDeleted(payload: RoomDeletedEventPayload) {
-    const next = new Map(rooms.value);
-    next.delete(payload.room_id);
-    rooms.value = next;
-    logs.value.delete(payload.room_id);
-    if (activeRoomId.value === payload.room_id) {
-      activeRoomId.value = null;
-    }
+    clearRoom({ projectId: payload.project_id, roomId: payload.room_id });
   }
 
   function onRoomMemberJoined(payload: RoomMemberEventPayload) {
@@ -93,28 +127,50 @@ export const useRoomsStore = defineStore("ghrah-rooms", () => {
       list = [];
       map.set(entry.room_id, list);
     }
-    // dedup by entry.id（重连 replay）
-    if (list.some((e) => e.id === entry.id)) return;
-    // 按 seq 有序插入：正常路径 append 到尾部，乱序/补漏插到对应位置
-    let idx = list.length;
-    while (idx > 0 && list[idx - 1].seq > entry.seq) idx -= 1;
-    list.splice(idx, 0, entry);
+    if (list.some((existing) => existing.id === entry.id)) return;
+    let index = list.length;
+    while (index > 0 && list[index - 1].seq > entry.seq) index -= 1;
+    list.splice(index, 0, entry);
     touchLog(entry.room_id);
   }
 
-  function setRoomsFromList(list: RoomInfoPayload[]) {
-    rooms.value = new Map(list.map((r) => [r.room_id, r]));
+  function replaceProjectRooms(
+    projectId: string,
+    list: RoomInfoPayload[],
+    status: "active" | "archived",
+  ): RoomTarget[] {
+    const previousActive = roomsForProject(projectId, "active");
+    const source = status === "active" ? activeRooms.value : archivedRooms.value;
+    const next = new Map([...source.entries()].filter(([, room]) => room.project_id !== projectId));
+    const accepted = list.filter((room) => room.project_id === projectId && room.status === status);
+    for (const room of accepted) next.set(room.room_id, room);
+    if (status === "active") {
+      activeRooms.value = next;
+      const archived = new Map(archivedRooms.value);
+      for (const room of accepted) archived.delete(room.room_id);
+      archivedRooms.value = archived;
+    } else {
+      archivedRooms.value = next;
+      const active = new Map(activeRooms.value);
+      for (const room of accepted) active.delete(room.room_id);
+      activeRooms.value = active;
+    }
+    const retainedActiveIds = new Set(
+      roomsForProject(projectId, "active").map((room) => room.room_id),
+    );
+    const removed = previousActive
+      .filter((room) => !retainedActiveIds.has(room.room_id))
+      .map((room) => ({ projectId, roomId: room.room_id }));
+    if (activeRoomId.value && removed.some((target) => target.roomId === activeRoomId.value)) {
+      activeRoomId.value = null;
+    }
+    return removed;
   }
 
-  /** 灌入 room_get_log 结果（按 id 并集去重 + seq 排序）。
-   *
-   * 并集而非整替：合帧分发下，get_log 回执与本帧内已落地的增量事件可能交错，
-   * 整替会丢掉回执窗口之外的已见条目（append-only 语义下并集幂等安全）。
-   */
   function setRoomLog(roomId: string, entries: RoomLogEntryPayload[]) {
     const existing = logs.value.get(roomId) ?? [];
-    const byId = new Map(existing.map((e) => [e.id, e] as const));
-    for (const e of entries) byId.set(e.id, e);
+    const byId = new Map(existing.map((entry) => [entry.id, entry] as const));
+    for (const entry of entries) byId.set(entry.id, entry);
     logs.value.set(
       roomId,
       [...byId.values()].sort((a, b) => a.seq - b.seq),
@@ -123,34 +179,57 @@ export const useRoomsStore = defineStore("ghrah-rooms", () => {
   }
 
   function setActiveRoom(roomId: string | null) {
-    activeRoomId.value = roomId;
-    if (roomId !== null && logs.value.has(roomId)) {
-      touchLog(roomId);
-    }
+    activeRoomId.value = roomId !== null && activeRooms.value.has(roomId) ? roomId : null;
+    if (activeRoomId.value && logs.value.has(activeRoomId.value)) touchLog(activeRoomId.value);
+  }
+
+  function clearProject(projectId: string) {
+    const roomIds = new Set([
+      ...roomsForProject(projectId, "active").map((room) => room.room_id),
+      ...roomsForProject(projectId, "archived").map((room) => room.room_id),
+    ]);
+    activeRooms.value = new Map(
+      [...activeRooms.value.entries()].filter(([, room]) => room.project_id !== projectId),
+    );
+    archivedRooms.value = new Map(
+      [...archivedRooms.value.entries()].filter(([, room]) => room.project_id !== projectId),
+    );
+    for (const roomId of roomIds) logs.value.delete(roomId);
+    if (activeRoomId.value && roomIds.has(activeRoomId.value)) activeRoomId.value = null;
   }
 
   function clearAll() {
-    rooms.value = new Map();
+    activeRooms.value = new Map();
+    archivedRooms.value = new Map();
     logs.value = new Map();
     activeRoomId.value = null;
   }
 
   return {
     rooms,
+    activeRooms,
+    archivedRooms,
     logs,
     activeRoomId,
     roomList,
+    archivedRoomList,
     activeRoom,
     activeRoomLog,
+    roomsForProject,
     onRoomCreated,
     onRoomUpdated,
+    onRoomArchived,
+    onRoomRestored,
     onRoomDeleted,
     onRoomMemberJoined,
     onRoomMemberLeft,
     onRoomLogAppended,
-    setRoomsFromList,
+    replaceProjectRooms,
     setRoomLog,
     setActiveRoom,
+    clearRoom,
+    clearRoomLog,
+    clearProject,
     clearAll,
   };
 });

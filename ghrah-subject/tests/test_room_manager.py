@@ -117,7 +117,8 @@ async def test_update_optimistic_lock_and_event(tmp_path: Path) -> None:
             {"room_id": room["room_id"], "name": "v3", "expected_version": 1},
         )
         assert not conflict["success"]
-        assert "version conflict" in conflict["error"]
+        assert conflict["error"] == "room_version_conflict"
+        assert "version conflict" in conflict["error_detail"]
     finally:
         await m.store.stop()
 
@@ -207,7 +208,8 @@ async def test_archive_restore_guards_and_preserves_room_aggregate(tmp_path: Pat
             "room_restore",
             {"room_id": room["room_id"], "expected_version": joined["version"]},
         )
-        assert "version conflict" in conflict["error"]
+        assert conflict["error"] == "room_version_conflict"
+        assert "version conflict" in conflict["error_detail"]
         restored = _data(
             await m.handle_command(
                 "room_restore",
@@ -343,7 +345,8 @@ async def test_delete_permanently_removes_logs_without_force(tmp_path: Path) -> 
             "room_delete",
             {"room_id": room["room_id"], "expected_version": room["version"]},
         )
-        assert "version conflict" in conflict["error"]
+        assert conflict["error"] == "room_version_conflict"
+        assert "version conflict" in conflict["error_detail"]
         assert await m.store.count_logs(room["room_id"]) == 1
 
         agents_before = set(PROJECT_AGENTS)

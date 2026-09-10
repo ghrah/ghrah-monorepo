@@ -263,9 +263,8 @@ class ProjectRecord(BaseModel):
 
         recovery 为 ``RecoveryAction.value`` 字符串，时间戳 ISO str，含
         version/archived_at/deleted_at/cluster_ids/workspaces/agents/task_ids。
-        本 dict 为 ``ProjectInfoPayload`` 的**超集**：额外含 ``isolation`` 字段
-        （protocol payload schema 不含该键）。Core/Observer 反序列化时 Pydantic
-        默认 ``extra='ignore'`` 忽略该键，故安全；subject 侧内部使用 isolation。
+        ``isolation`` 已纳入 ``ProjectInfoPayload``，Observer 可对运行时实际返回的
+        隔离配置进行强类型读取。
         """
         return self.model_dump(mode="json")
 

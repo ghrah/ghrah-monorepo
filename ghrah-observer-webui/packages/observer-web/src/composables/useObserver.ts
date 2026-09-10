@@ -1,13 +1,17 @@
 import {
   type AbilityManifestInfo,
   type AgentManifestInfo,
+  type AgentTarget,
+  type ChainTarget,
   type CreateProjectOptions,
   connectStores,
   extractAbilityList,
   extractAgentList,
   extractManifestEntry,
   extractValidationResult,
+  type ListProjectsOptions,
   ObserverClient,
+  type SessionTarget,
   useActionChainsStore,
   useAgentsStore,
   useChangesStore,
@@ -131,8 +135,7 @@ export function useObserver() {
     return connect(connection.serverUrl);
   }
 
-  async function sendMessage(target: string, content: string) {
-    if (!target) return null;
+  async function sendMessage(target: AgentTarget, content: string) {
     return withClient((c) => c.sendMessage(target, content));
   }
 
@@ -144,23 +147,25 @@ export function useObserver() {
   }
 
   async function spawnAgent(config: AgentConfigPayload, manifestRef?: string | null) {
-    return withClient((c) => c.spawnAgent(config, null, manifestRef ?? null));
+    const projectId = projects.activeProjectId;
+    if (!projectId) return null;
+    return withClient((c) => c.spawnAgent(projectId, config, null, manifestRef ?? null));
   }
 
-  async function terminateAgent(name: string) {
-    return withClient((c) => c.terminateAgent(name));
+  async function terminateAgent(target: AgentTarget) {
+    return withClient((c) => c.terminateAgent(target));
   }
 
-  async function createWorkspace(agentName: string) {
-    return withClient((c) => c.createWorkspace(agentName));
+  async function createWorkspace(target: AgentTarget) {
+    return withClient((c) => c.createWorkspace(target));
   }
 
-  async function workspaceSnapshot(agentName: string, message = "") {
-    return withClient((c) => c.workspaceSnapshot(agentName, message));
+  async function workspaceSnapshot(target: AgentTarget, message = "") {
+    return withClient((c) => c.workspaceSnapshot(target, message));
   }
 
-  async function workspaceDiff(agentName: string, snapshotId?: string | null) {
-    return withClient((c) => c.workspaceDiff(agentName, snapshotId ?? undefined));
+  async function workspaceDiff(target: AgentTarget, snapshotId?: string | null) {
+    return withClient((c) => c.workspaceDiff(target, snapshotId ?? undefined));
   }
 
   // ── Room / Project / 导航 ──
@@ -175,16 +180,37 @@ export function useObserver() {
     );
   }
 
-  async function listRooms(projectId?: string | null) {
-    return withClient((c) => c.listRooms(projectId ?? undefined));
+  async function listRooms(projectId?: string | null, status?: string | null) {
+    return withClient((c) => c.listRooms(projectId ?? undefined, status ?? undefined));
   }
 
   async function createRoom(projectId: string, name: string) {
     return withClient((c) => c.createRoom(projectId, name));
   }
 
-  async function joinRoom(roomId: string, subject: string, subjectType: "agent" | "human") {
-    return withClient((c) => c.joinRoom(roomId, subject, subjectType));
+  async function updateRoom(roomId: string, name: string, expectedVersion: number) {
+    return withClient((c) => c.updateRoom(roomId, name, expectedVersion));
+  }
+
+  async function archiveRoom(roomId: string, expectedVersion: number) {
+    return withClient((c) => c.archiveRoom({ roomId, expectedVersion }));
+  }
+
+  async function deleteRoom(roomId: string, expectedVersion: number) {
+    return withClient((c) => c.deleteRoom({ roomId, expectedVersion }));
+  }
+
+  async function restoreRoom(roomId: string, expectedVersion: number) {
+    return withClient((c) => c.restoreRoom({ roomId, expectedVersion }));
+  }
+
+  async function joinRoom(
+    roomId: string,
+    subject: string,
+    subjectType: "agent" | "human",
+    subjectName?: string,
+  ) {
+    return withClient((c) => c.joinRoom(roomId, subject, subjectType, subjectName));
   }
 
   async function leaveRoom(roomId: string, subject: string) {
@@ -193,20 +219,80 @@ export function useObserver() {
 
   /** 拉取 room 历史；bind 的 ROOM_GET_LOG 处理会把结果灌入 rooms store。 */
   async function getRoomLog(roomId: string) {
-    const result = await withClient((c) => c.getRoomLog(roomId));
-    // 空历史时 bind 无法从 entries 反推 room_id，这里补灌空缓存避免重复拉取。
-    if (result?.success && !rooms.logs.has(roomId)) {
-      rooms.setRoomLog(roomId, []);
-    }
-    return result;
+    return withClient((c) => c.getRoomLog(roomId));
   }
 
-  async function listProjects() {
-    return withClient((c) => c.listProjects());
+  async function listProjects(options: ListProjectsOptions = {}) {
+    return withClient((c) => c.listProjects(options));
   }
 
   async function createProject(name: string, options: CreateProjectOptions) {
     return withClient((c) => c.createProject(name, options));
+  }
+
+  async function updateProject(
+    projectId: string,
+    fields: {
+      name?: string | null;
+      description?: string | null;
+      manifestRef?: string | null;
+      expectedVersion?: number | null;
+    },
+  ) {
+    return withClient((c) => c.updateProject(projectId, fields));
+  }
+
+  async function archiveProject(projectId: string, expectedVersion: number) {
+    return withClient((c) => c.archiveProject({ projectId, expectedVersion }));
+  }
+
+  async function restoreProject(projectId: string, expectedVersion: number) {
+    return withClient((c) => c.restoreProject({ projectId, expectedVersion }));
+  }
+
+  async function deleteProject(projectId: string, expectedVersion: number, cascadeRooms = false) {
+    return withClient((c) => c.deleteProject({ projectId, expectedVersion, cascadeRooms }));
+  }
+
+  async function listAgents(projectId: string) {
+    return withClient((c) => c.listAgents(projectId));
+  }
+
+  async function listSessions(target: AgentTarget) {
+    return withClient((c) => c.listSessions(target));
+  }
+
+  async function createSession(target: AgentTarget, options: { originSessionId?: string } = {}) {
+    return withClient((c) =>
+      c.createSession(target, {
+        originSessionId: options.originSessionId,
+      }),
+    );
+  }
+
+  async function activateSession(target: SessionTarget) {
+    return withClient((c) => c.activateSession(target));
+  }
+
+  async function listBranches(target: SessionTarget) {
+    return withClient((c) => c.listBranches(target));
+  }
+
+  async function createBranch(
+    target: SessionTarget,
+    name: string,
+    options: { fromNodeId?: string; parentBranchId?: string } = {},
+  ) {
+    return withClient((c) =>
+      c.createBranch(target, name, {
+        fromNodeId: options.fromNodeId,
+        parentBranchId: options.parentBranchId,
+      }),
+    );
+  }
+
+  async function activateBranch(target: ChainTarget) {
+    return withClient((c) => c.activateBranch(target));
   }
 
   /** 切换 active room；缓存缺失时拉历史。 */
@@ -221,8 +307,8 @@ export function useObserver() {
     projects.setActiveProject(projectId);
   }
 
-  function selectAgent(name: string | null) {
-    agents.selectAgent(name);
+  function selectAgent(target: AgentTarget | null) {
+    agents.selectAgent(target);
   }
 
   // ── Manifest: Ability ──
@@ -350,11 +436,26 @@ export function useObserver() {
     roomSend,
     listRooms,
     createRoom,
+    updateRoom,
+    archiveRoom,
+    restoreRoom,
+    deleteRoom,
     joinRoom,
     leaveRoom,
     getRoomLog,
     listProjects,
     createProject,
+    updateProject,
+    archiveProject,
+    restoreProject,
+    deleteProject,
+    listAgents,
+    listSessions,
+    createSession,
+    activateSession,
+    listBranches,
+    createBranch,
+    activateBranch,
     switchRoom,
     switchProject,
     selectAgent,

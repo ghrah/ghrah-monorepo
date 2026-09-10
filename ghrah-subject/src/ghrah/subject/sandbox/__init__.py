@@ -4,7 +4,6 @@ from ghrah.subject.sandbox.executor import CommandResult, SandboxExecutor, Sandb
 from ghrah.subject.sandbox.workspace import (
     AgentWorkspace,
     SnapshotError,
-    SnapshotInfo,
     WorkspaceManager,
     WorkspaceStatus,
 )
@@ -16,6 +15,5 @@ __all__ = [
     "WorkspaceManager",
     "AgentWorkspace",
     "WorkspaceStatus",
-    "SnapshotInfo",
     "SnapshotError",
 ]

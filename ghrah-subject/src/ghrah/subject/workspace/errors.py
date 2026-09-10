@@ -10,12 +10,12 @@ __all__ = ["SnapshotError", "WorkspaceProviderError"]
 
 
 class WorkspaceProviderError(Exception):
-    """Workspace provider 操作错误（init/adopt/status/destroy/版本能力）。"""
+    """Workspace provider 操作错误（init/status/注册校验）。"""
 
 
 class SnapshotError(WorkspaceProviderError):
-    """快照操作错误（git provider 版本能力专用）。
+    """快照操作错误（legacy git 版本能力专用；现仅作兼容 re-export 保留，
+    挂载语义下 snapshot/rollback/diff 已整体移除）。
 
-    沿用旧 :class:`ghrah.subject.sandbox.workspace.SnapshotError` 语义，
-    兼容层 re-export 此名以保持现有调用方零改动。
+    兼容层 re-export 此名以保持既有调用方零改动。
     """

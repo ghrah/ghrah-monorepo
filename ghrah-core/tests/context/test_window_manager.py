@@ -353,9 +353,9 @@ class TestWindowManager:
     """WindowManager 策略组合器测试。"""
 
     def test_init_default_max_tokens(self) -> None:
-        """默认 max_tokens 为 4096。"""
+        """默认 max_tokens 为 32768（DEFAULT_WINDOW_MAX_TOKENS）。"""
         wm = WindowManager()
-        assert wm.max_tokens == 4096
+        assert wm.max_tokens == 32768
 
     def test_init_custom_max_tokens(self) -> None:
         """自定义 max_tokens。"""
@@ -473,3 +473,126 @@ class TestWindowManager:
         wm = WindowManager()
         result = await wm.apply(msgs)
         assert len(result) == 2
+
+
+# ----------------------------------------------------------------
+# TestWindowManagerBudgetShortCircuit
+# ----------------------------------------------------------------
+
+
+class _FlaggedNoOp(WindowStrategy):
+    """带 skip_when_under_budget 开关的记录型测试策略。"""
+
+    def __init__(self, name: str, skip_when_under_budget: bool) -> None:
+        self._name = name
+        self.skip_when_under_budget = skip_when_under_budget
+        self.applied = 0
+
+    async def apply(self, messages: list, token_budget: int) -> list:
+        self.applied += 1
+        return list(messages)
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+
+class TestWindowManagerBudgetShortCircuit:
+    """WindowManager 预算短路语义测试（skip_when_under_budget）。"""
+
+    @pytest.mark.asyncio
+    async def test_under_budget_skips_flagged_strategies(self) -> None:
+        """预算内跳过 skip_when_under_budget=True 的策略，其余照常执行。"""
+        flagged = _FlaggedNoOp("flagged", skip_when_under_budget=True)
+        unflagged = _FlaggedNoOp("unflagged", skip_when_under_budget=False)
+        msg = _human("hi")
+        wm = WindowManager(strategies=[flagged, unflagged], max_tokens=10000)
+
+        result = await wm.apply([msg])
+
+        assert result == [msg]
+        assert flagged.applied == 0
+        assert unflagged.applied == 1
+
+    @pytest.mark.asyncio
+    async def test_over_budget_runs_all_strategies(self) -> None:
+        """超预算时全部策略执行。"""
+        flagged = _FlaggedNoOp("flagged", skip_when_under_budget=True)
+        unflagged = _FlaggedNoOp("unflagged", skip_when_under_budget=False)
+        wm = WindowManager(strategies=[flagged, unflagged], max_tokens=1)
+
+        await wm.apply([_human("x" * 100)])
+
+        assert flagged.applied == 1
+        assert unflagged.applied == 1
+
+    @pytest.mark.asyncio
+    async def test_max_tokens_override_respected_in_short_circuit(self) -> None:
+        """短路判断使用 apply 传入的 max_tokens 覆盖值。"""
+        flagged = _FlaggedNoOp("flagged", skip_when_under_budget=True)
+        wm = WindowManager(strategies=[flagged], max_tokens=1)
+
+        await wm.apply([_human("x" * 100)], max_tokens=10000)
+
+        assert flagged.applied == 0
+
+    @pytest.mark.asyncio
+    async def test_default_pipeline_folds_under_budget(self) -> None:
+        """默认管道回归：预算内超长 tool result 仍被 tool_call_fold 折叠。"""
+        from ghrah.chat.factory import ChatMessageFactory
+        from ghrah.context.strategies.tool_call_fold import ToolCallFoldStrategy
+
+        tool_msg = ChatMessage.tool(tool_call_id="tc1", content="y" * 1000, name="read_file")
+        wm = WindowManager(
+            strategies=[
+                ToolCallFoldStrategy(max_content_length=100, message_factory=ChatMessageFactory())
+            ],
+            max_tokens=100000,
+        )
+
+        result = await wm.apply([tool_msg])
+
+        content = result[0].content_blocks[0].content
+        assert len(content) < 1000
+        assert "truncated" in content
+
+
+class TestWindowManagerCompactionDrain:
+    """WindowManager.drain_compaction_records 测试。"""
+
+    @pytest.mark.asyncio
+    async def test_drain_collects_strategy_records(self) -> None:
+        """duck-typing 收集策略的 drain_compaction_record 返回值，取出后清空。"""
+        compaction_record = {"strategy": "llm_summary", "summarized_messages": 3}
+
+        class _DrainStrategy(WindowStrategy):
+            skip_when_under_budget = True
+            record: dict | None = None
+
+            async def apply(self, messages: list, token_budget: int) -> list:
+                self.record = compaction_record
+                return list(messages)
+
+            def drain_compaction_record(self) -> dict | None:
+                record = self.record
+                self.record = None
+                return record
+
+            @property
+            def name(self) -> str:
+                return "drain"
+
+        strategy = _DrainStrategy()
+        wm = WindowManager(strategies=[strategy], max_tokens=1)
+        await wm.apply([_human("x" * 100)])
+
+        assert wm.drain_compaction_records() == [compaction_record]
+        assert wm.drain_compaction_records() == []
+
+    @pytest.mark.asyncio
+    async def test_drain_ignores_strategies_without_hook(self) -> None:
+        """未实现 drain_compaction_record 的策略被忽略。"""
+        wm = WindowManager(strategies=[NoOpStrategy()], max_tokens=1)
+        await wm.apply([_human("x" * 100)])
+
+        assert wm.drain_compaction_records() == []

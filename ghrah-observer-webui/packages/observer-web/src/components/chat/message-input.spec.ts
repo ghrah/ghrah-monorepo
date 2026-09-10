@@ -33,7 +33,7 @@ function roomWithAgents(id: string, agents: string[]): RoomInfoPayload {
 function setup(agentsInRoom: string[] = ["frontend", "backend"]) {
   setActivePinia(createPinia());
   const rooms = useRoomsStore();
-  rooms.setRoomsFromList([roomWithAgents("r1", agentsInRoom)]);
+  rooms.replaceProjectRooms("p1", [roomWithAgents("r1", agentsInRoom)], "active");
   rooms.setActiveRoom("r1");
   return { rooms };
 }
@@ -114,7 +114,7 @@ describe("MessageInput", () => {
   it("无 active room 成员时不渲染 chips", () => {
     setActivePinia(createPinia());
     const rooms = useRoomsStore();
-    rooms.setRoomsFromList([roomWithAgents("r1", [])]);
+    rooms.replaceProjectRooms("p1", [roomWithAgents("r1", [])], "active");
     rooms.setActiveRoom("r1");
     const wrapper = mount(MessageInput, { props: { disabled: false } });
     expect(wrapper.findAll('button[type="button"]')).toHaveLength(0);
@@ -132,7 +132,7 @@ describe("MessageInput", () => {
         joined_at: "",
       },
     ];
-    rooms.setRoomsFromList([stableRoom]);
+    rooms.replaceProjectRooms("p1", [stableRoom], "active");
     rooms.setActiveRoom("r1");
 
     const wrapper = mount(MessageInput, { props: { disabled: false } });

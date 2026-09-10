@@ -14,7 +14,7 @@ from ghrah.subject.room.models import make_room_log_record, make_room_record
 from ghrah.subject.room.store import RoomStore
 from ghrah.subject.task.models import make_task_record
 from ghrah.subject.task.store import TaskStore
-from ghrah.subject.workspace.providers.git import path_to_locator
+from ghrah.subject.workspace.locator import path_to_locator
 
 
 async def test_task_records_migrate_to_project_root(tmp_path: Path) -> None:

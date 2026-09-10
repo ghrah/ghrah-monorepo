@@ -4,5 +4,6 @@
   "data": {
     "name": "agent-1"
   },
-  "error": null
+  "error": null,
+  "error_detail": null
 }

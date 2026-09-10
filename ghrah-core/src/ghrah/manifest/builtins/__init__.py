@@ -20,12 +20,14 @@ _BUILTIN_YAML_NAMES: tuple[str, ...] = (
     "ghrah.fs.delete_file",
     "ghrah.fs.move_file",
     "ghrah.fs.list_directory",
+    "ghrah.fs.search_files",
     "ghrah.shell.execute_command",
     "ghrah.cluster.query_agents",
     "ghrah.cluster.send_message",
     "ghrah.cluster.broadcast_message",
     "ghrah.cluster.spawn_agent",
     "ghrah.cluster.terminate_agent",
+    "ghrah.cluster.query_manifests",
 )
 
 

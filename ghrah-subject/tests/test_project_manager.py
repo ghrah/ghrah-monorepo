@@ -17,8 +17,8 @@ from ghrah.subject.project.paths import ProjectPaths
 from ghrah.subject.project.store import ProjectStore
 from ghrah.subject.room.models import make_room_record
 from ghrah.subject.room.store import RoomStore
+from ghrah.subject.workspace.locator import path_to_locator
 from ghrah.subject.workspace.models import WorkspaceRecord
-from ghrah.subject.workspace.providers.git import path_to_locator
 
 # ─── fakes ───
 

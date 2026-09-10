@@ -14,6 +14,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ghrah.abilities.builtin.conversation import ConversationAbility
+from ghrah.abilities.builtin.end_task import EndTaskAbility
 from ghrah.chat.message import ChatMessage
 from ghrah.communication.errors import AgentNotFoundError, RegistryError
 from ghrah.communication.supervisor import SupervisorActor
@@ -72,7 +74,9 @@ class TestSupervisorActor:
         supervisor._registry.register("test-agent", sample_config, mock_handle)
 
         with pytest.raises(RegistryError, match="already registered"):
-            await supervisor.spawn_agent(sample_config)
+            await supervisor.spawn_agent(
+                sample_config, abilities=[ConversationAbility(), EndTaskAbility()]
+            )
 
     @pytest.mark.asyncio
     async def test_terminate_agent(self, supervisor: SupervisorActor) -> None:
@@ -170,6 +174,102 @@ class TestSupervisorActor:
         result = supervisor._resolve_timeout("infinite-agent", None)
         assert result == -1
 
+    # ----------------------------------------------------------------
+    # fail-closed 能力语义（四态收敛）
+    # ----------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_spawn_empty_abilities_raises(self) -> None:
+        """[] -> raise：零能力 agent 是僵尸（无法回复，烧满 max_iterations）。"""
+        supervisor = SupervisorActor()
+        with pytest.raises(RegistryError, match="zero abilities"):
+            await supervisor.spawn_agent(AgentConfig(name="zombie"), abilities=[])
+
+    @pytest.mark.asyncio
+    async def test_spawn_none_without_default_raises(self) -> None:
+        """None + 未配置 default_abilities -> raise，指路显式通道。"""
+        supervisor = SupervisorActor()
+        with pytest.raises(RegistryError, match="no default_abilities configured"):
+            await supervisor.spawn_agent(AgentConfig(name="orphan"))
+
+    @pytest.mark.asyncio
+    async def test_spawn_none_with_default_abilities_injects(self) -> None:
+        """None + 已配置 default_abilities -> 注入配置集（部署方显式声明）。"""
+        supervisor = SupervisorActor(
+            default_abilities=["conversation", "end_task"],
+            max_cluster_members=10,
+        )
+        await supervisor.spawn_agent(AgentConfig(name="configured"))
+
+        handle = await supervisor.get_agent_handle("configured")
+        ability_names = set(handle._abilities.keys())
+        assert {"conversation", "end_task"} <= ability_names
+
+    @pytest.mark.asyncio
+    async def test_spawn_none_with_unknown_default_ability_raises(self) -> None:
+        """配置集含 unknown 名 -> spawn 期 fail-closed（装配错误启动期暴露）。"""
+        supervisor = SupervisorActor(default_abilities=["conversation", "no_such_ability"])
+        with pytest.raises(RegistryError, match="unknown ability type 'no_such_ability'"):
+            await supervisor.spawn_agent(AgentConfig(name="broken-assembly"))
+
+    @pytest.mark.asyncio
+    async def test_spawn_respects_max_cluster_members(self) -> None:
+        """超限 raise：集群宽度硬阻断。"""
+        supervisor = SupervisorActor(max_cluster_members=1)
+
+        async def _spawn(name: str) -> None:
+            await supervisor.spawn_agent(
+                AgentConfig(name=name),
+                abilities=[ConversationAbility(), EndTaskAbility()],
+            )
+
+        await _spawn("first")
+        with pytest.raises(RegistryError, match="member limit reached"):
+            await _spawn("second")
+
+
+class TestGetClusterContext:
+    """get_cluster_context：集群身份注入的数据源（C2c）。"""
+
+    def test_context_shape_and_tags(self) -> None:
+        """cluster_id + 成员清单（含 manifest tags 透传）。"""
+        supervisor = SupervisorActor(cluster_id="cluster-x")
+        supervisor._registry.register(
+            "planner",
+            AgentConfig(name="planner", description="任务规划"),
+            MagicMock(),
+            tags=["planning", "core"],
+        )
+        supervisor._registry.register(
+            "coder",
+            AgentConfig(name="coder", description="代码编写"),
+            MagicMock(),
+        )
+
+        ctx = supervisor.get_cluster_context()
+        assert ctx["cluster_id"] == "cluster-x"
+        assert len(ctx["members"]) == 2
+        planner = next(m for m in ctx["members"] if m["name"] == "planner")
+        assert planner["description"] == "任务规划"
+        assert planner["tags"] == ["planning", "core"]
+        coder = next(m for m in ctx["members"] if m["name"] == "coder")
+        assert coder["tags"] == []
+
+    def test_member_cap_truncates(self) -> None:
+        """截断上限：成员 ≤ 20（prompt 固定开销守恒）。"""
+        from ghrah.communication.supervisor import _MAX_CONTEXT_MEMBERS
+
+        supervisor = SupervisorActor(cluster_id="c")
+        for i in range(_MAX_CONTEXT_MEMBERS + 5):
+            supervisor._registry.register(f"agent-{i}", AgentConfig(name=f"agent-{i}"), MagicMock())
+        assert len(supervisor.get_cluster_context()["members"]) == _MAX_CONTEXT_MEMBERS
+
+    def test_empty_cluster(self) -> None:
+        supervisor = SupervisorActor()
+        ctx = supervisor.get_cluster_context()
+        assert ctx["cluster_id"] == ""
+        assert ctx["members"] == []
+
 
 class TestSupervisorPersistenceRecovery:
     """spawn 必须 restore-first，且恢复失败不能注册空白 Agent。"""
@@ -209,7 +309,7 @@ class TestSupervisorPersistenceRecovery:
         first = SupervisorActor()
         await first.spawn_agent(
             config,
-            abilities=[],
+            abilities=[ConversationAbility(), EndTaskAbility()],
             persistence_factory=lambda _: backend,
         )
         first_info = first._registry.get_info("recoverable")
@@ -229,7 +329,7 @@ class TestSupervisorPersistenceRecovery:
         restarted = SupervisorActor()
         await restarted.spawn_agent(
             config,
-            abilities=[],
+            abilities=[ConversationAbility(), EndTaskAbility()],
             persistence_factory=lambda _: backend,
         )
         restored_cm = restarted._registry.get_info("recoverable").actor_handle._context_manager
@@ -251,7 +351,11 @@ class TestSupervisorPersistenceRecovery:
         config = AgentConfig(name="recoverable", system_prompt="stable")
 
         first = SupervisorActor()
-        await first.spawn_agent(config, abilities=[], persistence_factory=lambda _: backend)
+        await first.spawn_agent(
+            config,
+            abilities=[ConversationAbility(), EndTaskAbility()],
+            persistence_factory=lambda _: backend,
+        )
         cm = first._registry.get_info("recoverable").actor_handle._context_manager
         for iteration in range(1, 6):
             cm.begin_iteration()
@@ -265,7 +369,11 @@ class TestSupervisorPersistenceRecovery:
         await first.terminate_agent("recoverable")
 
         restarted = SupervisorActor()
-        await restarted.spawn_agent(config, abilities=[], persistence_factory=lambda _: backend)
+        await restarted.spawn_agent(
+            config,
+            abilities=[ConversationAbility(), EndTaskAbility()],
+            persistence_factory=lambda _: backend,
+        )
         restored = restarted._registry.get_info("recoverable").actor_handle._context_manager
         texts = [message.text for message in restored.message_store.current_messages]
 
@@ -301,7 +409,7 @@ class TestSupervisorPersistenceRecovery:
         with pytest.raises(RegistryError, match="persistence recovery failed"):
             await supervisor.spawn_agent(
                 AgentConfig(name="broken"),
-                abilities=[],
+                abilities=[ConversationAbility(), EndTaskAbility()],
                 persistence_factory=lambda _: backend,
             )
 
@@ -320,7 +428,7 @@ class TestSupervisorPersistenceRecovery:
         first = SupervisorActor()
         await first.spawn_agent(
             config,
-            abilities=[],
+            abilities=[ConversationAbility(), EndTaskAbility()],
             persistence_factory=lambda _: SqliteBackend(db_path=db_path, run_id="run-1"),
         )
         first_cm = first._registry.get_info("sqlite-agent").actor_handle._context_manager
@@ -332,7 +440,7 @@ class TestSupervisorPersistenceRecovery:
         restarted = SupervisorActor()
         await restarted.spawn_agent(
             config,
-            abilities=[],
+            abilities=[ConversationAbility(), EndTaskAbility()],
             persistence_factory=lambda _: SqliteBackend(db_path=db_path, run_id="run-2"),
         )
         restored_cm = restarted._registry.get_info("sqlite-agent").actor_handle._context_manager
