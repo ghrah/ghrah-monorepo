@@ -6,7 +6,9 @@ import InstanceSettings from "./instance-settings.vue";
 
 const wrappers: Array<ReturnType<typeof mount>> = [];
 
-function mountSettings(initialSection: "general" | "agents" | "abilities" = "general") {
+function mountSettings(
+  initialSection: "general" | "agents" | "abilities" | "archived" = "general",
+) {
   const wrapper = mount(InstanceSettings, {
     attachTo: document.body,
     props: { initialSection },
@@ -18,6 +20,7 @@ function mountSettings(initialSection: "general" | "agents" | "abilities" = "gen
             '<div data-page="agents"><button class="make-dirty" @click="$emit(\'dirty-change\', true)">dirty</button></div>',
         },
         AbilityConfigPage: { template: '<div data-page="abilities">abilities</div>' },
+        ArchivedResourcesPage: { template: '<div data-page="archived">archived</div>' },
       },
     },
   });
@@ -38,6 +41,15 @@ describe("InstanceSettings", () => {
       .find((button) => button.text().includes("Agent Config"));
     await agents!.trigger("click");
     expect(wrapper.find('[data-page="agents"]').exists()).toBe(true);
+  });
+
+  it("opens archived resources from the shared settings sidebar", async () => {
+    const wrapper = mountSettings();
+    const archived = wrapper
+      .findAll(".sidebar-row")
+      .find((button) => button.text().includes("Archived Resources"));
+    await archived!.trigger("click");
+    expect(wrapper.find('[data-page="archived"]').exists()).toBe(true);
   });
 
   it("closes from the visible button and Escape", async () => {

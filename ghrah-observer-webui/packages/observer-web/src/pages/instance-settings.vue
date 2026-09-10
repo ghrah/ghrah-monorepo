@@ -3,11 +3,12 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import AbilityConfigPage from "@/components/config/ability-config-page.vue";
 import AgentConfigPage from "@/components/config/agent-config-page.vue";
+import ArchivedResourcesPage from "@/components/config/archived-resources-page.vue";
 import ConfigNav from "@/components/config/config-nav.vue";
 import GeneralConfigPage from "@/components/config/general-config-page.vue";
 import ConfirmDialog from "@/components/ui/confirm-dialog.vue";
 
-type Section = "general" | "agents" | "abilities";
+type Section = "general" | "agents" | "abilities" | "archived";
 const props = defineProps<{ initialSection?: Section }>();
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
@@ -19,6 +20,7 @@ const pendingAction = ref<{ kind: "close" } | { kind: "section"; section: Sectio
 const activePage = computed(() => {
   if (activeSection.value === "agents") return AgentConfigPage;
   if (activeSection.value === "abilities") return AbilityConfigPage;
+  if (activeSection.value === "archived") return ArchivedResourcesPage;
   return GeneralConfigPage;
 });
 

@@ -198,6 +198,10 @@ export function useObserver() {
     return withClient((c) => c.deleteRoom({ roomId, expectedVersion }));
   }
 
+  async function restoreRoom(roomId: string, expectedVersion: number) {
+    return withClient((c) => c.restoreRoom({ roomId, expectedVersion }));
+  }
+
   async function joinRoom(
     roomId: string,
     subject: string,
@@ -222,6 +226,34 @@ export function useObserver() {
 
   async function createProject(name: string, options: CreateProjectOptions) {
     return withClient((c) => c.createProject(name, options));
+  }
+
+  async function updateProject(
+    projectId: string,
+    fields: {
+      name?: string | null;
+      description?: string | null;
+      manifestRef?: string | null;
+      expectedVersion?: number | null;
+    },
+  ) {
+    return withClient((c) => c.updateProject(projectId, fields));
+  }
+
+  async function archiveProject(projectId: string, expectedVersion: number) {
+    return withClient((c) => c.archiveProject({ projectId, expectedVersion }));
+  }
+
+  async function restoreProject(projectId: string, expectedVersion: number) {
+    return withClient((c) => c.restoreProject({ projectId, expectedVersion }));
+  }
+
+  async function deleteProject(projectId: string, expectedVersion: number, cascadeRooms = false) {
+    return withClient((c) => c.deleteProject({ projectId, expectedVersion, cascadeRooms }));
+  }
+
+  async function listAgents(projectId: string) {
+    return withClient((c) => c.listAgents(projectId));
   }
 
   /** 切换 active room；缓存缺失时拉历史。 */
@@ -367,12 +399,18 @@ export function useObserver() {
     createRoom,
     updateRoom,
     archiveRoom,
+    restoreRoom,
     deleteRoom,
     joinRoom,
     leaveRoom,
     getRoomLog,
     listProjects,
     createProject,
+    updateProject,
+    archiveProject,
+    restoreProject,
+    deleteProject,
+    listAgents,
     switchRoom,
     switchProject,
     selectAgent,

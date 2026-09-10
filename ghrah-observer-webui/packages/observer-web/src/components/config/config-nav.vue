@@ -4,7 +4,7 @@ import SidebarList from "@/components/ui/sidebar-list.vue";
 import SidebarRow from "@/components/ui/sidebar-row.vue";
 
 const { t } = useI18n();
-type Section = "general" | "agents" | "abilities";
+type Section = "general" | "agents" | "abilities" | "archived";
 defineProps<{ activeSection: Section }>();
 defineEmits<{ select: [section: Section] }>();
 
@@ -12,6 +12,7 @@ const links = [
   { id: "general", labelKey: "config.nav.general" },
   { id: "agents", labelKey: "config.nav.agents" },
   { id: "abilities", labelKey: "config.nav.abilities" },
+  { id: "archived", labelKey: "config.nav.archived" },
 ] as const;
 </script>
 
