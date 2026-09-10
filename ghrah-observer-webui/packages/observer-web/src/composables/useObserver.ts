@@ -2,6 +2,7 @@ import {
   type AbilityManifestInfo,
   type AgentManifestInfo,
   type AgentTarget,
+  type ChainTarget,
   type CreateProjectOptions,
   connectStores,
   extractAbilityList,
@@ -10,6 +11,7 @@ import {
   extractValidationResult,
   type ListProjectsOptions,
   ObserverClient,
+  type SessionTarget,
   useActionChainsStore,
   useAgentsStore,
   useChangesStore,
@@ -256,6 +258,43 @@ export function useObserver() {
     return withClient((c) => c.listAgents(projectId));
   }
 
+  async function listSessions(target: AgentTarget) {
+    return withClient((c) => c.listSessions(target));
+  }
+
+  async function createSession(target: AgentTarget, options: { originSessionId?: string } = {}) {
+    return withClient((c) =>
+      c.createSession(target, {
+        originSessionId: options.originSessionId,
+      }),
+    );
+  }
+
+  async function activateSession(target: SessionTarget) {
+    return withClient((c) => c.activateSession(target));
+  }
+
+  async function listBranches(target: SessionTarget) {
+    return withClient((c) => c.listBranches(target));
+  }
+
+  async function createBranch(
+    target: SessionTarget,
+    name: string,
+    options: { fromNodeId?: string; parentBranchId?: string } = {},
+  ) {
+    return withClient((c) =>
+      c.createBranch(target, name, {
+        fromNodeId: options.fromNodeId,
+        parentBranchId: options.parentBranchId,
+      }),
+    );
+  }
+
+  async function activateBranch(target: ChainTarget) {
+    return withClient((c) => c.activateBranch(target));
+  }
+
   /** 切换 active room；缓存缺失时拉历史。 */
   async function switchRoom(roomId: string | null) {
     rooms.setActiveRoom(roomId);
@@ -411,6 +450,12 @@ export function useObserver() {
     restoreProject,
     deleteProject,
     listAgents,
+    listSessions,
+    createSession,
+    activateSession,
+    listBranches,
+    createBranch,
+    activateBranch,
     switchRoom,
     switchProject,
     selectAgent,

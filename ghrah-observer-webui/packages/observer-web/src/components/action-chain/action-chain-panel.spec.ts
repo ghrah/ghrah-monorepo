@@ -3,15 +3,32 @@
 import {
   type AgentTarget,
   type ChainTarget,
+  type SessionTarget,
   useActionChainsStore,
   useAgentsStore,
   useBranchesStore,
   useSessionsStore,
 } from "@ghrah/observer-core";
-import { type ActionNode, ActionNodeSchema, type AgentSpawnedPayload } from "@ghrah/protocol";
+import {
+  type ActionNode,
+  ActionNodeSchema,
+  type AgentSpawnedPayload,
+  BranchInfoPayloadSchema,
+  SessionInfoPayloadSchema,
+} from "@ghrah/protocol";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const activateSession = vi.fn();
+const activateBranch = vi.fn();
+const createSession = vi.fn();
+const createBranch = vi.fn();
+
+vi.mock("@/composables/useObserver", () => ({
+  useObserver: () => ({ activateSession, activateBranch, createSession, createBranch }),
+}));
+
 import ActionChainPanel from "./action-chain-panel.vue";
 
 function node(overrides: Partial<ActionNode> = {}): ActionNode {
@@ -50,6 +67,10 @@ function setActiveChain(name: string, nodes: ActionNode[]) {
 describe("ActionChainPanel", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    for (const mock of [activateSession, activateBranch, createSession, createBranch]) {
+      mock.mockReset();
+      mock.mockResolvedValue({ success: true });
+    }
   });
 
   it("prompts to select an agent when none selected", () => {
@@ -151,5 +172,122 @@ describe("ActionChainPanel", () => {
     expect(expandedText).toContain("think");
     expect(expandedText).not.toContain("hello reply");
     expect(expandedText).not.toContain("send_message");
+  });
+
+  it("exposes session and branch switchers driven by server activation", async () => {
+    const agents = useAgentsStore();
+    const sessions = useSessionsStore();
+    const branches = useBranchesStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    agents.selectAgent(target("alpha"));
+
+    const agent = target("alpha");
+    const active: SessionTarget = { ...agent, sessionId: "alpha-session-2" };
+    sessions.replaceAgentSessions(agent, [
+      SessionInfoPayloadSchema.parse({
+        session_id: "alpha-session",
+        agent_name: "alpha",
+        root_node_id: "root",
+        active_branch_id: "alpha-branch",
+      }),
+      SessionInfoPayloadSchema.parse({
+        session_id: "alpha-session-2",
+        agent_name: "alpha",
+        root_node_id: "root-2",
+        active_branch_id: "alpha-branch-2",
+      }),
+    ]);
+    sessions.setActiveSession(agent, "alpha-session-2");
+    branches.replaceSessionBranches(active, [
+      BranchInfoPayloadSchema.parse({
+        branch_id: "alpha-branch-2",
+        session_id: "alpha-session-2",
+        name: "Branch 2",
+        head_node_id: "root-2",
+      }),
+    ]);
+
+    const wrapper = mount(ActionChainPanel);
+    await wrapper.vm.$nextTick();
+    const sessionSelect = wrapper.get<HTMLSelectElement>(".chain-session-select");
+    expect(sessionSelect.findAll("option").length).toBe(3);
+    expect(sessionSelect.element.value).toBe("alpha-session-2");
+    const branchSelect = wrapper.get<HTMLSelectElement>(".chain-branch-select");
+    expect(branchSelect.find("option:not([disabled])").text()).toBe("Branch 2");
+
+    await sessionSelect.setValue("alpha-session");
+    expect(activateSession).toHaveBeenCalledWith({ ...agent, sessionId: "alpha-session" });
+
+    await branchSelect.setValue("alpha-branch-2");
+    expect(activateBranch).toHaveBeenCalledWith({
+      ...agent,
+      sessionId: "alpha-session-2",
+      branchId: "alpha-branch-2",
+    });
+  });
+
+  it("creates a session and activates it from the receipt", async () => {
+    const agents = useAgentsStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    agents.selectAgent(target("alpha"));
+    createSession.mockResolvedValue({
+      success: true,
+      data: { session_id: "alpha-session-2", agent_name: "alpha" },
+    });
+    const wrapper = mount(ActionChainPanel);
+    await wrapper.vm.$nextTick();
+    await wrapper.get("button.chain-new-session").trigger("click");
+    expect(createSession).toHaveBeenCalledWith(target("alpha"));
+    expect(activateSession).toHaveBeenCalledWith({
+      ...target("alpha"),
+      sessionId: "alpha-session-2",
+    });
+  });
+
+  it("creates a branch, activates it from the receipt, and surfaces failures", async () => {
+    const agents = useAgentsStore();
+    const sessions = useSessionsStore();
+    const branches = useBranchesStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    agents.selectAgent(target("alpha"));
+    const agent = target("alpha");
+    const session: SessionTarget = { ...agent, sessionId: "alpha-session" };
+    sessions.replaceAgentSessions(agent, [
+      SessionInfoPayloadSchema.parse({
+        session_id: "alpha-session",
+        agent_name: "alpha",
+        root_node_id: "root",
+        active_branch_id: "alpha-branch",
+      }),
+    ]);
+    sessions.setActiveSession(agent, "alpha-session");
+    branches.replaceSessionBranches(session, [
+      BranchInfoPayloadSchema.parse({
+        branch_id: "alpha-branch",
+        session_id: "alpha-session",
+        name: "Branch 1",
+        head_node_id: "root",
+      }),
+    ]);
+
+    createBranch.mockResolvedValue({ success: true, data: { branch_id: "alpha-branch-2" } });
+    const wrapper = mount(ActionChainPanel);
+    await wrapper.vm.$nextTick();
+    await wrapper.get("button.chain-new-branch").trigger("click");
+    expect(createBranch).toHaveBeenCalledWith(session, "Branch 2");
+    expect(activateBranch).toHaveBeenCalledWith({
+      ...agent,
+      sessionId: "alpha-session",
+      branchId: "alpha-branch-2",
+    });
+
+    createBranch.mockResolvedValue({
+      success: false,
+      error: "fork node not found",
+      error_detail: "fork node is not readable",
+    });
+    await wrapper.get("button.chain-new-branch").trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('[role="alert"]').text()).toContain("fork node is not readable");
   });
 });
