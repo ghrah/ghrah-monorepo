@@ -110,4 +110,23 @@ describe("AgentsOverviewPanel", () => {
     expect(useSessionsStore().activeSessionId(target)).toBe("s1");
     expect(useBranchesStore().activeBranchId(target)).toBe("b1");
   });
+
+  it("falls back to an explicit label for unknown runtime states", () => {
+    const projects = useProjectsStore();
+    const current = projects.projects.get("p1");
+    projects.onProjectEvent({
+      project: {
+        ...current,
+        agents: [
+          ...(current?.agents ?? []),
+          { name: "Future Agent", agent_id: "a3", runtime_status: "recovering" },
+        ],
+      },
+    } as never);
+
+    const wrapper = mount(AgentsOverviewPanel, { props: { projectId: "p1" } });
+
+    expect(wrapper.text()).toContain("Unknown");
+    expect(wrapper.text()).not.toContain("agentsOverview.status.recovering");
+  });
 });

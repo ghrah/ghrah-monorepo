@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useProjectsStore, useRoomsStore } from "@ghrah/observer-core";
 import type { RoomInfoPayload } from "@ghrah/protocol";
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import ConfirmDialog from "@/components/ui/confirm-dialog.vue";
 import SidebarList from "@/components/ui/sidebar-list.vue";
@@ -50,6 +50,26 @@ const pendingLifecycle = ref<{
   action: "archive" | "delete";
   room: RoomInfoPayload;
 } | null>(null);
+
+function closeActionMenuOutside(event: PointerEvent) {
+  const target = event.target;
+  if (target instanceof Element && target.closest(".sidebar-row-actions")) return;
+  actionRoomId.value = null;
+}
+
+function closeActionMenuOnEscape(event: KeyboardEvent) {
+  if (event.key === "Escape") actionRoomId.value = null;
+}
+
+onMounted(() => {
+  document.addEventListener("pointerdown", closeActionMenuOutside);
+  document.addEventListener("keydown", closeActionMenuOnEscape);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", closeActionMenuOutside);
+  document.removeEventListener("keydown", closeActionMenuOnEscape);
+});
 
 function cancelCreate() {
   creating.value = false;

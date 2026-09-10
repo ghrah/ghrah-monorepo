@@ -19,6 +19,12 @@ const branches = useBranchesStore();
 const rooms = useRoomsStore();
 const { t } = useI18n();
 
+const displayRuntimeStatuses = new Set(["active", "running", "stopped", "pending", "error"]);
+
+function displayRuntimeStatus(status: string): string {
+  return displayRuntimeStatuses.has(status) ? status : "unknown";
+}
+
 const project = computed(() => projects.projects.get(props.projectId) ?? null);
 const rows = computed(() =>
   (project.value?.agents ?? []).map((spec) => {
@@ -46,7 +52,7 @@ const rows = computed(() =>
       agentId,
       name: runtime?.agentName ?? spec.name,
       clusterId: runtime?.clusterId ?? spec.cluster_id ?? "",
-      status: runtime?.runtimeStatus ?? spec.runtime_status ?? "stopped",
+      status: displayRuntimeStatus(runtime?.runtimeStatus ?? spec.runtime_status ?? "stopped"),
       runtimeError: runtime?.runtimeError ?? spec.runtime_error ?? "",
       roomNames,
       chainTarget,

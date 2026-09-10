@@ -124,15 +124,32 @@ function openRoom(room: { room_id: string; project_id: string; name: string }) {
 }
 
 function openAgent(target: AgentTarget | ChainTarget) {
-  const chain = "sessionId" in target ? target : currentChain(target);
   const resolved = agents.getAgent(target) ?? target;
   const agent: AgentTarget = {
     projectId: resolved.projectId,
     agentId: resolved.agentId,
     agentName: resolved.agentName,
   };
+  const chain: ChainTarget | null =
+    "sessionId" in target
+      ? { ...agent, sessionId: target.sessionId, branchId: target.branchId }
+      : currentChain(agent);
   const id = chain ? `chain:${branchKey(chain)}` : `agent:${agentKey(agent)}`;
   let tab = tabs.value.find((item) => item.id === id);
+  if (!tab && chain) {
+    const contextTab = tabs.value.find(
+      (item) =>
+        item.kind === "agent" && item.target.chain === null && sameAgent(item.target.agent, agent),
+    );
+    if (contextTab) {
+      const wasActive = activeTabId.value === contextTab.id;
+      contextTab.id = id;
+      contextTab.target = { agent, chain };
+      contextTab.fallbackLabel = agent.agentName;
+      if (wasActive) activeTabId.value = id;
+      tab = contextTab;
+    }
+  }
   if (!tab) {
     tab = { id, kind: "agent", target: { agent, chain }, fallbackLabel: agent.agentName };
     tabs.value.push(tab);
@@ -221,54 +238,32 @@ function invalidateRoom(target: { projectId: string; roomId: string }) {
 }
 
 watch(
-  () => rooms.roomList.map((room) => `${room.project_id}:${room.room_id}`),
-  (keys) => {
-    const valid = new Set(keys);
-    void removeTabs(
-      (tab) => tab.kind === "room" && !valid.has(`${tab.target.projectId}:${tab.target.roomId}`),
-    );
-  },
-);
-
-watch(
-  () => projects.projectList.map((project) => project.project_id),
-  (ids) => {
-    const valid = new Set(ids);
-    void removeTabs((tab) => !valid.has(projectIdOf(tab)));
-  },
-);
-
-watch(
-  () => [...agents.agents.keys()],
-  (keys) => {
-    const valid = new Set(keys);
-    void removeTabs((tab) => tab.kind === "agent" && !valid.has(agentKey(tab.target.agent)));
-  },
-);
-
-watch(
-  () => [...sessions.sessions.keys()],
-  (keys) => {
-    const valid = new Set(keys);
-    void removeTabs(
-      (tab) =>
-        tab.kind === "agent" &&
-        tab.target.chain !== null &&
-        !valid.has(sessionKey(tab.target.chain)),
-    );
-  },
-);
-
-watch(
-  () => [...branches.branches.keys()],
-  (keys) => {
-    const valid = new Set(keys);
-    void removeTabs(
-      (tab) =>
-        tab.kind === "agent" &&
-        tab.target.chain !== null &&
-        !valid.has(branchKey(tab.target.chain)),
-    );
+  () => ({
+    roomKeys: rooms.roomList.map((room) => `${room.project_id}:${room.room_id}`),
+    projectIds: projects.projectList.map((project) => project.project_id),
+    agentKeys: [...agents.agents.keys()],
+    sessionKeys: [...sessions.sessions.keys()],
+    branchKeys: [...branches.branches.keys()],
+  }),
+  ({ roomKeys, projectIds, agentKeys, sessionKeys, branchKeys }) => {
+    const validRooms = new Set(roomKeys);
+    const validProjects = new Set(projectIds);
+    const validAgents = new Set(agentKeys);
+    const validSessions = new Set(sessionKeys);
+    const validBranches = new Set(branchKeys);
+    void removeTabs((tab) => {
+      if (!validProjects.has(projectIdOf(tab))) return true;
+      if (tab.kind === "room") {
+        return !validRooms.has(`${tab.target.projectId}:${tab.target.roomId}`);
+      }
+      if (tab.kind !== "agent") return false;
+      if (!validAgents.has(agentKey(tab.target.agent))) return true;
+      if (!tab.target.chain) return false;
+      return (
+        !validSessions.has(sessionKey(tab.target.chain)) ||
+        !validBranches.has(branchKey(tab.target.chain))
+      );
+    });
   },
 );
 </script>

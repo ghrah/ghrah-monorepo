@@ -71,9 +71,14 @@ const ProjectFixedNavStub = {
 };
 const AgentListStub = {
   emits: ["openAgent", "openSettings"],
-  template: `<button id="open-chain" @click="$emit('openAgent', {
-    projectId: 'p2', agentId: 'a2', agentName: 'Coder', sessionId: 's2', branchId: 'b2'
-  })">agent</button>`,
+  template: `<div>
+    <button id="open-agent-context" @click="$emit('openAgent', {
+      projectId: 'p2', agentId: 'a2', agentName: 'Coder'
+    })">agent context</button>
+    <button id="open-chain" @click="$emit('openAgent', {
+      projectId: 'p2', agentId: 'a2', agentName: 'Coder', sessionId: 's2', branchId: 'b2'
+    })">agent chain</button>
+  </div>`,
 };
 
 function project(id: string, name: string): ProjectInfoPayload {
@@ -228,6 +233,30 @@ describe("Dashboard workspace tabs", () => {
     expect(wrapper.find(".workspace-tab .tab-label").text()).toBe("Coder");
   });
 
+  it("upgrades an Agent context tab when a complete ChainTarget becomes available", async () => {
+    const agent = { projectId: "p2", agentId: "a2", agentName: "Coder" };
+    useBranchesStore().clearAgent(agent);
+    useSessionsStore().clearAgent(agent);
+    const wrapper = mountDashboard();
+
+    await wrapper.find("#open-agent-context").trigger("click");
+    expect(wrapper.findAll(".workspace-tab")).toHaveLength(1);
+
+    useSessionsStore().replaceAgentSessions(
+      agent,
+      [{ session_id: "s2", agent_name: "Coder", state: "active" } as never],
+      "s2",
+    );
+    useBranchesStore().replaceSessionBranches(
+      { ...agent, sessionId: "s2" },
+      [{ branch_id: "b2", session_id: "s2", name: "main" } as never],
+      "b2",
+    );
+    await wrapper.find("#open-chain").trigger("click");
+
+    expect(wrapper.findAll(".workspace-tab")).toHaveLength(1);
+  });
+
   it("closes room and chain tabs when remote state invalidates their targets", async () => {
     const wrapper = mountDashboard();
     await wrapper.find("#open-p1-room").trigger("click");
@@ -248,5 +277,27 @@ describe("Dashboard workspace tabs", () => {
     await nextTick();
 
     expect(wrapper.findAll(".workspace-tab")).toHaveLength(0);
+  });
+
+  it("reactivates a surviving tab only once during cascaded Project invalidation", async () => {
+    const wrapper = mountDashboard();
+    await wrapper.find("#open-changes").trigger("click");
+    await wrapper.find("#open-p2-room").trigger("click");
+    switchProjectMock.mockClear();
+    switchRoomMock.mockClear();
+
+    useProjectsStore().onProjectDeleted({ project: project("p2", "Project Two") });
+    useRoomsStore().clearProject("p2");
+    useAgentsStore().clearProject("p2");
+    useSessionsStore().clearProject("p2");
+    useBranchesStore().clearProject("p2");
+    await nextTick();
+    await nextTick();
+
+    expect(wrapper.findAll(".workspace-tab")).toHaveLength(1);
+    expect(wrapper.find(".workspace-tab .tab-label").text()).toBe("Project One · Changes");
+    expect(switchProjectMock).toHaveBeenCalledTimes(1);
+    expect(switchProjectMock).toHaveBeenCalledWith("p1");
+    expect(switchRoomMock).not.toHaveBeenCalled();
   });
 });

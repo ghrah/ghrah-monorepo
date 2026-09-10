@@ -29,6 +29,7 @@ const baselineName = ref("");
 const selectedAgentId = ref("");
 const busy = ref<"rename" | "member" | "archive" | "delete" | "refresh" | null>(null);
 const localError = ref<string | null>(null);
+const localErrorCode = ref<string | null>(null);
 const pendingLifecycle = ref<"archive" | "delete" | null>(null);
 let trackedRoomId: string | undefined;
 
@@ -36,7 +37,7 @@ const nameDirty = computed(
   () =>
     !!room.value && nameDraft.value.trim() !== "" && nameDraft.value.trim() !== baselineName.value,
 );
-const versionConflict = computed(() => localError.value === "room_version_conflict");
+const versionConflict = computed(() => localErrorCode.value === "room_version_conflict");
 const candidateAgents = computed(() => {
   const current = room.value;
   if (!current) return [];
@@ -63,6 +64,7 @@ watch(
     if (roomId !== trackedRoomId) {
       selectedAgentId.value = "";
       localError.value = null;
+      localErrorCode.value = null;
       pendingLifecycle.value = null;
     }
     trackedRoomId = roomId;
@@ -70,8 +72,17 @@ watch(
   { immediate: true },
 );
 
-function setFailure(result: { error?: string | null } | null, fallback: string) {
-  localError.value = result?.error ?? observerError.value ?? fallback;
+function clearFailure() {
+  localError.value = null;
+  localErrorCode.value = null;
+}
+
+function setFailure(
+  result: { error?: string | null; error_detail?: string | null } | null,
+  fallback: string,
+) {
+  localErrorCode.value = result?.error ?? null;
+  localError.value = result?.error_detail ?? result?.error ?? observerError.value ?? fallback;
 }
 
 async function renameRoom() {
@@ -79,7 +90,7 @@ async function renameRoom() {
   const nextName = nameDraft.value.trim();
   if (!current || !nameDirty.value || busy.value) return;
   busy.value = "rename";
-  localError.value = null;
+  clearFailure();
   try {
     const result = await updateRoom(current.room_id, nextName, current.version);
     if (result?.success) baselineName.value = nextName;
@@ -94,7 +105,7 @@ async function addMember() {
   const agent = candidateAgents.value.find((item) => item.agentId === selectedAgentId.value);
   if (!current || !agent || busy.value) return;
   busy.value = "member";
-  localError.value = null;
+  clearFailure();
   try {
     const result = await joinRoom(current.room_id, agent.agentId, "agent", agent.agentName);
     if (result?.success) selectedAgentId.value = "";
@@ -108,7 +119,7 @@ async function removeMember(subject: string) {
   const current = room.value;
   if (!current || busy.value) return;
   busy.value = "member";
-  localError.value = null;
+  clearFailure();
   try {
     const result = await leaveRoom(current.room_id, subject);
     if (!result?.success) setFailure(result, t("nav.room.removeFailed"));
@@ -123,7 +134,7 @@ async function runLifecycle() {
   pendingLifecycle.value = null;
   if (!current || !action || busy.value) return;
   busy.value = action;
-  localError.value = null;
+  clearFailure();
   try {
     const result =
       action === "archive"
@@ -144,14 +155,15 @@ async function runLifecycle() {
 async function refreshRoom() {
   const current = room.value;
   if (!current || busy.value) return;
+  const preservedDraft = nameDraft.value;
   busy.value = "refresh";
   try {
     const result = await listRooms(current.project_id, "active");
     if (result?.success) {
-      localError.value = null;
+      clearFailure();
       await nextTick();
-      nameDraft.value = room.value?.name ?? "";
       baselineName.value = room.value?.name ?? "";
+      nameDraft.value = preservedDraft;
     } else setFailure(result, t("roomAdmin.refreshFailed"));
   } finally {
     busy.value = null;

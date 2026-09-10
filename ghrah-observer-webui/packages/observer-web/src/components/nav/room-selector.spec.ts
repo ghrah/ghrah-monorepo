@@ -184,6 +184,26 @@ describe("RoomSelector", () => {
     expect(wrapper.emitted("roomInvalidated")?.[0]).toEqual([{ projectId: "p1", roomId: "r1" }]);
   });
 
+  it("closes the room action menu on outside pointer interaction or Escape", async () => {
+    setProjects("p1");
+    setActiveRooms([room("r1", "p1", "one")]);
+    const wrapper = mount(RoomSelector);
+    const trigger = wrapper.find('button[aria-label="Actions for one"]');
+
+    await trigger.trigger("click");
+    expect(wrapper.find(".sidebar-row-menu").exists()).toBe(true);
+
+    document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".sidebar-row-menu").exists()).toBe(false);
+
+    await trigger.trigger("click");
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".sidebar-row-menu").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("creates in the active project and opens the server-returned room", async () => {
     setProjects("p1");
     createRoomMock.mockResolvedValue({

@@ -204,6 +204,7 @@ export default {
       stopped: "Stopped",
       pending: "Pending",
       error: "Error",
+      unknown: "Unknown",
     },
   },
   projectSettings: {

@@ -199,6 +199,7 @@ export default {
       stopped: "已停止",
       pending: "等待中",
       error: "错误",
+      unknown: "未知",
     },
   },
   projectSettings: {

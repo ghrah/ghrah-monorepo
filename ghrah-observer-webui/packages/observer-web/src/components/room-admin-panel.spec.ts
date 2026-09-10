@@ -154,18 +154,37 @@ describe("RoomAdminPanel", () => {
     expect(wrapper.emitted("roomInvalidated")?.[0]).toEqual([{ projectId: "p1", roomId: "r1" }]);
   });
 
-  it("offers a refresh path for version conflicts", async () => {
+  it("preserves the rename draft while refreshing the version after a conflict", async () => {
     seed();
-    updateRoomMock.mockResolvedValue({ success: false, error: "room_version_conflict" });
-    listRoomsMock.mockResolvedValue({ success: true, data: {} });
+    updateRoomMock
+      .mockResolvedValueOnce({
+        success: false,
+        error: "room_version_conflict",
+        error_detail: "Room changed on the server",
+      })
+      .mockResolvedValueOnce({ success: true, data: {} });
+    listRoomsMock.mockImplementation(async () => {
+      useRoomsStore().replaceProjectRooms(
+        "p1",
+        [{ ...room(), name: "Remote name", version: 8 }],
+        "active",
+      );
+      return { success: true, data: {} };
+    });
     const wrapper = mount(RoomAdminPanel);
 
     await wrapper.find("#active-room-name").setValue("Conflicting name");
     await wrapper.find(".room-rename-form").trigger("submit.prevent");
-    expect(wrapper.text()).toContain("room_version_conflict");
+    expect(wrapper.text()).toContain("Room changed on the server");
 
     const refresh = wrapper.findAll("button").find((button) => button.text() === "Refresh");
     await refresh?.trigger("click");
     expect(listRoomsMock).toHaveBeenCalledWith("p1", "active");
+    expect(wrapper.find<HTMLInputElement>("#active-room-name").element.value).toBe(
+      "Conflicting name",
+    );
+
+    await wrapper.find(".room-rename-form").trigger("submit.prevent");
+    expect(updateRoomMock).toHaveBeenLastCalledWith("r1", "Conflicting name", 8);
   });
 });
