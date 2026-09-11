@@ -75,6 +75,9 @@ class ContextManager:
         origin_node_id: Root 来源节点 ID，只记录 provenance，不建立跨 Session 父边
         session_metadata: 初始 Session 元数据
         root_metadata: 初始 Root 节点元数据
+        compact_threshold: 链上 compact 触发阈值（0~1 相对预算比率）；None 禁用
+        compact_keep_recent: compact 保留窗节点数
+        compact_method: compact 综合方法名（当前唯一合法值 "ghrah.builtin"）
     """
 
     def __init__(
@@ -92,6 +95,9 @@ class ContextManager:
         origin_node_id: str | None = None,
         session_metadata: dict[str, Any] | None = None,
         root_metadata: dict[str, Any] | None = None,
+        compact_threshold: float | None = None,
+        compact_keep_recent: int = 2,
+        compact_method: str = "ghrah.builtin",
     ) -> None:
         self._agent_name = agent_name
         self._state_manager = StateManager(initial_state)
@@ -106,6 +112,16 @@ class ContextManager:
         self._pending_compaction: list[dict[str, Any]] = []
         self._persist_tasks: set[asyncio.Task[Any]] = set()
         self._persist_lock = asyncio.Lock()
+
+        # 链上 compact 配置（threshold=None 即禁用，行为与现状管道等价）
+        self._compact_threshold = compact_threshold
+        self._compact_keep_recent = compact_keep_recent
+        self._compact_method = compact_method
+        # 最近一次主循环真实 input_tokens 锚点；None 表示尚无可靠锚点
+        self._window_occupied: int | None = None
+        self._last_real_input_tokens: int | None = None
+        # 手动 compact 请求标志（B/H 节接线消费）
+        self._compact_requested: bool = False
 
         # 初始化默认 Session：一次性创建 Root 与 main Branch。
         effective_messages = list(initial_messages or [])
@@ -544,7 +560,12 @@ class ContextManager:
         return messages
 
     def _restore_active_context(self) -> None:
-        """从当前 Session/Branch Head 恢复 state 与 MessageStore。"""
+        """从当前 Session/Branch Head 恢复 state 与 MessageStore。
+
+        Head 变更（activate_branch/activate_session/restore）会使既有真实
+        占用锚点失效——store 已按新 Head 重建，旧锚点不再计量当前视图，
+        因此置 None，待下一次真实 LLM 调用重建。
+        """
         runtime = self._active_runtime
         head = runtime.active_head
         messages = self._messages_from_history(runtime.get_history())
@@ -554,6 +575,7 @@ class ContextManager:
         self._message_store.take_snapshot(head.iteration)
         self._system_prompt = runtime.session.system_prompt
         self._pending_messages = []
+        self._window_occupied = None
 
     # ----------------------------------------------------------------
     # 迭代生命周期
@@ -748,6 +770,9 @@ class ContextManager:
         self._pending_messages = []
         self._pending_compaction = []
         self._in_iteration = False
+        # pending 消息从未进入 store，store 本就正确（不重建）；但本轮迭代
+        # 若有 LLM 调用，其锚点计量的是已回滚的发送视图，须失效
+        self._window_occupied = None
 
         if self._auto_persist and self._persistence is not None:
             self._schedule_changes(
@@ -852,6 +877,117 @@ class ContextManager:
                 total["output_tokens"] += usage.get("output_tokens", 0)
                 total["total_tokens"] += usage.get("total_tokens", 0)
         return total
+
+    # ----------------------------------------------------------------
+    # 窗口占用锚点与链上 compact 决策
+    # ----------------------------------------------------------------
+
+    def record_window_occupied(self, real_input_tokens: int) -> None:
+        """记录最近一次主循环真实 LLM 调用的 input_tokens 锚点。
+
+        该锚点是链上 compact 决策的唯一计量权威（D4）：决策与触发均以
+        真实用量为准，估算值不参与。锚点仅在两处失效（D15）：
+        ``_restore_active_context``（head 变更）与 ``rollback_iteration``。
+
+        Args:
+            real_input_tokens: 首响应真实 input_tokens（多响应取首响应）
+        """
+        self._window_occupied = real_input_tokens
+        self._last_real_input_tokens = real_input_tokens
+
+    def evaluate_compaction_decision(self) -> dict[str, Any] | None:
+        """评估当前是否需要链上 compact，产出决策记录。
+
+        仅在配置了 compact_threshold 且存在 WindowManager 时参与决策；
+        否则返回 None（不写节点 metadata，与现状行为 bit 级一致）。
+        无锚点（从未记录或已失效）时 needs_compaction 恒为 False，
+        交由发送侧安全阀兜底。
+
+        Returns:
+            决策 dict：{occupied, threshold, needs_compaction}；不参与决策
+            时返回 None
+        """
+        if self._compact_threshold is None or self._window_manager is None:
+            return None
+        occupied = self._window_occupied
+        trigger = int(self._window_manager.max_tokens * self._compact_threshold)
+        needs = occupied is not None and occupied >= trigger
+        return {
+            "occupied": occupied,
+            "threshold": self._compact_threshold,
+            "needs_compaction": needs,
+        }
+
+    def check_compact_trigger(self) -> bool:
+        """触发门判定（锚点活体复评）。
+
+        供驱动循环在每轮迭代开头、普通 action 之前调用（B 节接线）：
+        (a) 手动标志（显式意图，不受锚点状态否决）；
+        (b) 活体锚点达到阈值。
+        节点 metadata 的 ``needs_compaction`` 仅作审计记录，不作为触发依据。
+
+        Returns:
+            是否应进入 compact 回合
+        """
+        if self._compact_requested:
+            return True
+        if self._compact_threshold is None or self._window_manager is None:
+            return False
+        if self._window_occupied is None:
+            return False
+        trigger = int(self._window_manager.max_tokens * self._compact_threshold)
+        return self._window_occupied >= trigger
+
+    def request_compact(self) -> None:
+        """置手动 compact 请求标志（幂等）。
+
+        标志由 compact 回合的窗外为空守卫与消费点清除（B/H 节）。
+        """
+        self._compact_requested = True
+
+    def consume_compact_request(self) -> bool:
+        """消费手动 compact 请求标志。
+
+        Returns:
+            标志是否原本为 True
+        """
+        was_requested = self._compact_requested
+        self._compact_requested = False
+        return was_requested
+
+    def get_window_status(self) -> dict[str, Any]:
+        """导出窗口占用状态（观测出口，C.2）。
+
+        Returns:
+            状态 dict：occupied_tokens 为锚点值（可能为 None）；
+            basis 恒为 "anchor"（同步快照即锚点口径；"real" 保留给
+            post_call 事件相位）；无 WindowManager 时 budget_tokens 为 0、
+            compact_threshold 为 None
+        """
+        return {
+            "occupied_tokens": self._window_occupied,
+            "basis": "anchor",
+            "budget_tokens": (
+                self._window_manager.max_tokens if self._window_manager is not None else 0
+            ),
+            "compact_threshold": (
+                self._compact_threshold if self._window_manager is not None else None
+            ),
+            "compact_keep_recent": self._compact_keep_recent,
+            "compact_method": self._compact_method,
+            "last_real_input_tokens": self._last_real_input_tokens,
+        }
+
+    def peek_pending_compaction(self) -> list[dict[str, Any]]:
+        """只读窥视待排水压缩记录（不排水，C.3）。
+
+        供事件组装读取 ``get_llm_messages`` 产生的压缩审计记录；
+        排水仍由 ``commit_iteration`` 的既有合并逻辑负责。
+
+        Returns:
+            当前待排水记录的浅拷贝列表
+        """
+        return list(self._pending_compaction)
 
     # ----------------------------------------------------------------
     # 子 Agent 支持

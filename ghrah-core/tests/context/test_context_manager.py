@@ -40,6 +40,13 @@ def _make_cm(**overrides) -> ContextManager:
     return ContextManager(**defaults)
 
 
+def _make_window_manager(max_tokens: int = 1000):
+    """创建无策略 WindowManager（仅提供预算权威）。"""
+    from ghrah.context.window import WindowManager
+
+    return WindowManager(strategies=[], max_tokens=max_tokens)
+
+
 def _make_message(content: str = "hello") -> Message:
     """创建测试用 Message。"""
     return Message(sender="user", recipient="test-agent", content=content)
@@ -719,3 +726,202 @@ class TestContextManagerIntegration:
         assert history[0].ability_names == ["init"]
         assert history[1].ability_names == ["ability_1"]
         assert history[2].ability_names == ["ability_2"]
+
+
+# ----------------------------------------------------------------
+# TestWindowOccupancyAnchor — 窗口占用锚点与 compact 决策（A 阶段）
+# ----------------------------------------------------------------
+
+
+class TestWindowOccupancyAnchor:
+    """占用锚点记录、D15 失效合约与决策/触发辅助。"""
+
+    def test_record_window_occupied_sets_anchor_and_last_real(self) -> None:
+        """record 同时更新锚点与 last_real_input_tokens。"""
+        cm = _make_cm()
+
+        cm.record_window_occupied(1234)
+
+        status = cm.get_window_status()
+        assert status["occupied_tokens"] == 1234
+        assert status["last_real_input_tokens"] == 1234
+
+    def test_evaluate_decision_returns_none_when_threshold_unset(self) -> None:
+        """threshold=None（默认禁用）不参与决策，返回 None。"""
+        cm = _make_cm()
+        cm.record_window_occupied(99999)
+
+        assert cm.evaluate_compaction_decision() is None
+
+    def test_evaluate_decision_returns_none_without_window_manager(self) -> None:
+        """无 WindowManager（无预算权威）不参与决策。"""
+        cm = _make_cm(compact_threshold=0.8)
+        cm.record_window_occupied(99999)
+
+        assert cm.evaluate_compaction_decision() is None
+
+    def test_evaluate_decision_below_threshold(self) -> None:
+        """锚点低于阈值：决策产出但 needs_compaction=False。"""
+        cm = _make_cm(
+            window_manager=_make_window_manager(max_tokens=1000),
+            compact_threshold=0.8,
+        )
+        cm.record_window_occupied(500)
+
+        decision = cm.evaluate_compaction_decision()
+
+        assert decision == {"occupied": 500, "threshold": 0.8, "needs_compaction": False}
+
+    def test_evaluate_decision_at_threshold_triggers(self) -> None:
+        """锚点达到阈值（>=）即置 needs_compaction=True。"""
+        cm = _make_cm(
+            window_manager=_make_window_manager(max_tokens=1000),
+            compact_threshold=0.8,
+        )
+        cm.record_window_occupied(800)
+
+        decision = cm.evaluate_compaction_decision()
+
+        assert decision == {"occupied": 800, "threshold": 0.8, "needs_compaction": True}
+
+    def test_evaluate_decision_without_anchor_needs_false(self) -> None:
+        """无锚点（从未记录或已失效）needs_compaction=False，交安全阀兜底。"""
+        cm = _make_cm(
+            window_manager=_make_window_manager(max_tokens=1000),
+            compact_threshold=0.8,
+        )
+
+        decision = cm.evaluate_compaction_decision()
+
+        assert decision == {"occupied": None, "threshold": 0.8, "needs_compaction": False}
+
+    def test_check_compact_trigger_requires_threshold_and_anchor(self) -> None:
+        """触发门：threshold=None 或无锚点时恒 False。"""
+        plain = _make_cm()
+        plain.record_window_occupied(99999)
+        assert plain.check_compact_trigger() is False
+
+        configured = _make_cm(
+            window_manager=_make_window_manager(max_tokens=1000),
+            compact_threshold=0.8,
+        )
+        assert configured.check_compact_trigger() is False
+
+        configured.record_window_occupied(800)
+        assert configured.check_compact_trigger() is True
+
+    def test_check_compact_trigger_manual_flag_overrides_anchor(self) -> None:
+        """手动标志是显式意图：无锚点/未配阈值也不受活体否决。"""
+        cm = _make_cm()
+
+        cm.request_compact()
+        assert cm.check_compact_trigger() is True
+        assert cm.consume_compact_request() is True
+        assert cm.check_compact_trigger() is False
+
+    def test_request_compact_idempotent(self) -> None:
+        """重复置标志幂等，一次消费即清。"""
+        cm = _make_cm()
+
+        cm.request_compact()
+        cm.request_compact()
+        assert cm.consume_compact_request() is True
+        assert cm.consume_compact_request() is False
+
+    def test_rollback_invalidates_anchor_but_keeps_store(self) -> None:
+        """P5 回归：rollback 后锚点失效（None），store 不动、消息不丢。"""
+        cm = _make_cm()
+        cm.begin_iteration()
+        cm.add_messages([ChatMessage.user(text_or_blocks="first")])
+        cm.commit_iteration(ability_names=["step1"])
+        cm.record_window_occupied(600)
+        store_before = cm.message_store
+
+        cm.begin_iteration()
+        cm.rollback_iteration(RuntimeError("boom"))
+
+        assert cm._window_occupied is None
+        assert cm.message_store is store_before
+        assert cm.message_store.count == 1
+
+    def test_activate_branch_invalidates_anchor(self) -> None:
+        """activate_branch（head 变更）后锚点失效，store 按新 head 重建。"""
+        cm = _make_cm()
+        session_id = cm.active_session_id
+        main_branch_id = cm.get_active_session().active_branch_id
+        cm.begin_iteration()
+        cm.add_messages([ChatMessage.user(text_or_blocks="shared")])
+        cm.commit_iteration(ability_names=["shared"])
+        fork_point = cm.active_head
+        retry = cm.create_branch(
+            session_id=session_id,
+            name="retry-1",
+            from_node_id=fork_point.id,
+            parent_branch_id=main_branch_id,
+        )
+        cm.begin_iteration()
+        cm.add_messages([ChatMessage.user(text_or_blocks="main-only")])
+        cm.commit_iteration(ability_names=["main-only"])
+        cm.record_window_occupied(600)
+
+        cm.activate_branch(session_id, retry.branch_id)
+
+        assert cm._window_occupied is None
+        assert [m.text for m in cm.message_store.current_messages] == ["shared"]
+
+    def test_activate_session_invalidates_anchor(self) -> None:
+        """activate_session（head 变更）后锚点失效。"""
+        cm = _make_cm()
+        main_session_id = cm.active_session_id
+        cm.begin_iteration()
+        cm.add_messages([ChatMessage.user(text_or_blocks="main")])
+        cm.commit_iteration(ability_names=["main"])
+        created = cm.create_session(
+            initial_messages=[ChatMessage.user(text_or_blocks="other")],
+        )
+        cm.record_window_occupied(600)
+
+        cm.activate_session(created.session_id)
+
+        assert cm._window_occupied is None
+        assert [m.text for m in cm.message_store.current_messages] == ["other"]
+
+        # 切回原 session 后锚点同样失效（restore 路径公共汇点）
+        cm.record_window_occupied(700)
+        cm.activate_session(main_session_id)
+        assert cm._window_occupied is None
+
+    def test_get_window_status_shape(self) -> None:
+        """观测出口字段齐全；无 wm 时 budget=0、threshold=None。"""
+        bare = _make_cm()
+        status = bare.get_window_status()
+
+        assert status["occupied_tokens"] is None
+        assert status["basis"] == "anchor"
+        assert status["budget_tokens"] == 0
+        assert status["compact_threshold"] is None
+        assert status["compact_keep_recent"] == 2
+        assert status["compact_method"] == "ghrah.builtin"
+        assert status["last_real_input_tokens"] is None
+
+        configured = _make_cm(
+            window_manager=_make_window_manager(max_tokens=2000),
+            compact_threshold=0.75,
+            compact_keep_recent=3,
+        )
+        configured.record_window_occupied(1500)
+        status = configured.get_window_status()
+
+        assert status["occupied_tokens"] == 1500
+        assert status["budget_tokens"] == 2000
+        assert status["compact_threshold"] == 0.75
+        assert status["compact_keep_recent"] == 3
+
+    def test_peek_pending_compaction_readonly(self) -> None:
+        """peek 只读窥视，不排水；排水仍由 commit_iteration 负责。"""
+        cm = _make_cm()
+        cm._pending_compaction.append({"strategy": "llm_summary"})
+
+        assert cm.peek_pending_compaction() == [{"strategy": "llm_summary"}]
+        assert cm.peek_pending_compaction() == [{"strategy": "llm_summary"}]
+        assert len(cm._pending_compaction) == 1

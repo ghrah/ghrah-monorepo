@@ -14,6 +14,8 @@ from __future__ import annotations
 from typing import Any
 
 from ghrah.types.config_types import (
+    DEFAULT_COMPACT_KEEP_RECENT,
+    DEFAULT_COMPACT_METHOD,
     DEFAULT_WINDOW_MAX_TOKENS,
     ContextConfig,
     ModelOverrides,
@@ -37,6 +39,9 @@ def build_window_from_dict(data: dict[str, Any]) -> WindowConfig:
         strategies=data.get("strategies", ["tool_call_fold", "truncation"]),
         tool_call_max_length=data.get("tool_call_max_length", 500),
         sliding_window_size=data.get("sliding_window_size", 20),
+        compact_threshold=data.get("compact_threshold"),
+        compact_keep_recent=data.get("compact_keep_recent", DEFAULT_COMPACT_KEEP_RECENT),
+        compact_method=data.get("compact_method", DEFAULT_COMPACT_METHOD),
     )
 
 
@@ -78,6 +83,17 @@ def build_window_from_overrides(overrides: Any) -> WindowConfig:
         ),
         sliding_window_size=(
             overrides.sliding_window_size if overrides.sliding_window_size is not None else 20
+        ),
+        compact_threshold=overrides.compact_threshold,
+        compact_keep_recent=(
+            overrides.compact_keep_recent
+            if overrides.compact_keep_recent is not None
+            else DEFAULT_COMPACT_KEEP_RECENT
+        ),
+        compact_method=(
+            overrides.compact_method
+            if overrides.compact_method is not None
+            else DEFAULT_COMPACT_METHOD
         ),
     )
 

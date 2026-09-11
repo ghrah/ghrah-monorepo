@@ -31,6 +31,7 @@ from ghrah.core.events import CoreEventType
 from ghrah.core.exceptions import AgentError, HookError
 from ghrah.core.message import AgentMessage as Message
 from ghrah.core.message import MessageType
+from ghrah.types.config_types import WindowConfig
 
 # ----------------------------------------------------------------
 # 测试用 Mock 类
@@ -1489,3 +1490,203 @@ class TestMessageQueue:
         # 成功迭代后，消息不应回到队列
         # 它已被 ContextManager 消费
         assert agent._message_queue.empty()
+
+
+# ----------------------------------------------------------------
+# 测试：compact 决策 seam（A 阶段）
+# ----------------------------------------------------------------
+
+
+def _make_mock_llm_with_usage(input_tokens: int, output_tokens: int = 50) -> AsyncMock:
+    """创建带真实 token_usage 的 mock LLM（计量 seam 数据源）。"""
+    from ghrah.chat.format import LLMResponse
+    from ghrah.types.tokens import TokenUsage
+
+    mock_llm = AsyncMock()
+    mock_response = LLMResponse(
+        content_blocks=[TextBlock(text="reply")],
+        token_usage=TokenUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+        ),
+    )
+    mock_llm.generate.return_value = mock_response
+    mock_llm.configure_tools = MagicMock()
+    return mock_llm
+
+
+class TestCompactionDecisionSeam:
+    """token 提取 → 锚点记录 → compaction_decision 落节点 metadata。"""
+
+    @pytest.mark.asyncio
+    async def test_anchor_records_first_response_input_tokens(self) -> None:
+        """锚点取首响应 input_tokens；token_usage 求和不受影响。"""
+        agent = _create_agent()
+        agent.register_ability(MockAbility(name="conversation"))
+        mock_llm = _make_mock_llm_with_usage(input_tokens=1200)
+        agent._llm = mock_llm
+        agent._iteration_state.reset()
+        await agent._drive_loop()
+
+        status = agent._context_manager.get_window_status()
+
+        assert status["occupied_tokens"] == 1200
+        assert status["last_real_input_tokens"] == 1200
+
+        node = agent._context_manager.get_history()[-1]
+        assert node.metadata["token_usage"]["input_tokens"] == 1200
+
+    @pytest.mark.asyncio
+    async def test_no_usage_keeps_previous_anchor(self) -> None:
+        """首响应无 usage 时不覆盖旧锚点、不误触发决策。"""
+        agent = _create_agent()
+        agent.register_ability(MockAbility(name="conversation"))
+        agent._context_manager.record_window_occupied(500)
+        agent._llm = _make_mock_llm("no usage response")
+        agent._iteration_state.reset()
+        await agent._drive_loop()
+
+        status = agent._context_manager.get_window_status()
+
+        assert status["occupied_tokens"] == 500
+
+    @pytest.mark.asyncio
+    async def test_retry_response_does_not_pollute_anchor(self) -> None:
+        """空可见响应重试时，锚点仍取首响应（重试含注入提示）。"""
+        from ghrah.chat.format import LLMResponse
+        from ghrah.types.tokens import TokenUsage
+
+        agent = _create_agent()
+        agent.register_ability(MockAbility(name="conversation"))
+
+        empty_with_usage = LLMResponse(
+            content_blocks=[ReasoningBlock(reasoning="thinking")],
+            token_usage=TokenUsage(input_tokens=800, output_tokens=10, total_tokens=810),
+        )
+        retried_with_usage = LLMResponse(
+            content_blocks=[TextBlock(text="recovered")],
+            token_usage=TokenUsage(input_tokens=900, output_tokens=20, total_tokens=920),
+        )
+        mock_llm = AsyncMock()
+        mock_llm.generate.side_effect = [empty_with_usage, retried_with_usage]
+        mock_llm.configure_tools = MagicMock()
+        agent._llm = mock_llm
+        agent._all_hooks.append(StopAfterOneHook())
+        agent._iteration_state.reset()
+        await agent._drive_loop()
+
+        status = agent._context_manager.get_window_status()
+
+        # 首响应 input=800 计锚点；节点 token_usage 为两响应之和 1700
+        assert status["occupied_tokens"] == 800
+        node = agent._context_manager.get_history()[-1]
+        assert node.metadata["token_usage"]["input_tokens"] == 1700
+
+    @pytest.mark.asyncio
+    async def test_compaction_decision_written_to_node_when_configured(self) -> None:
+        """配置 threshold 后决策写进节点 metadata（审计记录）。"""
+        agent = _create_agent(
+            config=AgentConfig(
+                name="test-agent",
+                window=WindowConfig(
+                    max_tokens=1000,
+                    strategies=[],
+                    compact_threshold=0.8,
+                ),
+            ),
+        )
+        agent.register_ability(MockAbility(name="conversation"))
+        mock_llm = _make_mock_llm_with_usage(input_tokens=900)
+        agent._llm = mock_llm
+        agent._iteration_state.reset()
+        await agent._drive_loop()
+
+        node = agent._context_manager.get_history()[-1]
+
+        assert node.metadata["compaction_decision"] == {
+            "occupied": 900,
+            "threshold": 0.8,
+            "needs_compaction": True,
+        }
+
+    @pytest.mark.asyncio
+    async def test_compaction_decision_absent_when_threshold_unset(self) -> None:
+        """D10 回归：threshold=None 时节点 metadata 键集与现状一致。"""
+        agent = _create_agent()
+        agent.register_ability(MockAbility(name="conversation"))
+        mock_llm = _make_mock_llm_with_usage(input_tokens=100)
+        agent._llm = mock_llm
+        agent._iteration_state.reset()
+        await agent._drive_loop()
+
+        node = agent._context_manager.get_history()[-1]
+
+        assert "compaction_decision" not in node.metadata
+        # 现状通道照旧：token_usage 存在、无 compact 相关键
+        assert "token_usage" in node.metadata
+
+    @pytest.mark.asyncio
+    async def test_rollback_discards_decision_with_node(self) -> None:
+        """决策随节点提交落链；已提交节点保留决策，被回滚迭代不产节点。"""
+        agent = _create_agent(
+            config=AgentConfig(
+                name="test-agent",
+                window=WindowConfig(
+                    max_tokens=1000,
+                    strategies=[],
+                    compact_threshold=0.8,
+                ),
+            ),
+        )
+        agent.register_ability(MockAbility(name="conversation"))
+
+        mock_llm = AsyncMock()
+        mock_llm.generate.side_effect = [
+            # 首轮：tool call → 执行 ability 后成功提交（决策随节点落链）
+            LLMResponse(
+                content_blocks=[ToolCallBlock(id="call_1", name="test_ability", arguments={"x": 1})]
+            ),
+            # 次轮：LLM 失败 → 该迭代回滚，无节点即无决策
+            RuntimeError("vendor context limit"),
+        ]
+        mock_llm.configure_tools = MagicMock()
+        agent._llm = mock_llm
+        agent._iteration_state.reset()
+        with pytest.raises(AgentError):
+            await agent._drive_loop()
+
+        history = agent._context_manager.get_history()
+
+        # init 根节点 + 首轮成功节点，共 2 个；失败轮未产节点
+        assert len(history) == 2
+        committed = history[-1]
+        assert committed.ability_names == ["test_ability"]
+        # 已提交节点的决策保留（mock 无 usage → occupied=None, needs=False）
+        assert committed.metadata["compaction_decision"] == {
+            "occupied": None,
+            "threshold": 0.8,
+            "needs_compaction": False,
+        }
+
+    @pytest.mark.asyncio
+    async def test_builder_passes_compact_config_to_context_manager(self) -> None:
+        """AgentBuilder 将 WindowConfig 的 compact 三字段注入 ContextManager。"""
+        agent = _create_agent(
+            config=AgentConfig(
+                name="test-agent",
+                window=WindowConfig(
+                    max_tokens=2000,
+                    strategies=[],
+                    compact_threshold=0.7,
+                    compact_keep_recent=3,
+                ),
+            ),
+        )
+
+        status = agent._context_manager.get_window_status()
+
+        assert status["budget_tokens"] == 2000
+        assert status["compact_threshold"] == 0.7
+        assert status["compact_keep_recent"] == 3
+        assert status["compact_method"] == "ghrah.builtin"

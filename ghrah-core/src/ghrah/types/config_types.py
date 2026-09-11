@@ -12,6 +12,10 @@ from typing import Any
 DEFAULT_WINDOW_MAX_TOKENS = 32768
 
 
+DEFAULT_COMPACT_METHOD = "ghrah.builtin"
+DEFAULT_COMPACT_KEEP_RECENT = 2
+
+
 @dataclass
 class WindowConfig:
     """窗口管理策略配置。
@@ -25,12 +29,34 @@ class WindowConfig:
             可选值: "tool_call_fold", "sliding_window", "truncation", "llm_summary"
         tool_call_max_length: ToolCallFoldStrategy 的最大 content 长度
         sliding_window_size: SlidingWindowStrategy 的窗口大小
+        compact_threshold: 链上 compact 触发阈值（0~1 相对预算比率）；
+            None 表示不启用链上压缩，仅走现状窗口管道
+        compact_keep_recent: compact 保留窗节点数（按节点边界），最小为 2
+        compact_method: compact 综合方法名，当前唯一合法值为 "ghrah.builtin"
     """
 
     max_tokens: int = DEFAULT_WINDOW_MAX_TOKENS
     strategies: list[str] = field(default_factory=lambda: ["tool_call_fold", "truncation"])
     tool_call_max_length: int = 500
     sliding_window_size: int = 20
+    compact_threshold: float | None = None
+    compact_keep_recent: int = DEFAULT_COMPACT_KEEP_RECENT
+    compact_method: str = DEFAULT_COMPACT_METHOD
+
+    def __post_init__(self) -> None:
+        if self.compact_threshold is not None and not 0 < self.compact_threshold <= 1:
+            raise ValueError(
+                f"compact_threshold must be in (0, 1] when set, got {self.compact_threshold}"
+            )
+        if self.compact_keep_recent < 2:
+            raise ValueError(
+                f"compact_keep_recent must be >= 2 (node-pair integrity), "
+                f"got {self.compact_keep_recent}"
+            )
+        if self.compact_method != DEFAULT_COMPACT_METHOD:
+            raise ValueError(
+                f"compact_method must be {DEFAULT_COMPACT_METHOD!r}, got {self.compact_method!r}"
+            )
 
 
 @dataclass

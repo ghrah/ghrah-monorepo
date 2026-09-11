@@ -72,6 +72,9 @@ class WindowOverrides(BaseModel):
     strategies: list[str] | None = None
     tool_call_max_length: int | None = None
     sliding_window_size: int | None = None
+    compact_threshold: float | None = None
+    compact_keep_recent: int | None = None
+    compact_method: str | None = None
 
 
 class PersistenceOverrides(BaseModel):

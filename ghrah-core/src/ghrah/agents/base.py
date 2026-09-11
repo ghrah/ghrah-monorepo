@@ -528,6 +528,14 @@ class ActorAgent:
                     # 用户 ChatMessage。把投递归属写入每个节点，确保最终
                     # conversation 节点仍可稳定投影回原 Room。
                     node_metadata["delivery_context"] = dict(delivery_context)
+                # commit 前压缩决策 seam：仅在配置 compact_threshold 时产出
+                # 记录（None 时保持节点 metadata 与现状 bit 级一致）。
+                # 决策随节点提交落链；rollback 无节点，决策自然消失。
+                # needs_compaction 仅作审计与事件/UI 记录，触发以驱动循环
+                # 开头的锚点活体复评（check_compact_trigger）为准。
+                compaction_decision = cm.evaluate_compaction_decision()
+                if compaction_decision is not None:
+                    node_metadata["compaction_decision"] = compaction_decision
                 node = cm.commit_iteration(
                     ability_names=ability_names,
                     action_results=action_results,
@@ -699,6 +707,13 @@ class ActorAgent:
             llm_meta["response_metadata"] = resp_meta
         if len(llm_responses) > 1:
             llm_meta["visible_response_retry_count"] = len(llm_responses) - 1
+
+        # 链上 compact 决策锚点：取首响应 input_tokens（重试响应含注入的
+        # 协议提示，不再计量纯上下文占用）。无 usage 时沿用上一锚点，
+        # 从未有过锚点则不触发决策，交发送侧安全阀兜底。
+        first_usage = token_usages[0] if token_usages else None
+        if first_usage is not None:
+            cm.record_window_occupied(first_usage.input_tokens)
 
         # 3. 将 AI 响应添加到消息历史
         cm.add_messages([llm_response.to_chat_message(source=f"agent:{self.config.name}")])

@@ -165,9 +165,15 @@ def _build_context_manager(
             )
 
     window_manager = None
+    compact_kwargs: dict[str, Any] = {}
     if config.window is not None:
         summary_llm_factory = (lambda: llm_factory(config)) if llm_factory is not None else None
         window_manager = _build_window_manager(config.window, summary_llm_factory)
+        compact_kwargs = {
+            "compact_threshold": config.window.compact_threshold,
+            "compact_keep_recent": config.window.compact_keep_recent,
+            "compact_method": config.window.compact_method,
+        }
 
     context_config = config.context
     persistence = None
@@ -197,6 +203,7 @@ def _build_context_manager(
             else persistence_factory is not None
         ),
         message_factory=message_factory,
+        **compact_kwargs,
     )
 
 
