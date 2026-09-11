@@ -507,7 +507,7 @@ class ActorAgent:
         """
         cm = self._context_manager
         accumulated_data: dict[str, Any] = {}
-        # 紧急压缩阶梯（D13）：驱动循环级状态，跨 rollback 存活
+        # 紧急压缩阶梯：驱动循环级状态，跨 rollback 存活
         emergency_halvings = 0
 
         while self._iteration_state.should_continue:
@@ -621,7 +621,7 @@ class ActorAgent:
                 for msg in iteration_drained_messages:
                     await self._message_queue.put(msg)
 
-                # 紧急压缩阶梯（D13）：厂商上下文超限（保守类别识别，不解析
+                # 紧急压缩阶梯：厂商上下文超限（保守类别识别，不解析
                 # 数字）且仍有减半余量时，不重抛——进紧急 compact 回合
                 # （预算减半、trigger_source="emergency"），下一迭代自然重试。
                 # 每次触发都是显式信号（warning + emergency 标记）。
@@ -689,16 +689,16 @@ class ActorAgent:
     async def _run_compact_round(
         self, trigger_source: str, budget_override: int | None = None
     ) -> dict[str, Any]:
-        """执行一轮链上 compact 回合（ghrah.builtin 综合方法，v3.5 B 节）。
+        """执行一轮链上 compact 回合（ghrah.builtin 综合方法）。
 
         阈值触发（驱动循环触发门）、手动（request_compact 空闲路径）、
         紧急（厂商超限阶梯）三入口共用本例程：分割 → 折叠 → LLM 摘要 →
         快照拼接 → 自检 → 专用路径提交 → 发布事件。
 
         本回合不排空消息队列、不计 max_iterations、不执行 agent 级
-        HookPoint（D9）；摘要 LLM 用量单记节点 metadata.compaction.usage，
-        不污染主循环锚点（B.10）。LLM 摘要失败降级为确定性折叠视图提交
-        ——compact 回合必须总能产出节点（D8）。
+        HookPoint；摘要 LLM 用量单记节点 metadata.compaction.usage，
+        不污染主循环锚点。LLM 摘要失败降级为确定性折叠视图提交
+        ——compact 回合必须总能产出节点。
 
         Args:
             trigger_source: 触发来源 "threshold" | "manual" | "emergency"
@@ -767,7 +767,7 @@ class ActorAgent:
         # 摘要输入体积安全：折叠后估算超 budget×2 → 渐进丢最旧并标记
         summary_messages, truncated_input = truncate_summary_input(summary_messages, budget)
 
-        # LLM 摘要（D14③）：agent 自有 LLM；失败降级为确定性折叠视图（D8）
+        # LLM 摘要：agent 自有 LLM；失败降级为确定性折叠视图
         summary_text: str | None = None
         summary_usage: dict[str, int] | None = None
         degraded = False

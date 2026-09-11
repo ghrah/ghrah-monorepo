@@ -39,7 +39,7 @@ class LedgerUnit(SubjectUnit):
         self._ctx: Any | None = None
         self._meta = UnitMeta(
             name="ledger",
-            # LEDGER 服务键保留但不再发布实例级实现（D6：chain 永远读取
+            # LEDGER 服务键保留但不再发布实例级实现（chain 永远读取
             # 目标 Project Root，不留全局库读后门）。
             provides=frozenset(),
             routes=RouteSpec(commands=CHAIN_HISTORY_COMMANDS),

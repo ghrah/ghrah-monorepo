@@ -133,7 +133,7 @@ async def test_send_ability_serial_path_converges(tmp_path: Path) -> None:
             "room"
         ]
 
-        # 模拟 Core 侧 send ability 的落账调用（D3：serial 保持命令面统一）
+        # 模拟 Core 侧 send ability 的落账调用（serial 保持命令面统一）
         result = await _dispatch(
             ctx,
             "room_send",

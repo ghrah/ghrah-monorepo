@@ -45,7 +45,7 @@ def _build_window_manager(
     Args:
         config: 窗口管理配置
         summary_llm_factory: 可选的零参 LLM 工厂回调（闭包在
-            ``_build_context_manager`` 处捕获 AgentConfig，见 D1 设计）
+            ``_build_context_manager`` 处捕获 AgentConfig）
 
     Returns:
         配置好的 WindowManager 实例

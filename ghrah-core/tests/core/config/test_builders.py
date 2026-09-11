@@ -4,8 +4,8 @@
 
 """core/config/builders 窗口配置构建测试。
 
-覆盖 DEFAULT_WINDOW_MAX_TOKENS 默认值兜底与显式覆盖优先（工作流 B / D3），
-以及 compact_* 三字段的默认值、双向透传与非法值校验（A 阶段）。
+覆盖 DEFAULT_WINDOW_MAX_TOKENS 默认值兜底与显式覆盖优先，
+以及 compact_* 三字段的默认值、双向透传与非法值校验。
 """
 
 import pytest

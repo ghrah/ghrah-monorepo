@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Workspace 挂载语义验收（dogfood 前置工作流 A）。
+"""Workspace 挂载语义验收。
 
 验收要点：
 1. 零污染：真实 git 仓注册后 .git/config 字节级不变、无新增 commit、

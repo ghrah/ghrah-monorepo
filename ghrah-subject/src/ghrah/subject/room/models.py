@@ -5,7 +5,7 @@
 """Room 域模型：RoomRecord（元数据+成员+seq 水位）/ RoomLogRecord（append-only 日志节点）。
 
 继承 protocol RoomInfoPayload / RoomLogEntryPayload 保证 wire 一一对应
-（范式对齐 task/models.TaskRecord）。契约来源：Room 计划 §3.1 + 附录。
+（范式对齐 task/models.TaskRecord）。
 """
 
 from __future__ import annotations

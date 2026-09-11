@@ -2,12 +2,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Room bridge：Core → Subject Room 侧的最小协议面（Room 计划附录 send 回路）。
+"""Room bridge：Core → Subject Room 侧的最小协议面（send 回路）。
 
 Core 保持 standalone（零 subject 依赖）：本模块只定义 Protocol 与基于
 Ouroboros ``ctx.serial`` 命令面的桥接实现（duck-typed serial 回调）。
 
-通道语义（附录 D3 定死 serial，保持命令面统一）：
+通道语义（serial 命令面统一）：
 - ``resolve_recipients``：经 ``command/room_get`` 逐 room 展开 agent 成员，
   ∪ extra_targets 去重。
 - ``append_room_log``：经 ``command/room_send``（author_type="agent"）落账，

@@ -502,7 +502,7 @@ class TestProjectRuntimeStateGuards:
 
 
 class TestSpawnRetryAndDiagnostics:
-    """R4 回归：并发 spawn 乐观锁重试 + 运行诊断持久化。"""
+    """并发 spawn 乐观锁重试 + 运行诊断持久化回归。"""
 
     @staticmethod
     def _active_project() -> dict[str, Any]:
@@ -597,7 +597,7 @@ class TestSpawnRetryAndDiagnostics:
 
 
 async def test_default_factory_rejects_empty_locator(tmp_path: Path) -> None:
-    """R5：生产工厂空 project_root_locator 直接拒绝（无全局库回退）。"""
+    """生产工厂空 project_root_locator 直接拒绝（无全局库回退）。"""
     from ghrah.subject.core_cluster.registry import default_core_unit_factory
 
     factory = default_core_unit_factory(_config(tmp_path))

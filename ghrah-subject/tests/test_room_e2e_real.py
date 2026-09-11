@@ -233,11 +233,11 @@ class TestRoomRealEndToEnd:
             assert log["entries"][0]["seq"] == 1
 
     async def test_human_send_delivery_and_spawn_persistence(self, tmp_path: Path) -> None:
-        """投递回路冒烟（D1/D2）。
+        """投递回路冒烟。
 
-        - D2：spawn 即持久化——ghrah.db 建表 + agents 行落库（WAL 只读连接
+        - spawn 即持久化——ghrah.db 建表 + agents 行落库（WAL 只读连接
           直查真相源）；
-        - D1：room_send(human) 落账后 fire-and-forget 投递 → agent receive()
+        - room_send(human) 落账后 fire-and-forget 投递 → agent receive()
           入史（无 LLM 环境下迭代可能失败，但消息入史发生在 LLM 初始化前，
           为确定性投递证据；回复质量不在断言范围）。
         """
@@ -261,7 +261,7 @@ class TestRoomRealEndToEnd:
             )
             assert spawn["success"], spawn.get("error")
 
-            # D2：Core sqlite 真相源已按 Project Root 隔离。
+            # Core sqlite 真相源已按 Project Root 隔离。
             project = _data(await bridge_command(ctx, "project_get", {"project_id": project_id}))[
                 "project"
             ]
@@ -303,7 +303,7 @@ class TestRoomRealEndToEnd:
             )
             assert send["success"], send.get("error")
 
-            # D1：投递为 fire-and-forget，轮询 agent 入史
+            # 投递为 fire-and-forget，轮询 agent 入史
             # （supervisor 由 CoreUnit 实例自持，经 registry handle 取证）
             registry = ctx.get("core_cluster_registry")
             supervisor = registry.get_handle(project["cluster_ids"][0])._unit.supervisor

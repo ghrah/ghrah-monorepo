@@ -251,7 +251,7 @@ class TestSerialRoomBridge:
         bridge = SerialRoomBridge(serial)  # type: ignore[arg-type]
         result = await bridge.append_room_log("r1", author="architect", data={"message": "hi"})
         assert result["success"]
-        # D3 契约：command/room_send + author_type 固定 agent
+        # 契约：command/room_send + author_type 固定 agent
         name, payload = calls[0]
         assert name == "room_send"
         assert payload == {

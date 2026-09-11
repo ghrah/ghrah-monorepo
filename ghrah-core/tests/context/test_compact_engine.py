@@ -2,12 +2,12 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""链上 compact 引擎（ghrah.builtin）纯函数与专用提交路径测试（B 阶段）。
+"""链上 compact 引擎（ghrah.builtin）纯函数与专用提交路径测试。
 
 覆盖：
 - 窗口分割与消息重组边界（吸收不堆叠、保留窗不含 compact 节点展开）
 - 折叠/摘要输入截断/快照拼接布局/提交前自检
-- commit_compact_node 专用路径（P2 回归：快照即压缩视图而非活 store
+- commit_compact_node 专用路径（回归：快照即压缩视图而非活 store
   旧全量；提交后 store 重建；分支切回后原始上下文完整回来）
 """
 
@@ -278,10 +278,10 @@ class TestAssembleAndPostCheck:
 
 
 class TestCommitCompactNode:
-    """专用提交路径（P2 回归）。"""
+    """专用提交路径。"""
 
     def test_snapshot_is_compressed_view_not_live_store(self) -> None:
-        """compact 节点快照 == 压缩视图 ≠ 活 store 旧全量（P2 核心回归）。"""
+        """compact 节点快照 == 压缩视图 ≠ 活 store 旧全量（核心回归）。"""
         cm = _make_cm()
         _seed_rounds(cm, rounds=4)
 
@@ -317,7 +317,7 @@ class TestCommitCompactNode:
         assert [m.text for m in cm.get_messages()] == [m.text for m in view]
 
     def test_anchor_invalidated_and_not_snapshot_rhythm(self) -> None:
-        """提交后锚点失效（D15）；compact 节点不打乱后续常规快照节奏。"""
+        """提交后锚点失效；compact 节点不打乱后续常规快照节奏。"""
         cm = _make_cm(snapshot_interval=3)
         _seed_rounds(cm, rounds=3)
         cm.record_window_occupied(999)

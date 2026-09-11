@@ -4,7 +4,7 @@
 
 """窗口压缩（compaction）集成测试。
 
-覆盖 ContextManager 与 LLMSummaryStrategy 的端到端行为（工作流 B 验收）：
+覆盖 ContextManager 与 LLMSummaryStrategy 的端到端行为：
 - 超预算时真实触发 LLM 摘要，早期事实进入摘要输入
 - commit_iteration 将 compaction 事件写入节点 metadata
 - rollback_iteration 清空未提交的 compaction 记录

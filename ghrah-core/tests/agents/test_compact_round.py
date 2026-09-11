@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""compact 回合编排测试（B 阶段：触发门 / ghrah.builtin 流程 / 紧急阶梯）。
+"""compact 回合编排测试（触发门 / ghrah.builtin 流程 / 紧急阶梯）。
 
 覆盖：
 - 阈值触发：锚点 >= threshold → 下一轮进 compact 回合（不计 max_iterations、
@@ -115,7 +115,7 @@ class TestThresholdTriggerGate:
 
     @pytest.mark.asyncio
     async def test_compact_round_not_counted_in_iterations(self) -> None:
-        """compact 回合不消耗 max_iterations（D9：引擎自维护动作）。"""
+        """compact 回合不消耗 max_iterations（引擎自维护动作）。"""
         agent = _create_agent(_compact_config())
         agent._llm = _summary_llm()
         agent._iteration_state.max_iterations = 2
@@ -136,7 +136,7 @@ class TestThresholdTriggerGate:
 
     @pytest.mark.asyncio
     async def test_compact_round_does_not_drain_queue_or_run_hooks(self) -> None:
-        """compact 回合不排空消息队列、不执行 agent 级 HookPoint（D9）。"""
+        """compact 回合不排空消息队列、不执行 agent 级 HookPoint。"""
         from ghrah.abilities.hooks import Hook, HookPoint
 
         class _CountingHook(Hook):
@@ -241,7 +241,7 @@ class TestSnapshotLayout:
 
     @pytest.mark.asyncio
     async def test_summary_llm_failure_degrades_to_folded_view(self) -> None:
-        """LLM 摘要失败 → 折叠视图提交，degraded=True，不停摆（D8）。"""
+        """LLM 摘要失败 → 折叠视图提交，degraded=True，不停摆。"""
         agent = _create_agent(_compact_config())
         llm = AsyncMock()
         llm.generate.side_effect = RuntimeError("summary llm down")
@@ -296,7 +296,7 @@ class TestSnapshotLayout:
 
 
 class TestEmergencyLadder:
-    """紧急压缩阶梯（D13）。"""
+    """紧急压缩阶梯。"""
 
     @pytest.mark.asyncio
     async def test_context_limit_error_triggers_emergency_compact_and_retry(self) -> None:

@@ -729,12 +729,12 @@ class TestContextManagerIntegration:
 
 
 # ----------------------------------------------------------------
-# TestWindowOccupancyAnchor — 窗口占用锚点与 compact 决策（A 阶段）
+# TestWindowOccupancyAnchor — 窗口占用锚点与 compact 决策
 # ----------------------------------------------------------------
 
 
 class TestWindowOccupancyAnchor:
-    """占用锚点记录、D15 失效合约与决策/触发辅助。"""
+    """占用锚点记录、失效合约与决策/触发辅助。"""
 
     def test_record_window_occupied_sets_anchor_and_last_real(self) -> None:
         """record 同时更新锚点与 last_real_input_tokens。"""
@@ -829,7 +829,7 @@ class TestWindowOccupancyAnchor:
         assert cm.consume_compact_request() is False
 
     def test_rollback_invalidates_anchor_but_keeps_store(self) -> None:
-        """P5 回归：rollback 后锚点失效（None），store 不动、消息不丢。"""
+        """回归：rollback 后锚点失效（None），store 不动、消息不丢。"""
         cm = _make_cm()
         cm.begin_iteration()
         cm.add_messages([ChatMessage.user(text_or_blocks="first")])

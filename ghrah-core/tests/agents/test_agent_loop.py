@@ -1493,7 +1493,7 @@ class TestMessageQueue:
 
 
 # ----------------------------------------------------------------
-# 测试：compact 决策 seam（A 阶段）
+# 测试：compact 决策 seam
 # ----------------------------------------------------------------
 
 
@@ -1612,7 +1612,7 @@ class TestCompactionDecisionSeam:
 
     @pytest.mark.asyncio
     async def test_compaction_decision_absent_when_threshold_unset(self) -> None:
-        """D10 回归：threshold=None 时节点 metadata 键集与现状一致。"""
+        """回归：threshold=None 时节点 metadata 键集与现状一致。"""
         agent = _create_agent()
         agent.register_ability(MockAbility(name="conversation"))
         mock_llm = _make_mock_llm_with_usage(input_tokens=100)

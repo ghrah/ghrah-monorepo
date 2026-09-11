@@ -574,7 +574,7 @@ class TestProjectAddRemoveAgent:
     async def test_add_agent_persists_runtime_diagnostics(
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
-        """R4：运行诊断随定义持久化（error/running），重启后仍可读。"""
+        """运行诊断随定义持久化（error/running），重启后仍可读。"""
         events: list[tuple[str, dict[str, Any]]] = []
         transport = _FakeClusterTransport()
         mgr = _make_manager(

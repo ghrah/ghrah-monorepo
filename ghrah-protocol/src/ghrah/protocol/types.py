@@ -1664,7 +1664,7 @@ class RoomGetLogPayload(BaseModel):
 
 class RoomSendPayload(BaseModel):
     """room_send 命令载荷（人类/Mock 公开路径；agent 路径由 Core send
-    ability 解析后经同一命令面收敛，见 Room 计划附录双调用方分流）。"""
+    ability 解析后经同一命令面收敛，双调用方分流）。"""
 
     room_id: str
     author: str

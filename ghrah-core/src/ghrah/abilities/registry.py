@@ -198,5 +198,5 @@ class AbilityRegistry:
             raise ManifestValidationError(
                 f"Unsupported implementation type: '{impl.type}' "
                 f"for ability '{resolved.ability_name}'. "
-                f"Only 'builtin' and 'python' are supported in P1."
+                f"Only 'builtin' and 'python' are supported."
             )

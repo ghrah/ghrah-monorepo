@@ -135,7 +135,7 @@ def collect_window_messages(
 def fold_long_tool_outputs(
     messages: list[WindowableMessage], max_length: int, message_factory: MessageFactory | None
 ) -> list[WindowableMessage]:
-    """对消息列表中 role="tool" 的超长工具输出做确定性折叠（D14②）。
+    """对消息列表中 role="tool" 的超长工具输出做确定性折叠。
 
     Args:
         messages: 待折叠消息
@@ -217,7 +217,7 @@ def assemble_snapshot(
     kept_messages: list[WindowableMessage],
     message_factory: MessageFactory,
 ) -> list[WindowableMessage]:
-    """拼接 compact 快照视图（D14④）。
+    """拼接 compact 快照视图。
 
     布局：[system(session), 前置提示消息, 摘要消息, 保留窗消息…]。
     summary_text 为 None 时是降级路径——折叠后的摘要侧消息原样插入

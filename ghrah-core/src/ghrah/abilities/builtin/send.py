@@ -4,7 +4,7 @@
 
 """SendAbility：向 room（及可选定向 targets）发消息的 send 工具。
 
-Room 计划 D2/附录 send 回路（agent 自觉调用路径）：
+send 回路（agent 自觉调用路径）：
 - 入参 ``{room_ids, targets?, message}``；
 - recipients = Σ room 的 agent 成员 ∪ targets 去重（RoomBridge 解析）；
 - Supervisor 投递（后台 fire-and-forget，排除发送者自身）；

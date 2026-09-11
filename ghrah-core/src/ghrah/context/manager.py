@@ -891,8 +891,8 @@ class ContextManager:
     def record_window_occupied(self, real_input_tokens: int) -> None:
         """记录最近一次主循环真实 LLM 调用的 input_tokens 锚点。
 
-        该锚点是链上 compact 决策的唯一计量权威（D4）：决策与触发均以
-        真实用量为准，估算值不参与。锚点仅在两处失效（D15）：
+        该锚点是链上 compact 决策的唯一计量权威：决策与触发均以
+        真实用量为准，估算值不参与。锚点仅在两处失效：
         ``_restore_active_context``（head 变更）与 ``rollback_iteration``。
 
         Args:
@@ -929,7 +929,7 @@ class ContextManager:
     def check_compact_trigger(self) -> bool:
         """触发门判定（锚点活体复评）。
 
-        供驱动循环在每轮迭代开头、普通 action 之前调用（B 节接线）：
+        供驱动循环在每轮迭代开头、普通 action 之前调用：
         (a) 手动标志（显式意图，不受锚点状态否决）；
         (b) 活体锚点达到阈值（空窗跳过标志置位时抑制——振荡防护）。
         节点 metadata 的 ``needs_compaction`` 仅作审计记录，不作为触发依据。

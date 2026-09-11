@@ -116,7 +116,7 @@ OnEvent = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 def _err_code(code: str, detail: str = "") -> dict[str, Any]:
-    """稳定码 + 细节的双字段失败回执（R6 契约）。"""
+    """稳定码 + 细节的双字段失败回执。"""
     return {
         "success": False,
         "data": None,

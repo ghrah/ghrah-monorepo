@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""稳定错误码契约（阶段 D 门禁修复 R6）。
+"""稳定错误码契约。
 
 失败回执统一为 ``{"success": False, "data": None, "error": <稳定码>,
 "error_detail": <人类可读细节>}``：前端/测试按 ``error`` 精确匹配，

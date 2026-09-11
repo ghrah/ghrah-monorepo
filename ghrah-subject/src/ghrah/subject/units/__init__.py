@@ -32,7 +32,7 @@ async def mount_builtin_units(
     同时打开同一 SQLite 文件触发 ``database is locked``）。
 
     RoomUnit 在 ProjectUnit 之后（requires PROJECT_MANAGER）、CoreUnit 经
-    registry 懒挂载必然在后——满足 Room 计划附录「RoomUnit 先于 CoreUnit
+    registry 懒挂载必然在后——满足「RoomUnit 先于 CoreUnit
     挂载」的装配顺序要求（send 回路唯一跨 unit 耦合点）。
     """
 

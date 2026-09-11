@@ -130,7 +130,7 @@ class ProjectManagerService(Protocol):
 class RoomManagerService(Protocol):
     """Room command orchestration contract exposed to runtime dispatch.
 
-    send 收敛点（Room 计划附录双调用方分流）：Core send ability 经
+    send 收敛点（双调用方分流）：Core send ability 经
     ``ctx.serial("command/room_send", ...)``（handle_command）或本服务直调
     ``append_log`` 落账，两路径同语义。
     """

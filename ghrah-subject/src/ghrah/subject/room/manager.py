@@ -7,7 +7,7 @@
 范式对齐 task/manager.TaskManager：``_HANDLERS`` 表 + ``_ok/_err`` +
 ValidationError 收窄；纯 store + 回调，不依赖 SubjectContext，便于独立单测。
 
-send 双路径收敛（Room 计划附录）：协议面（human/Mock ``room_send`` 命令）与
+send 双路径收敛：协议面（human/Mock ``room_send`` 命令）与
 实现面（agent 经 Core send ability → ``ctx.serial("command/room_send")``）
 都汇入 ``append_log``——分配 seq、落库、广播 ROOM_LOG_APPENDED。
 
@@ -408,7 +408,7 @@ class RoomManager:
         if error is not None:
             return error
         assert room is not None
-        # 写时校验：author 合法 = human 或 room 成员 agent（附录契约）
+        # 写时校验：author 合法 = human 或 room 成员 agent
         if p.author_type == RoomSubjectType.AGENT and not any(
             m.subject == p.author for m in room.members
         ):

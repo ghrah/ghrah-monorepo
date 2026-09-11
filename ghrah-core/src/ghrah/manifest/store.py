@@ -22,9 +22,8 @@ __all__ = ["BuiltinManifestStore"]
 class BuiltinManifestStore:
     """基于 builtins YAML 包的 ManifestStore 实现。
 
-    仅支持 load_ability，不支持持久化写入。
-    用于 P1 阶段的测试和基本集成。
-    P2 的 ManifestStore 实现在 ghrah-subject 中提供完整文件系统 CRUD。
+    仅支持 load_ability，不支持持久化写入（测试与基本集成用）。
+    完整 ManifestStore 实现在 ghrah-subject 中提供文件系统 CRUD。
 
     内置 manifest 通过 cached_property 惰性加载，首次访问时解析 YAML。
     底层依赖 load_all_builtin_manifests() 的 lru_cache 缓存。
