@@ -60,6 +60,7 @@ from ghrah.abilities.builtin.move_file import MoveFileAbility
 from ghrah.abilities.builtin.query_agents import QueryAgentsAbility
 from ghrah.abilities.builtin.query_manifests import QueryManifestsAbility
 from ghrah.abilities.builtin.read_file import ReadFileAbility
+from ghrah.abilities.builtin.recall_context import RecallContextAbility
 from ghrah.abilities.builtin.search_files import SearchFilesAbility
 from ghrah.abilities.builtin.send import SendAbility
 from ghrah.abilities.builtin.send_message import SendMessageAbility
@@ -89,6 +90,7 @@ __all__ = [
     "SpawnAgentAbility",
     "TerminateAgentAbility",
     "QueryManifestsAbility",
+    "RecallContextAbility",
     "SendAbility",
     # 文件系统权限模块
     "FSPermissionChecker",
