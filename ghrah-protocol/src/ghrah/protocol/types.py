@@ -70,6 +70,7 @@ class CommandType(StrEnum):
     HEALTH_CHECK = "health_check"
     DELEGATE = "delegate"
     GET_AGENT_INFO = "get_agent_info"
+    AGENT_COMPACT_CONTEXT = "agent_compact_context"
 
     # ─── Supervisor 类（Observer → Subject → Core）───
     INIT_CLUSTER = "init_cluster"
@@ -203,6 +204,7 @@ class EventType(StrEnum):
     HEALTH_STATUS = "health_status"
     ABILITY_RESULT = "ability_result"
     HITL_REQUEST = "hitl_request"
+    CONTEXT_USAGE_UPDATED = "context_usage_updated"
     WORKSPACE_CREATED = "workspace_created"
     WORKSPACE_DESTROYED = "workspace_destroyed"
     WORKSPACE_SNAPSHOT_CREATED = "workspace_snapshot_created"
@@ -278,6 +280,7 @@ AGENT_SCOPED_EVENT_TYPES: frozenset[str] = frozenset(
         EventType.ACTION_CHAIN_UPDATED.value,
         EventType.ABILITY_RESULT.value,
         EventType.HITL_REQUEST.value,
+        EventType.CONTEXT_USAGE_UPDATED.value,
         EventType.SESSION_CREATED.value,
         EventType.SESSION_ACTIVATED.value,
         EventType.SESSION_ARCHIVED.value,
@@ -349,6 +352,7 @@ CORE_COMMANDS: frozenset[str] = frozenset(
         CommandType.HEALTH_CHECK.value,
         CommandType.DELEGATE.value,
         CommandType.GET_AGENT_INFO.value,
+        CommandType.AGENT_COMPACT_CONTEXT.value,
         CommandType.INIT_CLUSTER.value,
         CommandType.SHUTDOWN_CLUSTER.value,
         CommandType.CLUSTER_STATUS.value,
@@ -791,6 +795,34 @@ class HITLRequestPayload(BaseModel):
     context: dict[str, Any] = Field(default_factory=dict)
 
 
+class ContextUsageUpdatedPayload(BaseModel):
+    """context_usage_updated 事件载荷。
+
+    Core → Subject → Observer：上下文占用状态感知出口（pre_call/post_call
+    双相位）。occupied_tokens 为真实 usage 权威口径：pre_call 取占用锚点
+    （可能为 None，如首次调用/head 变更后），post_call 取本次 LLM 调用
+    真实 input_tokens（basis="real"）。budget_tokens 为运营者声明预算
+    （无 WindowManager 时为 0），须按目标模型真实窗口 − 输出余量设定。
+    """
+
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
+    agent_name: str
+    phase: str
+    """发布相位："pre_call"（发送前，占用锚点口径）/ "post_call"（响应后，真实值口径）"""
+    occupied_tokens: int | None = None
+    basis: str
+    """occupied_tokens 计量口径："anchor"（占用锚点）/"real"（本次调用真实值）"""
+    budget_tokens: int = 0
+    compact_threshold: float | None = None
+    real_input_tokens: int | None = None
+    real_output_tokens: int | None = None
+    compaction: dict[str, Any] | None = None
+    """本轮压缩决策记录（compaction_decision；未配置窗口时为 None）"""
+    iteration: int | None = None
+
+
 class HITLResponsePayload(BaseModel):
     """hitl_response 命令载荷。
 
@@ -831,6 +863,20 @@ class GetAgentInfoPayload(BaseModel):
     project_id: str
     agent_id: str
     name: str
+
+
+class AgentCompactContextPayload(BaseModel):
+    """agent_compact_context 命令载荷。
+
+    Observer → Subject → Core：手动触发链上 compact 回合。
+    迭代中：置标志、下一节点提交前消费、进 compact 回合；空闲：直接执行
+    一轮 compact；连续多次请求合并（幂等）。
+    """
+
+    project_id: str
+    agent_id: str
+    agent_name: str
+    cluster_id: str = ""
 
 
 class InitClusterPayload(BaseModel):
@@ -1965,6 +2011,7 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     CommandType.SUBSCRIBE: SubscribePayload,
     CommandType.UNSUBSCRIBE: UnsubscribePayload,
     CommandType.GET_AGENT_INFO: GetAgentInfoPayload,
+    CommandType.AGENT_COMPACT_CONTEXT: AgentCompactContextPayload,
     CommandType.INIT_CLUSTER: InitClusterPayload,
     CommandType.SHUTDOWN_CLUSTER: ShutdownClusterPayload,
     CommandType.CLUSTER_STATUS: ClusterStatusPayload,
@@ -2048,6 +2095,7 @@ EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
     EventType.HEALTH_STATUS: HealthStatusPayload,
     EventType.ABILITY_RESULT: AbilityResultPayload,
     EventType.HITL_REQUEST: HITLRequestPayload,
+    EventType.CONTEXT_USAGE_UPDATED: ContextUsageUpdatedPayload,
     EventType.WORKSPACE_CREATED: WorkspaceCreatedPayload,
     EventType.WORKSPACE_DESTROYED: WorkspaceDestroyedPayload,
     EventType.WORKSPACE_SNAPSHOT_CREATED: WorkspaceSnapshotCreatedPayload,

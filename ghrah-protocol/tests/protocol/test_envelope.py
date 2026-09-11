@@ -21,14 +21,18 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from ghrah.protocol.types import (
+    AGENT_SCOPED_EVENT_TYPES,
     COMMAND_PAYLOAD_MAP,
+    CORE_COMMANDS,
     EVENT_PAYLOAD_MAP,
     PAYLOAD_MAP,
     AbilityResultPayload,
+    AgentCompactContextPayload,
     AgentResponsePayload,
     AgentSpawnedPayload,
     CommandResultPayload,
     CommandType,
+    ContextUsageUpdatedPayload,
     Envelope,
     ErrorPayload,
     EventType,
@@ -372,6 +376,68 @@ class TestPayloadMap:
     def test_map_values_are_basemodel_subclasses(self):
         for cls in PAYLOAD_MAP.values():
             assert issubclass(cls, BaseModel)
+
+
+class TestCompactContextContracts:
+    """agent_compact_context 命令与 context_usage_updated 事件契约。"""
+
+    def test_agent_compact_context_registered(self):
+        """命令 + payload 双登记，且归入 CORE_COMMANDS（Observer → Subject → Core 转发类）。"""
+        assert COMMAND_PAYLOAD_MAP[CommandType.AGENT_COMPACT_CONTEXT] is AgentCompactContextPayload
+        assert CommandType.AGENT_COMPACT_CONTEXT.value in CORE_COMMANDS
+
+    def test_context_usage_updated_registered(self):
+        """事件 + payload 双登记，且归入 AGENT_SCOPED（发布须带非空归属）。"""
+        assert EVENT_PAYLOAD_MAP[EventType.CONTEXT_USAGE_UPDATED] is ContextUsageUpdatedPayload
+        assert EventType.CONTEXT_USAGE_UPDATED.value in AGENT_SCOPED_EVENT_TYPES
+
+    def test_agent_compact_context_envelope_round_trip(self):
+        """命令载荷经 envelope_from_dict 收窄往返不丢字段。"""
+        env = envelope_from_dict(
+            {
+                "type": "agent_compact_context",
+                "payload": {
+                    "project_id": "p1",
+                    "agent_id": "a1",
+                    "agent_name": "writer",
+                    "cluster_id": "c1",
+                },
+            }
+        )
+        assert isinstance(env.payload, AgentCompactContextPayload)
+        narrowed = expect_payload(env, AgentCompactContextPayload)
+        assert narrowed.agent_name == "writer"
+        assert narrowed.cluster_id == "c1"
+
+    def test_context_usage_updated_envelope_round_trip(self):
+        """事件载荷（pre_call 锚点口径 + None 真实值）收窄往返不丢字段。"""
+        env = envelope_from_dict(
+            {
+                "type": "context_usage_updated",
+                "payload": {
+                    "project_id": "p1",
+                    "agent_id": "a1",
+                    "agent_name": "writer",
+                    "phase": "pre_call",
+                    "occupied_tokens": None,
+                    "basis": "anchor",
+                    "budget_tokens": 32000,
+                    "compact_threshold": 0.8,
+                    "compaction": {
+                        "occupied": None,
+                        "threshold": 0.8,
+                        "needs_compaction": False,
+                    },
+                    "iteration": 3,
+                },
+            }
+        )
+        assert isinstance(env.payload, ContextUsageUpdatedPayload)
+        narrowed = expect_payload(env, ContextUsageUpdatedPayload)
+        assert narrowed.phase == "pre_call"
+        assert narrowed.basis == "anchor"
+        assert narrowed.occupied_tokens is None
+        assert narrowed.compaction["needs_compaction"] is False
 
 
 # ─── S1.1 验收：known_type / as_*_type 辅助 ───

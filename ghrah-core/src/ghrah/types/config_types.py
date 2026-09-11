@@ -24,7 +24,10 @@ class WindowConfig:
 
     Attributes:
         max_tokens: LLM 上下文窗口大小（token 预算），默认
-            DEFAULT_WINDOW_MAX_TOKENS（32768）；manifest/wire 显式覆盖优先
+            DEFAULT_WINDOW_MAX_TOKENS（32768）；manifest/wire 显式覆盖优先。
+            预算是运营者声明合约：引擎永不推断目标模型的真实窗口，
+            须按目标模型真实窗口 − 输出余量设定；厂商上下文超限错误是
+            唯一运行时真相信号（触发紧急压缩阶梯）
         strategies: 策略名称列表，按执行顺序排列
             可选值: "tool_call_fold", "sliding_window", "truncation", "llm_summary"
         tool_call_max_length: ToolCallFoldStrategy 的最大 content 长度
