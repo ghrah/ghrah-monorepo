@@ -23,6 +23,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from ghrah.context.compact import SUMMARY_MESSAGE_PREFIX
 from ghrah.context.window import WindowStrategy, _split_system_messages, estimate_tokens
 from ghrah.core.window_protocol import (
     MessageFactory,
@@ -30,7 +31,7 @@ from ghrah.core.window_protocol import (
     WindowableMessage,
 )
 
-__all__ = ["LLMSummaryStrategy"]
+__all__ = ["LLMSummaryStrategy", "format_messages_for_summary", "get_role_label"]
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +42,51 @@ _DEFAULT_SUMMARY_PROMPT = (
     "Write the summary in the same language as the conversation."
 )
 
-# 摘要消息前缀
-_SUMMARY_PREFIX = "[Context Summary] "
+# 摘要消息前缀（单一来源在 ghrah.context.compact）
+_SUMMARY_PREFIX = SUMMARY_MESSAGE_PREFIX
+
+
+def get_role_label(msg: WindowableMessage) -> str:
+    """获取消息的角色标签（纯函数，compact/recall 复用）。
+
+    Args:
+        msg: WindowableMessage 对象
+
+    Returns:
+        角色标签字符串
+    """
+    if msg.role == "system":
+        return "System"
+    elif msg.role == "user":
+        return "Human"
+    elif msg.role == "ai":
+        return "AI"
+    elif msg.role == "tool":
+        tool_results = msg.tool_results
+        if tool_results:
+            name = getattr(tool_results[0], "name", None) or "unknown"
+            return f"Tool({name})"
+        return "Tool"
+    else:
+        return "Unknown"
+
+
+def format_messages_for_summary(messages: list[WindowableMessage]) -> str:
+    """将消息列表格式化为摘要用的文本（纯函数，compact/recall 复用）。
+
+    Args:
+        messages: 消息列表
+
+    Returns:
+        格式化后的文本
+    """
+    lines: list[str] = []
+    for msg in messages:
+        role = get_role_label(msg)
+        content = msg.text
+        lines.append(f"{role}: {content}")
+
+    return "\n".join(lines)
 
 
 class LLMSummaryStrategy(WindowStrategy):
@@ -260,7 +304,7 @@ class LLMSummaryStrategy(WindowStrategy):
         return self._factory_llm
 
     def _format_messages_for_summary(self, messages: list[WindowableMessage]) -> str:
-        """将消息列表格式化为摘要用的文本。
+        """将消息列表格式化为摘要用的文本（委托模块级纯函数）。
 
         Args:
             messages: 消息列表
@@ -268,16 +312,10 @@ class LLMSummaryStrategy(WindowStrategy):
         Returns:
             格式化后的文本
         """
-        lines: list[str] = []
-        for msg in messages:
-            role = self._get_role_label(msg)
-            content = msg.text
-            lines.append(f"{role}: {content}")
-
-        return "\n".join(lines)
+        return format_messages_for_summary(messages)
 
     def _get_role_label(self, msg: WindowableMessage) -> str:
-        """获取消息的角色标签。
+        """获取消息的角色标签（委托模块级纯函数）。
 
         Args:
             msg: WindowableMessage 对象
@@ -285,22 +323,7 @@ class LLMSummaryStrategy(WindowStrategy):
         Returns:
             角色标签字符串
         """
-        if msg.role == "system":
-            return "System"
-        elif msg.role == "user":
-            return "Human"
-        elif msg.role == "ai":
-            if msg.has_tool_calls:
-                return "AI"
-            return "AI"
-        elif msg.role == "tool":
-            tool_results = msg.tool_results
-            if tool_results:
-                name = getattr(tool_results[0], "name", None) or "unknown"
-                return f"Tool({name})"
-            return "Tool"
-        else:
-            return "Unknown"
+        return get_role_label(msg)
 
     @property
     def llm(self) -> SummaryLLMProtocol | None:

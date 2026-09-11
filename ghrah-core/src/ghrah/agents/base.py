@@ -89,6 +89,32 @@ _VISIBLE_RESPONSE_RETRY_PROMPT = (
 )
 _EMPTY_VISIBLE_RESPONSE = "模型未返回可展示的正文，请重试。"
 
+# 厂商上下文超限错误保守识别白名单（D12/D13）：只认确定类别，不解析数字。
+# 类型名匹配 SDK 异常类（如 anthropic.BadRequestError 子类不可枚举，故用
+# 消息短语为主、类型名为辅的双通道；误判会吞真实故障，宁缺勿滥）。
+_CONTEXT_LIMIT_TYPE_MARKERS = ("contextwindowexceeded", "contextlengthexceeded")
+_CONTEXT_LIMIT_MESSAGE_MARKERS = (
+    "context_length_exceeded",
+    "prompt is too long",
+    "maximum context length",
+    "exceeds the context window",
+    "exceed the context window",
+    "exceed context limit",
+    "too many input tokens",
+)
+
+# 紧急压缩阶梯（D13）：最多减半 4 次（budget/16）
+_MAX_EMERGENCY_HALVINGS = 4
+
+
+def _is_context_limit_error(exc: BaseException) -> bool:
+    """保守判定异常是否为厂商上下文超限类别（不解析报文数字）。"""
+    type_name = type(exc).__name__.lower()
+    if any(marker in type_name for marker in _CONTEXT_LIMIT_TYPE_MARKERS):
+        return True
+    message = str(exc).lower()
+    return any(marker in message for marker in _CONTEXT_LIMIT_MESSAGE_MARKERS)
+
 
 class ActorAgent:
     """基于 Ability 组合的 Agent Actor。
@@ -481,8 +507,19 @@ class ActorAgent:
         """
         cm = self._context_manager
         accumulated_data: dict[str, Any] = {}
+        # 紧急压缩阶梯（D13）：驱动循环级状态，跨 rollback 存活
+        emergency_halvings = 0
 
         while self._iteration_state.should_continue:
+            # 0. compact 触发门（锚点活体复评，v3.5 A.4/B.1）——位于
+            # BEFORE_ACTION hook 之前：compact 回合不执行任何 agent 级
+            # HookPoint（D9）。命中后执行 compact 例程替代本轮 _action：
+            # 不排空消息队列、不计 max_iterations、不 advance。
+            if cm.check_compact_trigger():
+                trigger_source = "manual" if cm.compact_requested else "threshold"
+                await self._run_compact_round(trigger_source)
+                continue
+
             # 1. BEFORE_ACTION hook（drive_loop 级）
             before_ctx = self._build_hook_context(accumulated_data)
             hook_result = await self._run_hooks(HookPoint.BEFORE_ACTION, before_ctx)
@@ -584,6 +621,27 @@ class ActorAgent:
                 for msg in iteration_drained_messages:
                     await self._message_queue.put(msg)
 
+                # 紧急压缩阶梯（D13）：厂商上下文超限（保守类别识别，不解析
+                # 数字）且仍有减半余量时，不重抛——进紧急 compact 回合
+                # （预算减半、trigger_source="emergency"），下一迭代自然重试。
+                # 每次触发都是显式信号（warning + emergency 标记）。
+                if (
+                    _is_context_limit_error(e)
+                    and cm.window_manager is not None
+                    and emergency_halvings < _MAX_EMERGENCY_HALVINGS
+                ):
+                    emergency_halvings += 1
+                    budget_override = cm.window_manager.max_tokens // 2**emergency_halvings
+                    logger.warning(
+                        "ActorAgent[%s]: vendor context limit exceeded — emergency compact "
+                        "(halving %d/4, budget=%d)",
+                        self.config.name,
+                        emergency_halvings,
+                        budget_override,
+                    )
+                    await self._run_compact_round("emergency", budget_override=budget_override)
+                    continue
+
                 error_ctx = self._build_hook_context(accumulated_data)
                 await self._run_hooks(HookPoint.ON_ERROR, error_ctx)
                 raise AgentError(self.config.name, f"Action failed: {e}") from e
@@ -627,6 +685,181 @@ class ActorAgent:
                 break
 
             self._iteration_state.advance()
+
+    async def _run_compact_round(
+        self, trigger_source: str, budget_override: int | None = None
+    ) -> dict[str, Any]:
+        """执行一轮链上 compact 回合（ghrah.builtin 综合方法，v3.5 B 节）。
+
+        阈值触发（驱动循环触发门）、手动（request_compact 空闲路径）、
+        紧急（厂商超限阶梯）三入口共用本例程：分割 → 折叠 → LLM 摘要 →
+        快照拼接 → 自检 → 专用路径提交 → 发布事件。
+
+        本回合不排空消息队列、不计 max_iterations、不执行 agent 级
+        HookPoint（D9）；摘要 LLM 用量单记节点 metadata.compaction.usage，
+        不污染主循环锚点（B.10）。LLM 摘要失败降级为确定性折叠视图提交
+        ——compact 回合必须总能产出节点（D8）。
+
+        Args:
+            trigger_source: 触发来源 "threshold" | "manual" | "emergency"
+            budget_override: 紧急阶梯的减半预算（None 用声明预算）
+
+        Returns:
+            回执 dict：executed=False 时含 reason（"empty_window" 振荡
+            防护——窗外无节点，标志已清）；executed=True 时含 node_id、
+            degraded、post_check
+        """
+        from ghrah.context.compact import (
+            COMPACT_DEGRADED_PREAMBLE,
+            COMPACT_PREAMBLE_TEMPLATE,
+            COMPACT_SUMMARY_PROMPT,
+            assemble_snapshot,
+            collect_window_messages,
+            fold_long_tool_outputs,
+            post_check_snapshot,
+            split_compact_windows,
+            truncate_summary_input,
+        )
+        from ghrah.context.persistence.serialization import serialize_node
+        from ghrah.context.strategies.llm_summary import format_messages_for_summary
+        from ghrah.context.window import estimate_tokens
+
+        cm = self._context_manager
+        status = cm.get_window_status()
+        keep_recent = status["compact_keep_recent"]
+
+        # 手动标志在此消费（含连续请求合并语义）；窗外为空时同样视为
+        # 已消费——否则标志残留会导致每轮进回合再退出，振荡
+        manual_requested = cm.consume_compact_request()
+
+        windows = split_compact_windows(cm.get_history(), keep_recent)
+        if windows is None:
+            logger.info(
+                "ActorAgent[%s]: compact round skipped — nothing outside keep window",
+                self.config.name,
+            )
+            if trigger_source == "threshold":
+                # 振荡防护：锚点仍 >= trigger 但窗外已空，抑制阈值触发
+                # 直到下一个真实锚点重新武装（手动/紧急不受否决）
+                cm.skip_compact_until_reanchor()
+            return {"executed": False, "reason": "empty_window", "merged": not manual_requested}
+        summary_nodes, kept_nodes = windows
+
+        summary_messages, kept_messages = collect_window_messages(summary_nodes, kept_nodes)
+
+        message_factory = cm.message_factory
+        if message_factory is None:
+            from ghrah.chat.factory import ChatMessageFactory
+
+            message_factory = ChatMessageFactory()
+
+        window_config = self.config.window
+        fold_max_length = window_config.tool_call_max_length if window_config is not None else 500
+        summary_messages = fold_long_tool_outputs(
+            summary_messages, fold_max_length, message_factory
+        )
+        kept_messages = fold_long_tool_outputs(kept_messages, fold_max_length, message_factory)
+
+        budget = budget_override
+        if budget is None:
+            budget = status["budget_tokens"]
+
+        # 摘要输入体积安全：折叠后估算超 budget×2 → 渐进丢最旧并标记
+        summary_messages, truncated_input = truncate_summary_input(summary_messages, budget)
+
+        # LLM 摘要（D14③）：agent 自有 LLM；失败降级为确定性折叠视图（D8）
+        summary_text: str | None = None
+        summary_usage: dict[str, int] | None = None
+        degraded = False
+        try:
+            llm = await self._ensure_llm()
+            summary_prompt_messages = [
+                message_factory.create_message(role="system", text=COMPACT_SUMMARY_PROMPT),
+                message_factory.create_message(
+                    role="user", text=format_messages_for_summary(summary_messages)
+                ),
+            ]
+            response = await llm.generate(summary_prompt_messages)
+            text = (getattr(response, "text", "") or "").strip()
+            if text:
+                summary_text = text
+                usage = getattr(response, "token_usage", None)
+                if usage is not None:
+                    summary_usage = {
+                        "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                        "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                        "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+                    }
+            else:
+                degraded = True
+        except Exception:
+            logger.exception(
+                "ActorAgent[%s]: compact summary LLM failed — committing folded view",
+                self.config.name,
+            )
+            degraded = True
+
+        summarized_range = [summary_nodes[0].id, summary_nodes[-1].id]
+
+        if summary_text is not None:
+            preamble_text = COMPACT_PREAMBLE_TEMPLATE.format(
+                summarized_range=f"{summarized_range[0]}..{summarized_range[1]}"
+            )
+            snapshot = assemble_snapshot(
+                cm.get_active_session().system_prompt,
+                preamble_text,
+                summary_text,
+                kept_messages,
+                message_factory,
+            )
+        else:
+            # 降级路径：折叠视图原样进快照（保留窗照旧），必须产出节点
+            snapshot = assemble_snapshot(
+                cm.get_active_session().system_prompt,
+                COMPACT_DEGRADED_PREAMBLE,
+                None,
+                [*summary_messages, *kept_messages],
+                message_factory,
+            )
+
+        snapshot, post_check = post_check_snapshot(snapshot, budget, message_factory)
+        if post_check == "over_budget":
+            logger.warning(
+                "ActorAgent[%s]: compact snapshot still over budget after self-check "
+                "(pathological config: system + kept rounds > budget)",
+                self.config.name,
+            )
+
+        metadata: dict[str, Any] = {
+            "trigger_source": trigger_source,
+            "method": "ghrah.builtin",
+            "summarized_range": summarized_range,
+            "kept_node_ids": [node.id for node in kept_nodes],
+            "kept_recent_nodes": keep_recent,
+            "tokens_before": status["occupied_tokens"],
+            "tokens_after": estimate_tokens(snapshot),
+            "post_check": post_check,
+            "degraded": degraded,
+            "truncated_summary_input": truncated_input,
+        }
+        if summary_usage is not None:
+            metadata["usage"] = summary_usage
+
+        node = cm.commit_compact_node(snapshot, metadata)
+
+        await self._event_publisher.publish(
+            ActionChainUpdatedEvent(
+                agent_name=self.config.name,
+                node=serialize_node(node),
+            )
+        )
+
+        return {
+            "executed": True,
+            "node_id": node.id,
+            "degraded": degraded,
+            "post_check": post_check,
+        }
 
     async def _action(self, accumulated_data: dict[str, Any]) -> dict[str, Any]:
         """执行一次 action：调用 LLM → 解析响应 → 执行 abilities。

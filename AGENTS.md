@@ -61,12 +61,10 @@ pnpm lint
 ## 提交约定
 
 - Conventional Commits，中文描述：`feat(subject): …` / `fix(core)!…`（破坏性加 `!`）；范围用包短名（core/protocol/subject/observer/webui/ci/docs）。
-- 本机 GPG 签名在 headless 会话会因 pinentry 超时失败：用 `git commit --no-gpg-sign`（一次性 flag，不改配置）。
 
 ## plans 目录约定（强制）
 
-所有设计/计划文档落盘到根 **`plans/`**，该目录被 `.gitignore` 整体忽略——**本地专用，禁止提交、禁止推送**。
+所有设计/计划文档落盘到根 **`plans/`**，该目录被 `.gitignore` 整体忽略——**本地专用，不提交**。
 
-- Kilo plan 模式默认写 `.kilo/plans`——**不要**使用该默认路径，一律写 `plans/`。
 - 分类：`plans/done/`（已完成归档）、`plans/todo/`（待办）、`plans/planning/`（进行中设计）、`plans/shelved/`（搁置）、`plans/<repo>/`（仓专属主题，如 `plans/ghrah-core/`）。
-- `.kilo/` 同样整体忽略（本地工具状态：agent-manager.json、worktrees、kilo.jsonc 等），不得提交。
+

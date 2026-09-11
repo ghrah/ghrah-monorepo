@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import dataclasses
 import logging
 from collections.abc import Callable
@@ -122,6 +123,11 @@ class ContextManager:
         self._last_real_input_tokens: int | None = None
         # 手动 compact 请求标志（B/H 节接线消费）
         self._compact_requested: bool = False
+        # 空窗跳过标志（振荡防护第二形态）：阈值触发的 compact 回合发现
+        # 窗外为空时置位——此时锚点仍 >= trigger，若不抑制会每轮重进
+        # 回合再退出死循环。下一次真实锚点记录（record_window_occupied）
+        # 清除并重新武装；手动请求不受此标志否决。
+        self._compact_skip_until_reanchor: bool = False
 
         # 初始化默认 Session：一次性创建 Root 与 main Branch。
         effective_messages = list(initial_messages or [])
@@ -894,6 +900,8 @@ class ContextManager:
         """
         self._window_occupied = real_input_tokens
         self._last_real_input_tokens = real_input_tokens
+        # 新真实锚点重新武装阈值触发（清除空窗跳过标志）
+        self._compact_skip_until_reanchor = False
 
     def evaluate_compaction_decision(self) -> dict[str, Any] | None:
         """评估当前是否需要链上 compact，产出决策记录。
@@ -923,7 +931,7 @@ class ContextManager:
 
         供驱动循环在每轮迭代开头、普通 action 之前调用（B 节接线）：
         (a) 手动标志（显式意图，不受锚点状态否决）；
-        (b) 活体锚点达到阈值。
+        (b) 活体锚点达到阈值（空窗跳过标志置位时抑制——振荡防护）。
         节点 metadata 的 ``needs_compaction`` 仅作审计记录，不作为触发依据。
 
         Returns:
@@ -933,10 +941,18 @@ class ContextManager:
             return True
         if self._compact_threshold is None or self._window_manager is None:
             return False
-        if self._window_occupied is None:
+        if self._window_occupied is None or self._compact_skip_until_reanchor:
             return False
         trigger = int(self._window_manager.max_tokens * self._compact_threshold)
         return self._window_occupied >= trigger
+
+    def skip_compact_until_reanchor(self) -> None:
+        """置空窗跳过标志（阈值触发的 compact 回合发现窗外为空时调用）。
+
+        抑制锚点仍超阈值时的反复空转；下一次 record_window_occupied
+        （新真实锚点，通常对应 compact 后变短的发送视图）清除并重新评估。
+        """
+        self._compact_skip_until_reanchor = True
 
     def request_compact(self) -> None:
         """置手动 compact 请求标志（幂等）。
@@ -944,6 +960,60 @@ class ContextManager:
         标志由 compact 回合的窗外为空守卫与消费点清除（B/H 节）。
         """
         self._compact_requested = True
+
+    @property
+    def compact_requested(self) -> bool:
+        """手动 compact 请求标志是否置位（触发源判定用）。"""
+        return self._compact_requested
+
+    def commit_compact_node(
+        self, snapshot_messages: list[Any], metadata: dict[str, Any] | None = None
+    ) -> ContextNode:
+        """提交链上 compact 节点（专用路径，v3.5 B.7 / P2）。
+
+        与 commit_iteration 的关键差异：
+        - 跳过 ``should_snapshot``/活 store 自拍——compact 时活 store 仍是
+          压缩前的旧全量，naive 快照会把旧全量拍进节点，压缩归零；
+          本路径直接注入压缩视图 deepcopy 为 messages_snapshot；
+        - messages_delta 恒空、ability_names=["compact"]；
+        - 提交后按 ``_restore_active_context`` 模式重建 store（compact
+          节点 is_snapshot=True，天然成为回放新基准）并置锚点 None（D15）；
+        - 不计入 snapshot_interval 节奏（后续常规快照照常）。
+
+        Args:
+            snapshot_messages: 压缩视图消息（调用方组装，本方法深拷贝注入）
+            metadata: 节点 metadata（node_kind/method/trigger_source 等，
+                本方法强制合并 node_kind="compact"）
+
+        Returns:
+            新创建的 compact ContextNode
+
+        Raises:
+            RuntimeError: 迭代进行中（compact 回合必须不在迭代事务内）
+        """
+        if self._in_iteration:
+            raise RuntimeError("Cannot commit compact node during an iteration")
+
+        node_metadata = dict(metadata or {})
+        node_metadata["node_kind"] = "compact"
+
+        node = self._active_runtime.commit_node(
+            ability_names=["compact"],
+            agent_state=self._active_runtime.active_head.agent_state,
+            messages_delta=[],
+            messages_snapshot=copy.deepcopy(snapshot_messages),
+            is_snapshot=True,
+            action_results=[],
+            metadata=node_metadata,
+        )
+
+        # store 按新 head（compact 节点快照）重建，锚点随之失效
+        self._restore_active_context()
+
+        if self._auto_persist and self._persistence is not None:
+            self._schedule_persist_node(node)
+
+        return node
 
     def consume_compact_request(self) -> bool:
         """消费手动 compact 请求标志。
