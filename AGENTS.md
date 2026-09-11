@@ -62,9 +62,10 @@ pnpm lint
 
 - Conventional Commits，中文描述：`feat(subject): …` / `fix(core)!…`（破坏性加 `!`）；范围用包短名（core/protocol/subject/observer/webui/ci/docs）。
 
-## plans 目录约定（强制）
+## plans 目录约定
 
 所有设计/计划文档落盘到根 **`plans/`**，该目录被 `.gitignore` 整体忽略——**本地专用，不提交**。
 
 - 分类：`plans/done/`（已完成归档）、`plans/todo/`（待办）、`plans/planning/`（进行中设计）、`plans/shelved/`（搁置）、`plans/<repo>/`（仓专属主题，如 `plans/ghrah-core/`）。
+- **不要在项目代码中引用plan文档中的节点，标题，锚点，阶段**
 

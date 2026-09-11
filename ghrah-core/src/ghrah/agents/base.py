@@ -89,7 +89,7 @@ _VISIBLE_RESPONSE_RETRY_PROMPT = (
 )
 _EMPTY_VISIBLE_RESPONSE = "模型未返回可展示的正文，请重试。"
 
-# 厂商上下文超限错误保守识别白名单（D12/D13）：只认确定类别，不解析数字。
+# 厂商上下文超限错误保守识别白名单：只认确定类别，不解析数字。
 # 类型名匹配 SDK 异常类（如 anthropic.BadRequestError 子类不可枚举，故用
 # 消息短语为主、类型名为辅的双通道；误判会吞真实故障，宁缺勿滥）。
 _CONTEXT_LIMIT_TYPE_MARKERS = ("contextwindowexceeded", "contextlengthexceeded")
@@ -103,7 +103,7 @@ _CONTEXT_LIMIT_MESSAGE_MARKERS = (
     "too many input tokens",
 )
 
-# 紧急压缩阶梯（D13）：最多减半 4 次（budget/16）
+# 紧急压缩阶梯：最多减半 4 次（budget/16）
 _MAX_EMERGENCY_HALVINGS = 4
 
 
@@ -511,9 +511,9 @@ class ActorAgent:
         emergency_halvings = 0
 
         while self._iteration_state.should_continue:
-            # 0. compact 触发门（锚点活体复评，v3.5 A.4/B.1）——位于
-            # BEFORE_ACTION hook 之前：compact 回合不执行任何 agent 级
-            # HookPoint（D9）。命中后执行 compact 例程替代本轮 _action：
+            # 0. compact 触发——位于BEFORE_ACTION hook 之前：
+            # compact 回合不执行任何 agent 级HookPoint。
+            # 命中后执行 compact 例程替代本轮 _action：
             # 不排空消息队列、不计 max_iterations、不 advance。
             if cm.check_compact_trigger():
                 trigger_source = "manual" if cm.compact_requested else "threshold"

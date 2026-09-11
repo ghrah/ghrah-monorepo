@@ -969,7 +969,7 @@ class ContextManager:
     def commit_compact_node(
         self, snapshot_messages: list[Any], metadata: dict[str, Any] | None = None
     ) -> ContextNode:
-        """提交链上 compact 节点（专用路径，v3.5 B.7 / P2）。
+        """提交链上 compact 节点。
 
         与 commit_iteration 的关键差异：
         - 跳过 ``should_snapshot``/活 store 自拍——compact 时活 store 仍是
@@ -977,7 +977,7 @@ class ContextManager:
           本路径直接注入压缩视图 deepcopy 为 messages_snapshot；
         - messages_delta 恒空、ability_names=["compact"]；
         - 提交后按 ``_restore_active_context`` 模式重建 store（compact
-          节点 is_snapshot=True，天然成为回放新基准）并置锚点 None（D15）；
+          节点 is_snapshot=True，天然成为回放新基准）并置锚点 None；
         - 不计入 snapshot_interval 节奏（后续常规快照照常）。
 
         Args:
