@@ -422,6 +422,7 @@ class TestCompactContextContracts:
                     "occupied_tokens": None,
                     "basis": "anchor",
                     "budget_tokens": 32000,
+                    "budget_source": "declared",
                     "compact_threshold": 0.8,
                     "compaction": {
                         "occupied": None,
@@ -437,6 +438,9 @@ class TestCompactContextContracts:
         assert narrowed.phase == "pre_call"
         assert narrowed.basis == "anchor"
         assert narrowed.occupied_tokens is None
+        assert narrowed.budget_source == "declared"
+        assert narrowed.real_cache_read_tokens is None
+        assert narrowed.real_cache_write_tokens is None
         assert narrowed.compaction["needs_compaction"] is False
 
 

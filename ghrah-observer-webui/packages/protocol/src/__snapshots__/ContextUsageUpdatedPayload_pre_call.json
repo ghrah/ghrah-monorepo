@@ -7,9 +7,12 @@
   "occupied_tokens": null,
   "basis": "anchor",
   "budget_tokens": 0,
+  "budget_source": null,
   "compact_threshold": null,
   "real_input_tokens": null,
   "real_output_tokens": null,
+  "real_cache_read_tokens": null,
+  "real_cache_write_tokens": null,
   "compaction": null,
   "iteration": null
 }

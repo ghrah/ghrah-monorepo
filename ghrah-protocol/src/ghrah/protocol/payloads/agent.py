@@ -246,8 +246,10 @@ class ContextUsageUpdatedPayload(BaseModel):
     Core → Subject → Observer：上下文占用状态感知出口（pre_call/post_call
     双相位）。occupied_tokens 为真实 usage 权威口径：pre_call 取占用锚点
     （可能为 None，如首次调用/head 变更后），post_call 取本次 LLM 调用
-    真实 input_tokens（basis="real"）。budget_tokens 为运营者声明预算
-    （无 WindowManager 时为 0），须按目标模型真实窗口 − 输出余量设定。
+    真实 input_tokens（basis="real"，归一化口径：恒为总输入，含缓存
+    部分）。budget_tokens 为落定预算（无 WindowManager 时为 0），来源由
+    budget_source 标注：显式声明（declared）/ 模型窗口表（model_table）/
+    内置默认（default）/ 厂商超限错误回填（vendor）。
     """
 
     project_id: str = ""
@@ -260,9 +262,16 @@ class ContextUsageUpdatedPayload(BaseModel):
     basis: str
     """occupied_tokens 计量口径："anchor"（占用锚点）/"real"（本次调用真实值）"""
     budget_tokens: int = 0
+    budget_source: str | None = None
+    """预算来源："declared"/"model_table"/"default"/"vendor"（无 WindowManager 时为 None）"""
     compact_threshold: float | None = None
     real_input_tokens: int | None = None
+    """本次调用总输入 token 数（归一化口径，含缓存命中与缓存写入部分）"""
     real_output_tokens: int | None = None
+    real_cache_read_tokens: int | None = None
+    """本次调用缓存命中读 token 数（pre_call 或厂商未上报时为 None/0）"""
+    real_cache_write_tokens: int | None = None
+    """本次调用缓存写入 token 数（pre_call 或厂商未上报时为 None/0）"""
     compaction: dict[str, Any] | None = None
     """本轮压缩决策记录（compaction_decision；未配置窗口时为 None）"""
     iteration: int | None = None

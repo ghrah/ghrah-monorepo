@@ -283,9 +283,12 @@ export const ContextUsageUpdatedPayloadSchema = z.object({
   occupied_tokens: z.number().int().nullable().optional(),
   basis: z.string(),
   budget_tokens: z.number().int().optional().default(0),
+  budget_source: z.string().nullable().optional(),
   compact_threshold: z.number().nullable().optional(),
   real_input_tokens: z.number().int().nullable().optional(),
   real_output_tokens: z.number().int().nullable().optional(),
+  real_cache_read_tokens: z.number().int().nullable().optional(),
+  real_cache_write_tokens: z.number().int().nullable().optional(),
   compaction: z.record(z.unknown()).nullable().optional(),
   iteration: z.number().int().nullable().optional(),
 });

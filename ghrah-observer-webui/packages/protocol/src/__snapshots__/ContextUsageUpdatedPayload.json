@@ -7,9 +7,12 @@
   "occupied_tokens": 4200,
   "basis": "real",
   "budget_tokens": 8192,
+  "budget_source": "declared",
   "compact_threshold": 0.8,
   "real_input_tokens": 4200,
   "real_output_tokens": 350,
+  "real_cache_read_tokens": 3200,
+  "real_cache_write_tokens": 120,
   "compaction": {
     "occupied_tokens": 4200,
     "threshold": 0.8,
