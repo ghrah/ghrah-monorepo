@@ -65,7 +65,7 @@ function makeMsg(
       },
     };
   }
-  if (type === EventType.HITL_REQUEST) {
+  if (type === EventType.HITL_REQUEST || type === EventType.HITL_RESOLVED) {
     payload = { project_id: "p1", agent_id: "a1", cluster_id: "c1", ...payload };
   }
   if (type === SystemType.COMMAND_RESULT && payload.original_command === CommandType.LIST_AGENTS) {
@@ -842,6 +842,35 @@ describe("connectStores", () => {
       expect(store.requests).toHaveLength(1);
       expect(store.requests[0].promiseId).toBe("p1");
       expect(store.requests[0].abilityName).toBe("write_file");
+    });
+
+    it("removes hitl request on hitl_resolved", async () => {
+      await connectClient();
+      const store = useHitlStore();
+
+      internals(client)._dispatch(
+        EventType.HITL_REQUEST,
+        makeMsg(EventType.HITL_REQUEST, {
+          promise_id: "p1",
+          agent_name: "agent-1",
+          ability_name: "write_file",
+          tool_args: { file_path: "/tmp/test.txt" },
+          context: {},
+        }),
+      );
+      expect(store.requests).toHaveLength(1);
+
+      internals(client)._dispatch(
+        EventType.HITL_RESOLVED,
+        makeMsg(EventType.HITL_RESOLVED, {
+          promise_id: "p1",
+          agent_name: "agent-1",
+          ability_name: "write_file",
+          tool_call_id: "call-1",
+          status: "timeout",
+        }),
+      );
+      expect(store.requests).toHaveLength(0);
     });
   });
 

@@ -10,6 +10,7 @@ import type {
   CommandResultPayload,
   ContextUsageUpdatedPayload,
   HITLRequestPayload,
+  HITLResolvedPayload,
   ManifestAbilityEventPayload,
   ManifestAgentEventPayload,
   ProjectAgentEventPayload,
@@ -117,6 +118,11 @@ export function connectStores(
   client.on(EventType.HITL_REQUEST, (msg: ServerMessage) =>
     hitl.onHitlRequest(msg.payload as HITLRequestPayload),
   );
+
+  client.on(EventType.HITL_RESOLVED, (msg: ServerMessage) => {
+    const payload = msg.payload as HITLResolvedPayload;
+    hitl.removeRequest(payload.promise_id);
+  });
 
   client.on(EventType.CONTEXT_USAGE_UPDATED, (msg: ServerMessage) =>
     batcher.add(() =>

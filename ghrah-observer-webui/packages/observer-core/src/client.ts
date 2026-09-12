@@ -212,7 +212,11 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async sendHitlResponse(promiseId: string, approved: boolean, reason?: string): Promise<void> {
+  async sendHitlResponse(
+    promiseId: string,
+    approved: boolean,
+    reason?: string,
+  ): Promise<CommandResultPayload | null> {
     const payload: Record<string, unknown> = { promise_id: promiseId, approved };
     if (reason != null) payload["reason"] = reason;
 
@@ -222,7 +226,8 @@ export class ObserverClient extends ServerClient {
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };
-    await this.send(msg);
+    // request 而非 fire-and-forget：handler 报错（promise 过期等）需回执感知
+    return this.request(msg, 10_000);
   }
 
   async getAgentInfo(target: AgentTarget): Promise<CommandResultPayload> {

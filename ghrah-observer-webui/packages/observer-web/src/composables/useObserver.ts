@@ -141,7 +141,8 @@ export function useObserver() {
 
   async function sendHitlResponse(promiseId: string, approved: boolean, reason?: string) {
     const result = await withClient((c) => c.sendHitlResponse(promiseId, approved, reason));
-    if (result !== null) {
+    // 仅在回执成功时移除卡片；失败（promise 过期/送达失败）保留待重试
+    if (result !== null && result.success) {
       hitl.removeRequest(promiseId);
     }
   }

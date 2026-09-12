@@ -307,19 +307,27 @@ describe("ObserverClient", () => {
   });
 
   describe("sendHitlResponse", () => {
-    it("sends hitl_response without waiting for result", async () => {
+    it("sends hitl_response and resolves on command_result receipt", async () => {
       await connectClient(client, mockWs);
       mockWs.sent.length = 0;
 
-      const response = client.sendHitlResponse("p1", true, "approved");
-      // It should not reject - fire and forget
-      await expect(response).resolves.toBeUndefined();
+      const responsePromise = client.sendHitlResponse("p1", true, "approved");
 
       const parsed = JSON.parse(mockWs.sent[0]);
       expect(parsed.type).toBe(CommandType.HITL_RESPONSE);
       expect(parsed.payload.promise_id).toBe("p1");
       expect(parsed.payload.approved).toBe(true);
       expect(parsed.payload.reason).toBe("approved");
+
+      mockWs.onmessage!({
+        data: JSON.stringify({
+          type: "command_result",
+          payload: { request_id: parsed.request_id, success: true, data: { resolved: true } },
+          request_id: parsed.request_id,
+        }),
+      } as MessageEvent);
+      const result = await responsePromise;
+      expect(result?.success).toBe(true);
     });
   });
 
