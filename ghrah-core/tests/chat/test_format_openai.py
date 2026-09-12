@@ -307,6 +307,31 @@ class TestParseResponse:
         assert result.token_usage.output_tokens == 50
         assert result.token_usage.total_tokens == 150
 
+    def test_token_usage_cached_tokens(self) -> None:
+        """prompt_tokens_details.cached_tokens 归入 cache_read（prompt_tokens 已含 cached）。"""
+        fmt = OpenAIFormat(model="gpt-4o")
+        usage = SimpleNamespace(
+            prompt_tokens=1000,
+            completion_tokens=50,
+            total_tokens=1050,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=768),
+        )
+        resp = _make_openai_response(usage=usage)
+        result = fmt._parse_response(resp)
+        assert result.token_usage is not None
+        assert result.token_usage.input_tokens == 1000
+        assert result.token_usage.cache_read_tokens == 768
+        assert result.token_usage.cache_write_tokens == 0
+
+    def test_token_usage_total_fallback_to_input_plus_output(self) -> None:
+        """usage 无 total 字段时 total = input + output（与 anthropic 侧对称）。"""
+        fmt = OpenAIFormat(model="gpt-4o")
+        usage = SimpleNamespace(prompt_tokens=100, completion_tokens=50)
+        resp = _make_openai_response(usage=usage)
+        result = fmt._parse_response(resp)
+        assert result.token_usage is not None
+        assert result.token_usage.total_tokens == 150
+
     def test_response_metadata(self) -> None:
         fmt = OpenAIFormat(model="gpt-4o")
         resp = _make_openai_response(model="gpt-4o-mini", finish_reason="length")

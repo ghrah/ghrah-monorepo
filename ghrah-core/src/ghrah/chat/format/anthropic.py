@@ -251,15 +251,22 @@ class AnthropicFormat(ChatFormat):
         if not content_blocks:
             content_blocks.append(TextBlock(text=""))
 
+        # 归一化口径：input_tokens 计总输入（input + cache_read + cache_write），
+        # cache 两维度单列；与 OpenAI 的 prompt_tokens（已含 cached）对齐。
         token_usage = None
         usage = getattr(response, "usage", None)
         if usage:
-            input_tokens = getattr(usage, "input_tokens", 0) or 0
+            raw_input_tokens = getattr(usage, "input_tokens", 0) or 0
             output_tokens = getattr(usage, "output_tokens", 0) or 0
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            input_tokens = raw_input_tokens + cache_read + cache_write
             token_usage = TokenUsage(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 total_tokens=getattr(usage, "total_tokens", 0) or (input_tokens + output_tokens),
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
             )
 
         response_metadata: dict[str, Any] = {}
@@ -268,6 +275,14 @@ class AnthropicFormat(ChatFormat):
             response_metadata["model"] = model_name
         if stop_reason:
             response_metadata["stop_reason"] = stop_reason
+        if usage:
+            response_metadata["usage"] = {
+                "input_tokens": getattr(usage, "input_tokens", 0) or 0,
+                "output_tokens": getattr(usage, "output_tokens", 0) or 0,
+                "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
+                "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", 0)
+                or 0,
+            }
 
         return LLMResponse(
             content_blocks=content_blocks,

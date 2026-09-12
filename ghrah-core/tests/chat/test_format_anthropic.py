@@ -321,6 +321,42 @@ class TestParseResponse:
         assert result.token_usage is not None
         assert result.token_usage.total_tokens == 999
 
+    def test_token_usage_cache_normalization(self) -> None:
+        """归一化口径：input_tokens = 原始 input + cache_read + cache_write。"""
+        fmt = AnthropicFormat(model="claude-3-sonnet")
+        usage = SimpleNamespace(
+            input_tokens=100,
+            output_tokens=50,
+            cache_read_input_tokens=2000,
+            cache_creation_input_tokens=300,
+        )
+        resp = _make_anthropic_response(usage=usage)
+        result = fmt._parse_response(resp)
+        assert result.token_usage is not None
+        assert result.token_usage.input_tokens == 2400
+        assert result.token_usage.cache_read_tokens == 2000
+        assert result.token_usage.cache_write_tokens == 300
+        # total 回退以归一化后的 input 计算
+        assert result.token_usage.total_tokens == 2450
+
+    def test_response_metadata_contains_usage_copy(self) -> None:
+        """response_metadata 携带原始 usage 副本（对齐 OpenAI 侧做法）。"""
+        fmt = AnthropicFormat(model="claude-3-sonnet")
+        usage = SimpleNamespace(
+            input_tokens=100,
+            output_tokens=50,
+            cache_read_input_tokens=2000,
+            cache_creation_input_tokens=300,
+        )
+        resp = _make_anthropic_response(usage=usage)
+        result = fmt._parse_response(resp)
+        assert result.response_metadata["usage"] == {
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "cache_read_input_tokens": 2000,
+            "cache_creation_input_tokens": 300,
+        }
+
     def test_response_metadata(self) -> None:
         fmt = AnthropicFormat(model="claude-3-sonnet")
         resp = _make_anthropic_response(model="claude-3-opus", stop_reason="tool_use")

@@ -621,18 +621,26 @@ class ActorAgent:
                 )
                 # ────── 结束 ──────
 
-                # 4.5 累加 token 用量到 accumulated_data
+                # 4.5 累加 token 用量到 accumulated_data（读取侧 .get(k, 0) 兼容旧节点）
                 current_usage = node.metadata.get("token_usage", {})
                 if current_usage:
                     cumulative = dict(
                         accumulated_data.get(
                             "cumulative_token_usage",
-                            {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+                            {
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                                "total_tokens": 0,
+                                "cache_read_tokens": 0,
+                                "cache_write_tokens": 0,
+                            },
                         )
                     )
                     cumulative["input_tokens"] += current_usage.get("input_tokens", 0)
                     cumulative["output_tokens"] += current_usage.get("output_tokens", 0)
                     cumulative["total_tokens"] += current_usage.get("total_tokens", 0)
+                    cumulative["cache_read_tokens"] += current_usage.get("cache_read_tokens", 0)
+                    cumulative["cache_write_tokens"] += current_usage.get("cache_write_tokens", 0)
                     accumulated_data["cumulative_token_usage"] = cumulative
             except Exception as e:
                 # ────── 发布 AgentError 事件 ──────
@@ -650,9 +658,9 @@ class ActorAgent:
                 for msg in iteration_drained_messages:
                     await self._message_queue.put(msg)
 
-                # 紧急压缩阶梯：厂商上下文超限（保守类别识别，不解析
-                # 数字）且仍有减半余量时，不重抛——进紧急 compact 回合
-                # （预算减半、trigger_source="emergency"），下一迭代自然重试。
+                # 紧急压缩阶梯：厂商上下文超限（保守类别识别）且仍有减半
+                # 余量时，不重抛——进紧急 compact 回合（预算减半、
+                # trigger_source="emergency"），下一迭代自然重试。
                 # 每次触发都是显式信号（warning + emergency 标记）。
                 if (
                     _is_context_limit_error(e)
@@ -909,11 +917,15 @@ class ActorAgent:
                 basis = "real"
                 real_input = real_usage.input_tokens if real_usage is not None else None
                 real_output = real_usage.output_tokens if real_usage is not None else None
+                real_cache_read = real_usage.cache_read_tokens if real_usage is not None else None
+                real_cache_write = real_usage.cache_write_tokens if real_usage is not None else None
             else:
                 occupied = status["occupied_tokens"]
                 basis = status["basis"]
                 real_input = None
                 real_output = None
+                real_cache_read = None
+                real_cache_write = None
             await self._event_publisher.publish(
                 ContextUsageUpdatedEvent(
                     agent_name=self.config.name,
@@ -924,6 +936,8 @@ class ActorAgent:
                     compact_threshold=status["compact_threshold"],
                     real_input_tokens=real_input,
                     real_output_tokens=real_output,
+                    real_cache_read_tokens=real_cache_read,
+                    real_cache_write_tokens=real_cache_write,
                     compaction=cm.evaluate_compaction_decision(),
                     iteration=self._iteration_state.iteration,
                 )
@@ -1012,6 +1026,8 @@ class ActorAgent:
                 "input_tokens": sum(usage.input_tokens for usage in used),
                 "output_tokens": sum(usage.output_tokens for usage in used),
                 "total_tokens": sum(usage.total_tokens for usage in used),
+                "cache_read_tokens": sum(usage.cache_read_tokens for usage in used),
+                "cache_write_tokens": sum(usage.cache_write_tokens for usage in used),
             }
         if resp_meta:
             llm_meta["response_metadata"] = resp_meta

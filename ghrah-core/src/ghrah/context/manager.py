@@ -882,14 +882,18 @@ class ContextManager:
         """从链历史中累计计算总 token 用量。
 
         遍历所有链节点的 metadata.token_usage 字段，累加得到总和。
+        旧节点缺 cache 键时按 0 计（.get 兼容）。
 
         Returns:
-            包含 input_tokens、output_tokens、total_tokens 的 dict
+            包含 input_tokens、output_tokens、total_tokens、
+            cache_read_tokens、cache_write_tokens 的 dict
         """
         total: dict[str, int] = {
             "input_tokens": 0,
             "output_tokens": 0,
             "total_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
         }
         for node in self._active_runtime.get_history():
             usage = node.metadata.get("token_usage", {})
@@ -897,6 +901,8 @@ class ContextManager:
                 total["input_tokens"] += usage.get("input_tokens", 0)
                 total["output_tokens"] += usage.get("output_tokens", 0)
                 total["total_tokens"] += usage.get("total_tokens", 0)
+                total["cache_read_tokens"] += usage.get("cache_read_tokens", 0)
+                total["cache_write_tokens"] += usage.get("cache_write_tokens", 0)
         return total
 
     # ----------------------------------------------------------------

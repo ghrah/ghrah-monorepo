@@ -171,6 +171,10 @@ class ContextUsageUpdatedEvent(CoreEvent):
         compact_threshold: 压缩阈值比率（未配置时为 None）
         real_input_tokens: 本次调用真实 input_tokens（pre_call 为 None）
         real_output_tokens: 本次调用真实 output_tokens（pre_call 为 None）
+        real_cache_read_tokens: 本次调用缓存命中读 token 数（pre_call 或
+            厂商未上报时为 None）
+        real_cache_write_tokens: 本次调用缓存写入 token 数（pre_call 或
+            厂商未上报时为 None）
         compaction: 本轮压缩决策记录（未配置窗口时为 None）
         iteration: 当前迭代号
     """
@@ -183,6 +187,8 @@ class ContextUsageUpdatedEvent(CoreEvent):
     compact_threshold: float | None = None
     real_input_tokens: int | None = None
     real_output_tokens: int | None = None
+    real_cache_read_tokens: int | None = None
+    real_cache_write_tokens: int | None = None
     compaction: dict[str, Any] | None = None
     iteration: int | None = None
 

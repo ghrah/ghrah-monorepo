@@ -296,14 +296,19 @@ class OpenAIFormat(ChatFormat):
         if not content_blocks and not tool_calls:
             content_blocks.append(TextBlock(text=""))
 
-        # Token usage
+        # Token usage（归一化口径：prompt_tokens 已含 cached_tokens，cache 维度单列）
         token_usage = None
         usage = getattr(response, "usage", None)
         if usage:
+            input_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            output_tokens = getattr(usage, "completion_tokens", 0) or 0
+            prompt_details = getattr(usage, "prompt_tokens_details", None)
+            cached_tokens = getattr(prompt_details, "cached_tokens", 0) if prompt_details else 0
             token_usage = TokenUsage(
-                input_tokens=getattr(usage, "prompt_tokens", 0) or 0,
-                output_tokens=getattr(usage, "completion_tokens", 0) or 0,
-                total_tokens=getattr(usage, "total_tokens", 0) or 0,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                total_tokens=getattr(usage, "total_tokens", 0) or (input_tokens + output_tokens),
+                cache_read_tokens=cached_tokens or 0,
             )
 
         # Response metadata

@@ -75,14 +75,24 @@ def _plain_config() -> AgentConfig:
     )
 
 
-def _llm_with_usage(input_tokens: int = 500, output_tokens: int = 50) -> AsyncMock:
+def _llm_with_usage(
+    input_tokens: int = 500,
+    output_tokens: int = 50,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+) -> AsyncMock:
     """带 token_usage 的 mock LLM（首响应即含 usage，无需重试）。"""
     from ghrah.types.tokens import TokenUsage
 
     llm = AsyncMock()
     llm.generate.return_value = LLMResponse(
         content_blocks=[TextBlock(text="answer")],
-        token_usage=TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens),
+        token_usage=TokenUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+        ),
     )
     llm.configure_tools = MagicMock()
     return llm
@@ -131,9 +141,31 @@ class TestContextUsageEvents:
         assert post.occupied_tokens == 500  # 真实 input_tokens
         assert post.real_input_tokens == 500
         assert post.real_output_tokens == 50
+        assert post.real_cache_read_tokens == 0  # 未上报 cache 时为 0
+        assert post.real_cache_write_tokens == 0
         assert post.compaction is not None
         assert post.compaction["threshold"] == 0.8
         assert post.compaction["needs_compaction"] is False  # 500 < 800
+
+    @pytest.mark.asyncio
+    async def test_post_call_carries_cache_dimensions(self) -> None:
+        """post_call 事件携带 cache 三段式维度（归一化口径下 input 含 cache）。"""
+        agent = _create_agent(_plain_config())
+        agent._llm = _llm_with_usage(
+            input_tokens=2400, output_tokens=50, cache_read_tokens=2000, cache_write_tokens=300
+        )
+        publisher = MagicMock()
+        publisher.publish = AsyncMock()
+        agent._event_publisher = publisher
+
+        await agent._action({})
+
+        events = _usage_events(publisher)
+        assert len(events) == 1
+        post = events[0]
+        assert post.real_input_tokens == 2400
+        assert post.real_cache_read_tokens == 2000
+        assert post.real_cache_write_tokens == 300
 
     @pytest.mark.asyncio
     async def test_plain_agent_publishes_only_post_call(self) -> None:

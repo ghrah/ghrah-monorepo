@@ -38,10 +38,23 @@ def extract_token_usage(response: LLMResponse) -> TokenUsage | None:
                 raw_usage = candidate
                 break
         if raw_usage is not None:
+            # 双风格键兼容：OpenAI（prompt/completion）与 Anthropic（input/output）；
+            # cache 键同理（cached_tokens / cache_read_input_tokens）。
+            def _pick(*keys: str) -> int:
+                for k in keys:
+                    v = raw_usage.get(k)
+                    if isinstance(v, int) and v:
+                        return v
+                return 0
+
             return TokenUsage(
-                input_tokens=raw_usage.get("prompt_tokens", 0),
-                output_tokens=raw_usage.get("completion_tokens", 0),
-                total_tokens=raw_usage.get("total_tokens", 0),
+                input_tokens=_pick("input_tokens", "prompt_tokens"),
+                output_tokens=_pick("output_tokens", "completion_tokens"),
+                total_tokens=_pick("total_tokens"),
+                cache_read_tokens=_pick(
+                    "cache_read_tokens", "cache_read_input_tokens", "cached_tokens"
+                ),
+                cache_write_tokens=_pick("cache_write_tokens", "cache_creation_input_tokens"),
             )
 
     return None

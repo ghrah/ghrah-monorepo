@@ -284,6 +284,8 @@ def _core_event_to_dict(event: CoreEvent) -> tuple[str, dict[str, Any]]:
                 "compact_threshold": event.compact_threshold,
                 "real_input_tokens": event.real_input_tokens,
                 "real_output_tokens": event.real_output_tokens,
+                "real_cache_read_tokens": event.real_cache_read_tokens,
+                "real_cache_write_tokens": event.real_cache_write_tokens,
                 "compaction": event.compaction,
                 "iteration": event.iteration,
             }

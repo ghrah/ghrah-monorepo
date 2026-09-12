@@ -95,6 +95,54 @@ class TestExtractTokenUsage:
         resp = LLMResponse(content_blocks=[TextBlock(text="Hello")])
         assert extract_token_usage(resp) is None
 
+    def test_fallback_reads_anthropic_style_keys(self) -> None:
+        """Anthropic 风格键名（input_tokens/output_tokens）同样可提取。"""
+        resp = LLMResponse(
+            content_blocks=[TextBlock(text="Hello")],
+            response_metadata={
+                "usage": {
+                    "input_tokens": 300,
+                    "output_tokens": 120,
+                },
+            },
+        )
+        result = extract_token_usage(resp)
+        assert result is not None
+        assert result.input_tokens == 300
+        assert result.output_tokens == 120
+
+    def test_fallback_reads_cache_keys(self) -> None:
+        """cache 键双风格兼容（cached_tokens / cache_read_input_tokens）。"""
+        resp = LLMResponse(
+            content_blocks=[TextBlock(text="Hello")],
+            response_metadata={
+                "usage": {
+                    "prompt_tokens": 1000,
+                    "completion_tokens": 50,
+                    "cached_tokens": 768,
+                },
+            },
+        )
+        result = extract_token_usage(resp)
+        assert result is not None
+        assert result.cache_read_tokens == 768
+
+        resp2 = LLMResponse(
+            content_blocks=[TextBlock(text="Hello")],
+            response_metadata={
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cache_read_input_tokens": 2000,
+                    "cache_creation_input_tokens": 300,
+                },
+            },
+        )
+        result2 = extract_token_usage(resp2)
+        assert result2 is not None
+        assert result2.cache_read_tokens == 2000
+        assert result2.cache_write_tokens == 300
+
     def test_rejects_non_llmresponse(self) -> None:
         with pytest.raises(TypeError, match="Expected LLMResponse"):
             extract_token_usage("not a response")  # type: ignore[arg-type]

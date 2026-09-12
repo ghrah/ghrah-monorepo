@@ -238,27 +238,51 @@ class TestTokenUsage:
         assert usage.input_tokens == 0
         assert usage.output_tokens == 0
         assert usage.total_tokens == 0
+        assert usage.cache_read_tokens == 0
+        assert usage.cache_write_tokens == 0
 
     def test_to_dict(self) -> None:
-        """to_dict 正确转换。"""
-        usage = TokenUsage(input_tokens=100, output_tokens=50, total_tokens=150)
+        """to_dict 正确转换（含 cache 维度）。"""
+        usage = TokenUsage(
+            input_tokens=100,
+            output_tokens=50,
+            total_tokens=150,
+            cache_read_tokens=60,
+            cache_write_tokens=10,
+        )
         d = usage.to_dict()
-        assert d == {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150}
+        assert d == {
+            "input_tokens": 100,
+            "output_tokens": 50,
+            "total_tokens": 150,
+            "cache_read_tokens": 60,
+            "cache_write_tokens": 10,
+        }
 
     def test_from_dict(self) -> None:
         """from_dict 正确创建。"""
-        d = {"input_tokens": 200, "output_tokens": 100, "total_tokens": 300}
+        d = {
+            "input_tokens": 200,
+            "output_tokens": 100,
+            "total_tokens": 300,
+            "cache_read_tokens": 120,
+            "cache_write_tokens": 30,
+        }
         usage = TokenUsage.from_dict(d)
         assert usage.input_tokens == 200
         assert usage.output_tokens == 100
         assert usage.total_tokens == 300
+        assert usage.cache_read_tokens == 120
+        assert usage.cache_write_tokens == 30
 
     def test_from_dict_partial(self) -> None:
-        """from_dict 对缺失字段使用默认值 0。"""
+        """from_dict 对缺失字段使用默认值 0（旧持久化数据兼容）。"""
         usage = TokenUsage.from_dict({"input_tokens": 50})
         assert usage.input_tokens == 50
         assert usage.output_tokens == 0
         assert usage.total_tokens == 0
+        assert usage.cache_read_tokens == 0
+        assert usage.cache_write_tokens == 0
 
     def test_from_dict_empty(self) -> None:
         """from_dict 空字典全部默认为 0。"""
@@ -266,6 +290,8 @@ class TestTokenUsage:
         assert usage.input_tokens == 0
         assert usage.output_tokens == 0
         assert usage.total_tokens == 0
+        assert usage.cache_read_tokens == 0
+        assert usage.cache_write_tokens == 0
 
     def test_round_trip(self) -> None:
         """to_dict → from_dict 往返一致。"""
