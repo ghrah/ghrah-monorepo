@@ -144,6 +144,16 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
+  async agentCompactContext(target: AgentTarget): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.AGENT_COMPACT_CONTEXT,
+      payload: agentTargetPayload(target),
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
   async sendMessage(
     target: AgentTarget,
     content: string,

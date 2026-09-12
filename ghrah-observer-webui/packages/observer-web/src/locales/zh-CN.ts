@@ -165,6 +165,8 @@ export default {
     workspaceDiff: "Workspace Diff",
     terminateAgent: "终止 Agent",
     diffTitle: "Workspace Diff — {name}",
+    compactContext: "压缩上下文",
+    compactFailed: "触发上下文压缩失败",
   },
   hitl: {
     inbox: "HITL 收件箱",
@@ -187,6 +189,8 @@ export default {
     newBranch: "新建 Branch",
     newBranchName: "Branch {index}",
     switchFailed: "切换失败",
+    compactBadge: "⇕ 压缩 · {source}",
+    compactDetail: "摘要 {range} · 保留最近 {kept} 节点 · token {before} → {after} · 自检 {check}",
   },
   changes: {
     title: "文件变更",
@@ -201,6 +205,9 @@ export default {
     empty: "该 Project 中没有 Agent 定义",
     missingId: "缺少稳定 agent_id",
     noActiveChain: "没有活跃的 Session 与 Branch",
+    usageTitle: "上下文：{occupied} / {budget} tokens（{percent}%）",
+    usageCumulative: "已消耗 {tokens} tokens",
+    usageNoWindow: "未配置窗口",
     status: {
       active: "运行中",
       running: "运行中",

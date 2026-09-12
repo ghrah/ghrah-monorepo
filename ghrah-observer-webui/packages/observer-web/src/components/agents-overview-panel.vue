@@ -3,6 +3,7 @@ import {
   type ChainTarget,
   useAgentsStore,
   useBranchesStore,
+  useContextUsageStore,
   useProjectsStore,
   useRoomsStore,
   useSessionsStore,
@@ -17,6 +18,7 @@ const agents = useAgentsStore();
 const sessions = useSessionsStore();
 const branches = useBranchesStore();
 const rooms = useRoomsStore();
+const contextUsage = useContextUsageStore();
 const { t } = useI18n();
 
 const displayRuntimeStatuses = new Set(["active", "running", "stopped", "pending", "error"]);
@@ -56,6 +58,7 @@ const rows = computed(() =>
       runtimeError: runtime?.runtimeError ?? spec.runtime_error ?? "",
       roomNames,
       chainTarget,
+      usage: agentId ? contextUsage.usageFor(target) : null,
     };
   }),
 );
@@ -91,6 +94,18 @@ function openAgent(row: (typeof rows.value)[number]) {
           <span :class="['agents-overview-avatar', `status-${row.status}`]">{{ row.name.slice(0, 1).toUpperCase() }}</span>
           <span class="agents-overview-main"><strong>{{ row.name }}</strong><span>{{ row.agentId || t("agentsOverview.missingId") }}</span></span>
           <span class="agents-overview-rooms"><span v-for="roomName in row.roomNames" :key="roomName"># {{ roomName }}</span></span>
+          <span v-if="row.usage" :class="['agents-overview-usage', row.usage.mode]">
+            <template v-if="row.usage.mode === 'ratio' && row.usage.percent != null">
+              <span class="agents-overview-usage-bar">
+                <span class="agents-overview-usage-fill" :style="{ width: `${row.usage.percent}%` }" />
+              </span>
+              <span class="agents-overview-usage-text">{{ row.usage.occupiedTokens ?? 0 }} / {{ row.usage.budgetTokens }} ({{ row.usage.percent }}%)</span>
+            </template>
+            <template v-else>
+              <span class="agents-overview-usage-text">{{ t("agentsOverview.usageCumulative", { tokens: row.usage.cumulativeInputTokens }) }}</span>
+              <span class="agents-overview-usage-tag">{{ t("agentsOverview.usageNoWindow") }}</span>
+            </template>
+          </span>
           <span class="agents-overview-runtime"><strong>{{ t(`agentsOverview.status.${row.status}`) }}</strong><span>{{ row.clusterId }}</span></span>
         </button>
         <p v-if="!row.chainTarget" class="agents-overview-chain-hint">{{ t("agentsOverview.noActiveChain") }}</p>

@@ -40,6 +40,26 @@ const visibleBlocks = computed<ContentBlock[]>(() => {
 const abilitySummary = computed(() => (props.node.ability_names ?? []).join(",") || "—");
 const stateKeys = computed(() => Object.keys(props.node.agent_state ?? {}));
 const actionResults = computed(() => props.node.action_results ?? []);
+const isCompact = computed(() => (props.node.ability_names ?? []).includes("compact"));
+
+function metaString(key: string): string {
+  const value = (props.node.metadata ?? {})[key];
+  return value == null ? "—" : String(value);
+}
+
+const compactBadge = computed(() =>
+  isCompact.value ? t("actionChain.compactBadge", { source: metaString("trigger_source") }) : "",
+);
+const compactDetail = computed(() => {
+  if (!isCompact.value) return "";
+  return t("actionChain.compactDetail", {
+    range: metaString("summarized_range"),
+    kept: metaString("kept_recent_nodes"),
+    before: metaString("tokens_before"),
+    after: metaString("tokens_after"),
+    check: metaString("post_check"),
+  });
+});
 const timeStr = computed(() => {
   const ts = props.node.timestamp;
   if (!ts) return "";
@@ -71,6 +91,11 @@ const hasDetails = computed(() => visibleBlocks.value.length > 0 || actionResult
         @click="expanded = !expanded"
       >{{ expanded ? "▾" : "▸" }}</button>
       <span v-else class="inline-block w-4 flex-shrink-0" />
+      <span
+        v-if="isCompact"
+        :title="compactDetail"
+        class="flex-shrink-0 text-xs px-1.5 rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300"
+      >{{ compactBadge }}</span>
       <span class="flex-1 font-mono text-xs text-gray-700 dark:text-gray-300 truncate">{{ summary }}</span>
     </div>
     <div v-if="expanded && hasDetails" class="pl-10 py-1 space-y-1">

@@ -1,4 +1,5 @@
 import {
+  type ActionNode,
   type CommandResultPayload,
   CommandType,
   createCommand,
@@ -14,6 +15,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { MockServer } from "./server.js";
+import { MockState } from "./state.js";
 
 let server: MockServer;
 let url: string;
@@ -787,6 +789,88 @@ describe("mock-server 协议层", () => {
       ]);
     } finally {
       await client.disconnect();
+    }
+  }, 10_000);
+
+  it("链路模拟：CONTEXT_USAGE_UPDATED pre/post 双相位广播与 agent 归因", async () => {
+    const chainServer = new MockServer({
+      port: 0,
+      state: new MockState({ simulateChains: true, chainIntervalMs: 100 }),
+    });
+    await chainServer.start();
+    const chainUrl = `ws://127.0.0.1:${chainServer.port}/ws`;
+    const client = new ServerClient(chainUrl, "observer", {
+      wsFactory: (u) => wsFactory(u) as never,
+    });
+    await client.connect();
+    try {
+      const project = await request(client, CommandType.PROJECT_CREATE, {
+        name: "usage-project",
+      });
+      const projectId = (project.data as { project: { project_id: string } }).project.project_id;
+      await request(client, CommandType.SPAWN_AGENT, {
+        project_id: projectId,
+        config: { name: "planner", agent_id: "usage-agent-id" },
+      });
+
+      const events = collect(client, EventType.CONTEXT_USAGE_UPDATED);
+      await waitUntil(() =>
+        events.some((m) => (m.payload as { phase: string }).phase === "post_call"),
+      );
+      const pre = events.find((m) => (m.payload as { phase: string }).phase === "pre_call");
+      const post = events.find((m) => (m.payload as { phase: string }).phase === "post_call");
+      expect(pre).toBeDefined();
+      expect(post).toBeDefined();
+      const prePayload = pre?.payload as Record<string, unknown>;
+      const postPayload = post?.payload as Record<string, unknown>;
+      expect(prePayload.agent_name).toBe("planner");
+      expect(prePayload.basis).toBe("anchor");
+      expect(prePayload.budget_tokens).toBe(8192);
+      expect(postPayload.basis).toBe("real");
+      expect(postPayload.real_input_tokens).toBeGreaterThan(0);
+      expect(postPayload.occupied_tokens).toBeGreaterThan(0);
+    } finally {
+      await client.disconnect();
+      await chainServer.close();
+    }
+  }, 10_000);
+
+  it("AGENT_COMPACT_CONTEXT：compact 节点广播 + 成功回执 + 未知 agent 失败", async () => {
+    const client = await makeClient();
+    const listener = await makeClient();
+    try {
+      const { projectId } = await setupProjectRoom(client);
+      const agentId = "compact-agent-id";
+      await request(client, CommandType.SPAWN_AGENT, {
+        project_id: projectId,
+        config: { name: "coder", agent_id: agentId },
+      });
+      const scope = { project_id: projectId, agent_id: agentId, agent_name: "coder" };
+      await request(client, CommandType.SESSION_LIST, scope);
+
+      const chainEvents = collect(listener, EventType.ACTION_CHAIN_UPDATED);
+      const result = await request(client, CommandType.AGENT_COMPACT_CONTEXT, scope);
+      expect(result.success).toBe(true);
+      const data = result.data as { executed: boolean; node_id: string; trigger_source: string };
+      expect(data.executed).toBe(true);
+      expect(data.trigger_source).toBe("manual");
+      expect(data.node_id).toBeTruthy();
+
+      await waitUntil(() => chainEvents.length > 0);
+      const node = (chainEvents[0].payload as { node: ActionNode }).node;
+      expect(node.ability_names).toContain("compact");
+      expect((node.metadata as Record<string, unknown>).node_kind).toBe("compact");
+
+      const unknown = await request(client, CommandType.AGENT_COMPACT_CONTEXT, {
+        project_id: projectId,
+        agent_id: "no-such-agent",
+        agent_name: "ghost",
+      });
+      expect(unknown.success).toBe(false);
+      expect(unknown.error).toContain("agent context not found");
+    } finally {
+      await client.disconnect();
+      await listener.disconnect();
     }
   }, 10_000);
 });

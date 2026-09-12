@@ -50,6 +50,12 @@ export { type BranchProjection, useBranchesStore } from "./stores/branches.js";
 export { useChangesStore } from "./stores/changes.js";
 export { DEFAULT_HUMAN_AUTHOR, useChatStore } from "./stores/chat.js";
 export { type ConnectionState, useConnectionStore } from "./stores/connection.js";
+export {
+  type ContextUsageDisplay,
+  type ContextUsageEntry,
+  type ContextUsageSnapshot,
+  useContextUsageStore,
+} from "./stores/context-usage.js";
 export { type HitlRequest, useHitlStore } from "./stores/hitl.js";
 export {
   type AbilityManifestInfo,

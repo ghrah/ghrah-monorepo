@@ -8,6 +8,7 @@ import type {
   BranchLifecyclePayload,
   BranchListResultPayload,
   CommandResultPayload,
+  ContextUsageUpdatedPayload,
   HITLRequestPayload,
   ManifestAbilityEventPayload,
   ManifestAgentEventPayload,
@@ -40,6 +41,7 @@ import { useBranchesStore } from "./stores/branches.js";
 import { useChangesStore } from "./stores/changes.js";
 import { useChatStore } from "./stores/chat.js";
 import { useConnectionStore } from "./stores/connection.js";
+import { useContextUsageStore } from "./stores/context-usage.js";
 import { useHitlStore } from "./stores/hitl.js";
 import { useManifestsStore } from "./stores/manifests.js";
 import { useProjectsStore } from "./stores/projects.js";
@@ -72,6 +74,7 @@ export function connectStores(
   const hitl = useHitlStore();
   const chat = useChatStore();
   const changes = useChangesStore();
+  const contextUsage = useContextUsageStore();
   const manifests = useManifestsStore();
   const rooms = useRoomsStore();
   const projects = useProjectsStore();
@@ -113,6 +116,15 @@ export function connectStores(
 
   client.on(EventType.HITL_REQUEST, (msg: ServerMessage) =>
     hitl.onHitlRequest(msg.payload as HITLRequestPayload),
+  );
+
+  client.on(EventType.CONTEXT_USAGE_UPDATED, (msg: ServerMessage) =>
+    batcher.add(() =>
+      contextUsage.onContextUsageUpdated(
+        msg.payload as ContextUsageUpdatedPayload,
+        msg.timestamp ?? null,
+      ),
+    ),
   );
 
   client.on(SystemType.COMMAND_RESULT, (msg: ServerMessage) => {
@@ -372,6 +384,7 @@ export function connectStores(
     EventType.AGENT_SPAWNED,
     EventType.AGENT_TERMINATED,
     EventType.ACTION_CHAIN_UPDATED,
+    EventType.CONTEXT_USAGE_UPDATED,
     EventType.HITL_REQUEST,
     EventType.AGENT_ERROR,
     EventType.MANIFEST_ABILITY_CREATED,

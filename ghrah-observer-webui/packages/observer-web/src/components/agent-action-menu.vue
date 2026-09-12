@@ -9,6 +9,7 @@ const agents = useAgentsStore();
 const { t } = useI18n();
 const {
   terminateAgent,
+  agentCompactContext,
   createWorkspace,
   workspaceSnapshot,
   workspaceDiff,
@@ -91,6 +92,22 @@ async function handleDiff() {
   showMenu.value = false;
 }
 
+async function handleCompact() {
+  const target = agents.selectedAgentTarget;
+  if (!target) return;
+  loading.value = true;
+  errorMsg.value = null;
+  const result = await agentCompactContext(target);
+  loading.value = false;
+  if (result === null) {
+    errorMsg.value = observerError.value ?? t("agents.notConnected");
+  } else if (result && !result.success) {
+    errorMsg.value = result.error ?? t("agents.compactFailed");
+  } else {
+    showMenu.value = false;
+  }
+}
+
 function closeDiff() {
   showDiff.value = false;
   diffPatch.value = "";
@@ -129,6 +146,9 @@ function close() {
       </button>
       <button class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50" :disabled="loading" @click="handleDiff">
         {{ t("agents.workspaceDiff") }}
+      </button>
+      <button class="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50" :disabled="loading" @click="handleCompact">
+        {{ t("agents.compactContext") }}
       </button>
       <div class="border-t border-gray-100 dark:border-gray-800" />
       <button class="w-full text-left px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950 disabled:opacity-50" :disabled="loading" @click="handleTerminate">

@@ -12,6 +12,7 @@ import { useBranchesStore } from "./stores/branches.js";
 import { useChangesStore } from "./stores/changes.js";
 import { useChatStore } from "./stores/chat.js";
 import { useConnectionStore } from "./stores/connection.js";
+import { useContextUsageStore } from "./stores/context-usage.js";
 import { useHitlStore } from "./stores/hitl.js";
 import { useManifestsStore } from "./stores/manifests.js";
 import { useProjectsStore } from "./stores/projects.js";
@@ -867,6 +868,78 @@ describe("connectStores", () => {
       );
 
       expect(store.getChain(chainTarget("agent-1"))).toHaveLength(1);
+    });
+  });
+
+  describe("context usage events", () => {
+    it("stores latest usage on context_usage_updated", async () => {
+      await connectClient();
+      const store = useContextUsageStore();
+
+      internals(client)._dispatch(
+        EventType.CONTEXT_USAGE_UPDATED,
+        makeMsg(EventType.CONTEXT_USAGE_UPDATED, {
+          project_id: "p1",
+          agent_id: "a1",
+          cluster_id: "c1",
+          agent_name: "agent-1",
+          phase: "post_call",
+          occupied_tokens: 4096,
+          basis: "real",
+          budget_tokens: 8192,
+          real_input_tokens: 4096,
+          real_output_tokens: 200,
+        }),
+      );
+
+      const display = store.usageFor({ projectId: "p1", agentId: "a1" });
+      expect(display).not.toBeNull();
+      expect(display?.mode).toBe("ratio");
+      expect(display?.percent).toBe(50);
+    });
+
+    it("clears derived usage on agent_terminated", async () => {
+      await connectClient();
+      const usage = useContextUsageStore();
+      const agents = useAgentsStore();
+      agents.onAgentSpawned({
+        name: "agent-1",
+        agent_id: "a1",
+        project_id: "p1",
+        cluster_id: "c1",
+        incarnation_id: "i1",
+        recovery_mode: "",
+        config: { ...DEFAULT_CONFIG, name: "agent-1" },
+      });
+      usage.onContextUsageUpdated(
+        {
+          project_id: "p1",
+          agent_id: "a1",
+          cluster_id: "c1",
+          agent_name: "agent-1",
+          phase: "post_call",
+          occupied_tokens: 100,
+          basis: "real",
+          budget_tokens: 0,
+          real_input_tokens: 100,
+          real_output_tokens: 10,
+        },
+        1,
+      );
+      expect(usage.usageFor({ projectId: "p1", agentId: "a1" })).not.toBeNull();
+
+      internals(client)._dispatch(
+        EventType.AGENT_TERMINATED,
+        makeMsg(EventType.AGENT_TERMINATED, {
+          project_id: "p1",
+          agent_id: "a1",
+          cluster_id: "c1",
+          incarnation_id: "i1",
+          name: "agent-1",
+        }),
+      );
+
+      expect(usage.usageFor({ projectId: "p1", agentId: "a1" })).toBeNull();
     });
   });
 

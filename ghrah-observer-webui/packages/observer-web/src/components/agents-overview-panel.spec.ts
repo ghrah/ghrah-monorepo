@@ -3,6 +3,7 @@
 import {
   useAgentsStore,
   useBranchesStore,
+  useContextUsageStore,
   useProjectsStore,
   useRoomsStore,
   useSessionsStore,
@@ -128,5 +129,57 @@ describe("AgentsOverviewPanel", () => {
 
     expect(wrapper.text()).toContain("Unknown");
     expect(wrapper.text()).not.toContain("agentsOverview.status.recovering");
+  });
+
+  it("renders ratio usage bar for budgeted agents and cumulative for unbudgeted", () => {
+    const usage = useContextUsageStore();
+    usage.onContextUsageUpdated(
+      {
+        project_id: "p1",
+        agent_id: "a1",
+        cluster_id: "c1",
+        agent_name: "Coder",
+        phase: "post_call",
+        occupied_tokens: 4096,
+        basis: "real",
+        budget_tokens: 8192,
+        compact_threshold: 0.8,
+        real_input_tokens: 4096,
+        real_output_tokens: 200,
+        compaction: null,
+        iteration: 2,
+      },
+      111,
+    );
+    usage.onContextUsageUpdated(
+      {
+        project_id: "p1",
+        agent_id: "a2",
+        cluster_id: "c2",
+        agent_name: "Reviewer",
+        phase: "post_call",
+        occupied_tokens: null,
+        basis: "real",
+        budget_tokens: 0,
+        compact_threshold: null,
+        real_input_tokens: 1234,
+        real_output_tokens: 100,
+        compaction: null,
+        iteration: 1,
+      },
+      112,
+    );
+
+    const wrapper = mount(AgentsOverviewPanel, { props: { projectId: "p1" } });
+
+    const ratioRow = wrapper.findAll("li")[0];
+    expect(ratioRow.find(".agents-overview-usage-bar").exists()).toBe(true);
+    expect(ratioRow.find(".agents-overview-usage-fill").attributes("style")).toContain("50%");
+    expect(ratioRow.text()).toContain("4096 / 8192 (50%)");
+
+    const cumulativeRow = wrapper.findAll("li")[1];
+    expect(cumulativeRow.find(".agents-overview-usage-bar").exists()).toBe(false);
+    expect(cumulativeRow.text()).toContain("1234 tokens used");
+    expect(cumulativeRow.text()).toContain("No window configured");
   });
 });

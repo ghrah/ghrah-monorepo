@@ -4,6 +4,7 @@ import { useAgentsStore } from "./stores/agents.js";
 import { useBranchesStore } from "./stores/branches.js";
 import { useChangesStore } from "./stores/changes.js";
 import { useChatStore } from "./stores/chat.js";
+import { useContextUsageStore } from "./stores/context-usage.js";
 import { useHitlStore } from "./stores/hitl.js";
 import { useRoomsStore } from "./stores/rooms.js";
 import { useSessionsStore } from "./stores/sessions.js";
@@ -16,6 +17,7 @@ export function clearAgentDerived(target: AgentTarget) {
   useChangesStore().clearAgent(target);
   useHitlStore().clearAgent(target);
   useChatStore().clearAgent(target);
+  useContextUsageStore().clearAgent(target);
 }
 
 export function clearRoomDerived(target: RoomTarget, removeRoom = true) {
@@ -32,6 +34,7 @@ export function clearProjectDerived(projectId: string) {
   useChangesStore().clearProject(projectId);
   useHitlStore().clearProject(projectId);
   useChatStore().clearProject(projectId);
+  useContextUsageStore().clearProject(projectId);
   useTasksStore().clearProject(projectId);
   useRoomsStore().clearProject(projectId);
   useAgentsStore().clearProject(projectId);

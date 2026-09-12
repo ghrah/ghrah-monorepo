@@ -156,6 +156,10 @@ export function useObserver() {
     return withClient((c) => c.terminateAgent(target));
   }
 
+  async function agentCompactContext(target: AgentTarget) {
+    return withClient((c) => c.agentCompactContext(target));
+  }
+
   async function createWorkspace(target: AgentTarget) {
     return withClient((c) => c.createWorkspace(target));
   }
@@ -430,6 +434,7 @@ export function useObserver() {
     sendHitlResponse,
     spawnAgent,
     terminateAgent,
+    agentCompactContext,
     createWorkspace,
     workspaceSnapshot,
     workspaceDiff,

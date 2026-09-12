@@ -1,6 +1,7 @@
 import {
   type AbilityDefinitionPayload,
   type ActionNode,
+  AgentCompactContextPayloadSchema,
   type AgentConfigPayload,
   BranchActivatePayloadSchema,
   BranchArchivePayloadSchema,
@@ -253,6 +254,10 @@ export class MockState {
       case CommandType.TERMINATE_AGENT:
         return this._parse(TerminateAgentPayloadSchema, rawPayload, (p) =>
           this.terminateAgent(p.project_id, p.agent_id, p.name),
+        );
+      case CommandType.AGENT_COMPACT_CONTEXT:
+        return this._parse(AgentCompactContextPayloadSchema, rawPayload, (p) =>
+          this._agentCompactContext(p),
         );
       case CommandType.LIST_AGENTS:
         return this._parse(ListAgentsPayloadSchema, rawPayload, (p) =>
@@ -792,6 +797,83 @@ export class MockState {
 
   // ─── Agent ───
 
+  /** 手动 compact：构造 compact 节点入链并广播占用更新（模拟 ghrah.builtin 回合）。 */
+  private _agentCompactContext(p: {
+    project_id: string;
+    agent_id: string;
+    agent_name: string;
+    cluster_id?: string;
+  }): CommandOutcome {
+    const state = this._actionState(p);
+    if (!state) return fail("agent context not found");
+    const session = state.sessions.get(state.activeSessionId);
+    if (!session) return fail("no active session");
+    const branch = state.branches.get(session.active_branch_id);
+    if (!branch) return fail("no active branch");
+
+    const tokensBefore = 6800;
+    const tokensAfter = 2400;
+    const node: ActionNode = {
+      id: uuid(),
+      parent_id: branch.head_node_id,
+      agent_name: p.agent_name,
+      timestamp: isoNow(),
+      iteration: session.iteration_count,
+      ability_names: ["compact"],
+      agent_state: {},
+      messages_delta: [
+        {
+          role: "system",
+          content_blocks: [
+            { type: "text", text: "[Context Summary] Compacted summary of earlier rounds." },
+          ],
+          metadata: {},
+        },
+      ],
+      messages_snapshot: null,
+      is_snapshot: true,
+      action_results: [],
+      metadata: {
+        node_kind: "compact",
+        trigger_source: "manual",
+        method: "ghrah.builtin",
+        summarized_range: "n-001..n-004",
+        kept_recent_nodes: 2,
+        tokens_before: tokensBefore,
+        tokens_after: tokensAfter,
+        post_check: "ok",
+        degraded: false,
+      },
+      session_id: session.session_id,
+      created_on_branch_id: branch.branch_id,
+    };
+    branch.head_node_id = node.id;
+    state.nodes.set(node.id, node);
+    this.emit(EventType.ACTION_CHAIN_UPDATED, {
+      project_id: state.projectId,
+      agent_id: state.agentId,
+      cluster_id: state.clusterId,
+      agent_name: p.agent_name,
+      node,
+    });
+    this.emit(EventType.CONTEXT_USAGE_UPDATED, {
+      project_id: state.projectId,
+      agent_id: state.agentId,
+      cluster_id: state.clusterId,
+      agent_name: p.agent_name,
+      phase: "post_call",
+      occupied_tokens: tokensAfter,
+      basis: "real",
+      budget_tokens: 8192,
+      compact_threshold: 0.8,
+      real_input_tokens: tokensAfter,
+      real_output_tokens: 320,
+      compaction: { occupied_tokens: tokensBefore, threshold: 0.8, needs_compaction: true },
+      iteration: session.iteration_count,
+    });
+    return ok({ executed: true, node_id: node.id, trigger_source: "manual" });
+  }
+
   private _actionState(p: {
     project_id: string;
     agent_id: string;
@@ -1198,6 +1280,25 @@ export class MockState {
       if (!session) return;
       let branch = state.branches.get(session.active_branch_id);
       if (!branch) return;
+      // 占用模拟：8192 预算下 2000 + (iteration % 8) * 900 锯齿爬升，触顶回落模拟 compact 重置
+      const usageBudget = 8192;
+      const usageThreshold = 0.8;
+      const usageOccupied = 2000 + ((iteration - 1) % 8) * 900;
+      this.emit(EventType.CONTEXT_USAGE_UPDATED, {
+        project_id: state.projectId,
+        agent_id: state.agentId,
+        cluster_id: state.clusterId,
+        agent_name: agent.name,
+        phase: "pre_call",
+        occupied_tokens: usageOccupied,
+        basis: "anchor",
+        budget_tokens: usageBudget,
+        compact_threshold: usageThreshold,
+        real_input_tokens: null,
+        real_output_tokens: null,
+        compaction: null,
+        iteration: iteration,
+      });
       if (iteration % 7 === 0) {
         const retry: BranchInfoPayload = {
           branch_id: uuid(),
@@ -1260,6 +1361,25 @@ export class MockState {
         cluster_id: state.clusterId,
         agent_name: agent.name,
         node,
+      });
+      this.emit(EventType.CONTEXT_USAGE_UPDATED, {
+        project_id: state.projectId,
+        agent_id: state.agentId,
+        cluster_id: state.clusterId,
+        agent_name: agent.name,
+        phase: "post_call",
+        occupied_tokens: usageOccupied + 400,
+        basis: "real",
+        budget_tokens: usageBudget,
+        compact_threshold: usageThreshold,
+        real_input_tokens: usageOccupied + 400,
+        real_output_tokens: 180,
+        compaction: {
+          occupied_tokens: usageOccupied + 400,
+          threshold: usageThreshold,
+          needs_compaction: usageOccupied + 400 >= usageBudget * usageThreshold,
+        },
+        iteration: iteration,
       });
     }, this._chainIntervalMs);
     this._chainTimers.set(key, timer);

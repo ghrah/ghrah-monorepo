@@ -170,6 +170,8 @@ export default {
     workspaceDiff: "Workspace Diff",
     terminateAgent: "Terminate Agent",
     diffTitle: "Workspace Diff — {name}",
+    compactContext: "Compact Context",
+    compactFailed: "Failed to trigger context compaction",
   },
   hitl: {
     inbox: "HITL Inbox",
@@ -192,6 +194,9 @@ export default {
     newBranch: "New branch",
     newBranchName: "Branch {index}",
     switchFailed: "Switch failed",
+    compactBadge: "⇕ compact · {source}",
+    compactDetail:
+      "Summarized {range} · kept {kept} nodes · tokens {before} → {after} · post-check {check}",
   },
   changes: {
     title: "File Changes",
@@ -206,6 +211,9 @@ export default {
     empty: "No Agent definitions in this project",
     missingId: "Missing stable agent_id",
     noActiveChain: "No active Session and Branch",
+    usageTitle: "Context: {occupied} / {budget} tokens ({percent}%)",
+    usageCumulative: "{tokens} tokens used",
+    usageNoWindow: "No window configured",
     status: {
       active: "Running",
       running: "Running",

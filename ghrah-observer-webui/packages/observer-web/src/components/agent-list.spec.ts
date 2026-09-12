@@ -1,7 +1,16 @@
 // @vitest-environment happy-dom
 
-import { useAgentsStore, useProjectsStore, useRoomsStore } from "@ghrah/observer-core";
-import type { AgentSpawnedPayload, RoomInfoPayload } from "@ghrah/protocol";
+import {
+  useAgentsStore,
+  useContextUsageStore,
+  useProjectsStore,
+  useRoomsStore,
+} from "@ghrah/observer-core";
+import type {
+  AgentSpawnedPayload,
+  ContextUsageUpdatedPayload,
+  RoomInfoPayload,
+} from "@ghrah/protocol";
 import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,6 +52,27 @@ function room(id: string, name: string, members: string[] = []): RoomInfoPayload
     created_at: "",
     updated_at: "",
     archived_at: null,
+  };
+}
+
+function usagePayload(
+  overrides: Partial<ContextUsageUpdatedPayload> = {},
+): ContextUsageUpdatedPayload {
+  return {
+    project_id: "p1",
+    agent_id: "architect-id",
+    cluster_id: "cluster",
+    agent_name: "architect",
+    phase: "post_call",
+    occupied_tokens: 4096,
+    basis: "real",
+    budget_tokens: 8192,
+    compact_threshold: 0.8,
+    real_input_tokens: 4096,
+    real_output_tokens: 200,
+    compaction: null,
+    iteration: 3,
+    ...overrides,
   };
 }
 
@@ -131,5 +161,33 @@ describe("AgentList", () => {
     const wrapper = mountAgentList();
     await wrapper.vm.$nextTick();
     expect(agentItem(wrapper, "shuoxi")!.findAll(".agent-room-badge")).toHaveLength(1);
+  });
+
+  it("shows usage ring with hover title for agents with usage data", async () => {
+    const agents = useAgentsStore();
+    agents.onAgentSpawned(spawn("architect"));
+    agents.onAgentSpawned(spawn("tester"));
+    useContextUsageStore().onContextUsageUpdated(usagePayload(), 111);
+    const wrapper = mountAgentList();
+    await wrapper.vm.$nextTick();
+    const architectRing = agentItem(wrapper, "architect")!.find("svg");
+    expect(architectRing.exists()).toBe(true);
+    expect(agentItem(wrapper, "tester")!.find("svg").exists()).toBe(false);
+  });
+
+  it("usage ring reflects ratio in stroke-dashoffset", async () => {
+    const agents = useAgentsStore();
+    agents.onAgentSpawned(spawn("architect"));
+    const usage = useContextUsageStore();
+    usage.onContextUsageUpdated(usagePayload({ occupied_tokens: 4096 }), 111);
+    const wrapper = mountAgentList();
+    await wrapper.vm.$nextTick();
+    const circles = agentItem(wrapper, "architect")!.findAll("circle");
+    const progress = circles.at(1);
+    expect(progress).toBeDefined();
+    const offset = Number(progress!.attributes("stroke-dashoffset"));
+    // 4096/8192 = 50%：offset 应为周长一半
+    const circumference = 2 * Math.PI * 5;
+    expect(offset).toBeCloseTo(circumference * 0.5, 1);
   });
 });
