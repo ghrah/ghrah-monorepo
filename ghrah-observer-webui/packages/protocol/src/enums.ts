@@ -15,6 +15,7 @@ export enum CommandType {
   HEALTH_CHECK = "health_check",
   DELEGATE = "delegate",
   GET_AGENT_INFO = "get_agent_info",
+  AGENT_COMPACT_CONTEXT = "agent_compact_context",
 
   INIT_CLUSTER = "init_cluster",
   SHUTDOWN_CLUSTER = "shutdown_cluster",
@@ -126,6 +127,7 @@ export enum EventType {
   HEALTH_STATUS = "health_status",
   ABILITY_RESULT = "ability_result",
   HITL_REQUEST = "hitl_request",
+  CONTEXT_USAGE_UPDATED = "context_usage_updated",
   WORKSPACE_CREATED = "workspace_created",
   WORKSPACE_DESTROYED = "workspace_destroyed",
   WORKSPACE_SNAPSHOT_CREATED = "workspace_snapshot_created",
@@ -214,6 +216,7 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.HEALTH_CHECK,
   CommandType.DELEGATE,
   CommandType.GET_AGENT_INFO,
+  CommandType.AGENT_COMPACT_CONTEXT,
   CommandType.INIT_CLUSTER,
   CommandType.SHUTDOWN_CLUSTER,
   CommandType.CLUSTER_STATUS,

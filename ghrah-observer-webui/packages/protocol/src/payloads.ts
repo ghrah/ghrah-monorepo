@@ -84,6 +84,13 @@ export const GetAgentInfoPayloadSchema = z.object({
   name: z.string(),
 });
 
+export const AgentCompactContextPayloadSchema = z.object({
+  project_id: z.string(),
+  agent_id: z.string(),
+  agent_name: z.string(),
+  cluster_id: z.string().optional().default(""),
+});
+
 export const SubscribePayloadSchema = z.object({
   agent_names: z.array(z.string()).nullable().optional(),
   event_types: z.array(z.string()).nullable().optional(),
@@ -339,6 +346,22 @@ export const ActionChainUpdatedPayloadSchema = z.object({
   cluster_id: z.string().optional().default(""),
   agent_name: z.string(),
   node: ActionNodeSchema.optional().default({}),
+});
+
+export const ContextUsageUpdatedPayloadSchema = z.object({
+  project_id: z.string().optional().default(""),
+  agent_id: z.string().optional().default(""),
+  cluster_id: z.string().optional().default(""),
+  agent_name: z.string(),
+  phase: z.string(),
+  occupied_tokens: z.number().int().nullable().optional(),
+  basis: z.string(),
+  budget_tokens: z.number().int().optional().default(0),
+  compact_threshold: z.number().nullable().optional(),
+  real_input_tokens: z.number().int().nullable().optional(),
+  real_output_tokens: z.number().int().nullable().optional(),
+  compaction: z.record(z.unknown()).nullable().optional(),
+  iteration: z.number().int().nullable().optional(),
 });
 
 export const AgentErrorPayloadSchema = z.object({
@@ -1031,6 +1054,7 @@ export type ListAgentsPayload = z.infer<typeof ListAgentsPayloadSchema>;
 export type HealthCheckPayload = z.infer<typeof HealthCheckPayloadSchema>;
 export type DelegatePayload = z.infer<typeof DelegatePayloadSchema>;
 export type GetAgentInfoPayload = z.infer<typeof GetAgentInfoPayloadSchema>;
+export type AgentCompactContextPayload = z.infer<typeof AgentCompactContextPayloadSchema>;
 export type SubscribePayload = z.infer<typeof SubscribePayloadSchema>;
 export type UnsubscribePayload = z.infer<typeof UnsubscribePayloadSchema>;
 export type ExecuteAbilityPayload = z.infer<typeof ExecuteAbilityPayloadSchema>;
@@ -1058,6 +1082,7 @@ export type AgentSpawnedPayload = z.infer<typeof AgentSpawnedPayloadSchema>;
 export type AgentTerminatedPayload = z.infer<typeof AgentTerminatedPayloadSchema>;
 export type AgentResponsePayload = z.infer<typeof AgentResponsePayloadSchema>;
 export type ActionChainUpdatedPayload = z.infer<typeof ActionChainUpdatedPayloadSchema>;
+export type ContextUsageUpdatedPayload = z.infer<typeof ContextUsageUpdatedPayloadSchema>;
 export type AgentErrorPayload = z.infer<typeof AgentErrorPayloadSchema>;
 export type HealthStatusPayload = z.infer<typeof HealthStatusPayloadSchema>;
 export type AbilityResultPayload = z.infer<typeof AbilityResultPayloadSchema>;

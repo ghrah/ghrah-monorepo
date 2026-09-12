@@ -1,0 +1,15 @@
+{
+  "project_id": "",
+  "agent_id": "",
+  "cluster_id": "",
+  "agent_name": "agent-1",
+  "phase": "pre_call",
+  "occupied_tokens": null,
+  "basis": "anchor",
+  "budget_tokens": 0,
+  "compact_threshold": null,
+  "real_input_tokens": null,
+  "real_output_tokens": null,
+  "compaction": null,
+  "iteration": null
+}

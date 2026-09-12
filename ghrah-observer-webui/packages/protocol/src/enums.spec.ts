@@ -40,6 +40,7 @@ describe("CommandType", () => {
     "health_check",
     "delegate",
     "get_agent_info",
+    "agent_compact_context",
     "init_cluster",
     "shutdown_cluster",
     "cluster_status",
@@ -129,7 +130,7 @@ describe("CommandType", () => {
     "reconcile_status",
   ]);
 
-  it("has exactly 100 values matching Python CommandType", () => {
+  it("has exactly 101 values matching Python CommandType", () => {
     const tsValues = new Set(Object.values(CommandType));
     expect(tsValues).toEqual(PYTHON_COMMAND_VALUES);
   });
@@ -150,6 +151,7 @@ describe("EventType", () => {
     "health_status",
     "ability_result",
     "hitl_request",
+    "context_usage_updated",
     "workspace_created",
     "workspace_destroyed",
     "workspace_snapshot_created",
@@ -202,7 +204,7 @@ describe("EventType", () => {
     "reconcile_failed",
   ]);
 
-  it("has exactly 57 values matching Python EventType", () => {
+  it("has exactly 58 values matching Python EventType", () => {
     const tsValues = new Set(Object.values(EventType));
     expect(tsValues).toEqual(PYTHON_EVENT_VALUES);
   });
@@ -251,6 +253,7 @@ describe("CORE_COMMANDS", () => {
     "health_check",
     "delegate",
     "get_agent_info",
+    "agent_compact_context",
     "init_cluster",
     "shutdown_cluster",
     "cluster_status",
@@ -267,7 +270,7 @@ describe("CORE_COMMANDS", () => {
     "branch_delete",
   ]);
 
-  it("contains exactly 23 core command values", () => {
+  it("contains exactly 25 core command values", () => {
     expect(CORE_COMMANDS).toEqual(PYTHON_CORE_COMMANDS);
   });
 });
