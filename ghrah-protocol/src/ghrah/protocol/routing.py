@@ -24,6 +24,7 @@ AGENT_SCOPED_EVENT_TYPES: frozenset[str] = frozenset(
         EventType.ACTION_CHAIN_UPDATED.value,
         EventType.ABILITY_RESULT.value,
         EventType.HITL_REQUEST.value,
+        EventType.HITL_RESOLVED.value,
         EventType.CONTEXT_USAGE_UPDATED.value,
         EventType.SESSION_CREATED.value,
         EventType.SESSION_ACTIVATED.value,

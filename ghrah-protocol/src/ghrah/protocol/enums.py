@@ -193,6 +193,7 @@ class EventType(StrEnum):
     HEALTH_STATUS = "health_status"
     ABILITY_RESULT = "ability_result"
     HITL_REQUEST = "hitl_request"
+    HITL_RESOLVED = "hitl_resolved"
     CONTEXT_USAGE_UPDATED = "context_usage_updated"
     WORKSPACE_CREATED = "workspace_created"
     WORKSPACE_DESTROYED = "workspace_destroyed"

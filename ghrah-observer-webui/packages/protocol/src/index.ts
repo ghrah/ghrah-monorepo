@@ -117,6 +117,8 @@ export {
   HealthStatusPayloadSchema,
   type HITLRequestPayload,
   HITLRequestPayloadSchema,
+  type HITLResolvedPayload,
+  HITLResolvedPayloadSchema,
   type HITLResponsePayload,
   HITLResponsePayloadSchema,
   type InitClusterPayload,

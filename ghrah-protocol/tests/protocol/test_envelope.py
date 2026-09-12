@@ -38,6 +38,7 @@ from ghrah.protocol.types import (
     EventType,
     ExecuteAbilityPayload,
     HealthStatusPayload,
+    HITLResolvedPayload,
     HITLResponsePayload,
     SpawnAgentPayload,
     SystemType,
@@ -469,19 +470,19 @@ class TestEnvelopeTypeHelpers:
         assert Envelope(type="spawn_agent").as_system_type() is None
 
 
-# ─── S1.2.1 验收：HITLResponsePayload 双路径兼容 ───
+# ─── S1.2.1 验收：HITLResponsePayload 定位键 fail-closed ───
 
 
 class TestHITLResponsePayloadSchema:
-    def test_distributed_path_fields(self):
-        """分布式（Subject）路径：promise_id/approved/reason。"""
+    def test_promise_path_fields(self):
+        """promise 路径：promise_id/approved/reason（真实链路 WebUI → Core）。"""
         p = HITLResponsePayload(approved=True, promise_id="p1", reason="ok")
         assert p.promise_id == "p1"
         assert p.approved is True
         assert p.reason == "ok"
 
-    def test_mono_path_fields(self):
-        """单体（Core）路径：agent_name/ability_name/tool_call_id/approved/result。"""
+    def test_triplet_path_fields(self):
+        """三元组路径：agent_name/ability_name/tool_call_id/approved/result。"""
         p = HITLResponsePayload(
             approved=False,
             agent_name="a",
@@ -495,12 +496,27 @@ class TestHITLResponsePayloadSchema:
         assert p.approved is False
         assert p.result == "denied"
 
-    def test_only_approved_required(self):
-        """approved 为唯一必填字段。"""
-        p = HITLResponsePayload(approved=True)
-        assert p.approved is True
-        assert p.promise_id == ""
-        assert p.agent_name == ""
+    def test_promise_and_triplet_both_valid(self):
+        """promise 与三元组同时携带：合法（promise 优先解析）。"""
+        p = HITLResponsePayload(
+            approved=True,
+            promise_id="p1",
+            agent_name="a",
+            ability_name="write_file",
+            tool_call_id="call_1",
+        )
+        assert p.promise_id == "p1"
+        assert p.agent_name == "a"
+
+    def test_no_locator_rejected(self):
+        """定位键全缺（历史退化载荷）：校验失败（fail-closed 行为变更）。"""
+        with pytest.raises(ValidationError):
+            HITLResponsePayload(approved=True)
+
+    def test_partial_triplet_rejected(self):
+        """三元组不完整（缺 tool_call_id）且无 promise：校验失败。"""
+        with pytest.raises(ValidationError):
+            HITLResponsePayload(approved=True, agent_name="a", ability_name="write_file")
 
     def test_envelope_from_dict_narrows_hitl(self):
         env = envelope_from_dict(
@@ -511,6 +527,38 @@ class TestHITLResponsePayloadSchema:
         )
         assert isinstance(env.payload, HITLResponsePayload)
         assert env.payload.promise_id == "p1"
+
+    def test_envelope_from_dict_rejects_degenerate_hitl(self):
+        """wire 反序列化同样执行 fail-closed 校验。"""
+        with pytest.raises(ValidationError):
+            envelope_from_dict(
+                {
+                    "type": "hitl_response",
+                    "payload": {"approved": True},
+                }
+            )
+
+
+# ─── hitl_resolved 事件载荷 ───
+
+
+class TestHITLResolvedPayload:
+    def test_fields(self):
+        p = HITLResolvedPayload(
+            agent_name="a",
+            ability_name="write_file",
+            promise_id="p1",
+            tool_call_id="call_1",
+            status="timeout",
+        )
+        assert p.status == "timeout"
+        assert p.promise_id == "p1"
+
+    def test_event_registered_in_payload_map(self):
+        assert EVENT_PAYLOAD_MAP[EventType.HITL_RESOLVED] is HITLResolvedPayload
+
+    def test_agent_scoped(self):
+        assert EventType.HITL_RESOLVED.value in AGENT_SCOPED_EVENT_TYPES
 
 
 # ─── S1.2.4 验收：payload_agent_name helper ───

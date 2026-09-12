@@ -21,6 +21,7 @@ import {
   HealthCheckPayloadSchema,
   HealthStatusPayloadSchema,
   HITLRequestPayloadSchema,
+  HITLResolvedPayloadSchema,
   HITLResponsePayloadSchema,
   InitClusterPayloadSchema,
   ListAgentsPayloadSchema,
@@ -392,6 +393,55 @@ describe("HITLResponsePayloadSchema", () => {
       reason: "unsafe",
     });
     expect(result.reason).toBe("unsafe");
+  });
+
+  it("parses the complete triplet without promise_id", () => {
+    const result = HITLResponsePayloadSchema.parse({
+      agent_name: "a",
+      ability_name: "write_file",
+      tool_call_id: "call-1",
+      approved: true,
+    });
+    expect(result.agent_name).toBe("a");
+  });
+
+  it("rejects degenerate payload with no locator (fail-closed)", () => {
+    expect(() => HITLResponsePayloadSchema.parse({ approved: true })).toThrow();
+  });
+
+  it("rejects partial triplet without promise_id", () => {
+    expect(() =>
+      HITLResponsePayloadSchema.parse({
+        agent_name: "a",
+        ability_name: "write_file",
+        approved: true,
+      }),
+    ).toThrow();
+  });
+});
+
+describe("HITLResolvedPayloadSchema", () => {
+  it("parses with terminal status", () => {
+    const result = HITLResolvedPayloadSchema.parse({
+      promise_id: "p-001",
+      agent_name: "agent-1",
+      ability_name: "bash",
+      tool_call_id: "call-1",
+      status: "timeout",
+    });
+    expect(result.status).toBe("timeout");
+    expect(result.promise_id).toBe("p-001");
+  });
+
+  it("rejects unknown status", () => {
+    expect(() =>
+      HITLResolvedPayloadSchema.parse({
+        promise_id: "p-001",
+        agent_name: "agent-1",
+        ability_name: "bash",
+        status: "expired",
+      }),
+    ).toThrow();
   });
 });
 

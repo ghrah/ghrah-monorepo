@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ─── 命令载荷模型 ───
 
@@ -280,26 +280,59 @@ class ContextUsageUpdatedPayload(BaseModel):
 class HITLResponsePayload(BaseModel):
     """hitl_response 命令载荷。
 
-    Observer → Subject（分布式）/ Observer → Core（单体）：HITL 审批响应。
+    Observer → Core：HITL 审批响应。响应须至少携带一种定位键（fail-closed）：
+    - promise 路径：promise_id（Core 生成并随 hitl_request 下发，优先解析）
+    - 单体三元组路径：agent_name + ability_name + tool_call_id（回退解析）
+    两者皆缺时校验失败，不再静默接受空字段集。
 
-    存在两条数据流，字段集合不同，故全部字段（除 approved）设默认值以兼容：
-    - 分布式（Subject 侧）：promise_id / approved / reason
-      （SubjectService._handle_hitl_response 据此 resolve Promise）
-    - 单体（Core 侧）：agent_name / ability_name / tool_call_id / approved / result
-      （core/router._handle_hitl_response 据此 resolve HITLFutureStore）
+    存在两条数据流：
+    - 单体（Core 侧，真实链路）：promise_id / approved / reason
+    - 三元组（Core handler 回退）：agent_name / ability_name / tool_call_id / approved / result
+    - mock/开发链路：promise_id / approved / reason
     """
 
-    # 分布式路径字段
+    # promise 路径字段
     promise_id: str = ""
-    # 单体路径字段
+    # 单体三元组路径字段
     agent_name: str = ""
     ability_name: str = ""
     tool_call_id: str = ""
-    # 两路径共有
+    # 共有
     approved: bool
-    # 分布式：拒绝原因；单体：审批附加结果
+    # 拒绝原因（UI 收集，随 HITLResult.result 透传给 LLM）
     reason: str | None = None
+    # 审批附加结果
     result: Any = None
+
+    @model_validator(mode="after")
+    def _require_locator(self) -> HITLResponsePayload:
+        """promise 与三元组至少一路完整，否则拒绝（fail-closed）。"""
+        has_promise = bool(self.promise_id)
+        has_triplet = all([self.agent_name, self.ability_name, self.tool_call_id])
+        if not has_promise and not has_triplet:
+            raise ValueError(
+                "hitl_response requires either promise_id or the complete triplet "
+                "(agent_name + ability_name + tool_call_id); got neither"
+            )
+        return self
+
+
+class HITLResolvedPayload(BaseModel):
+    """hitl_resolved 事件载荷。
+
+    Core → Subject → Observer：HITL 审批等待终结通知（approved / rejected /
+    timeout）。Observer 据此清除审批卡片——超时或另端已处理时前端不再悬挂。
+    """
+
+    project_id: str = ""
+    agent_id: str = ""
+    cluster_id: str = ""
+    promise_id: str
+    agent_name: str
+    ability_name: str
+    tool_call_id: str = ""
+    status: str
+    """终态：approved / rejected / timeout"""
 
 
 class UnregisterAbilityPayload(BaseModel):

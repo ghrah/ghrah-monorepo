@@ -151,6 +151,7 @@ describe("EventType", () => {
     "health_status",
     "ability_result",
     "hitl_request",
+    "hitl_resolved",
     "context_usage_updated",
     "workspace_created",
     "workspace_destroyed",

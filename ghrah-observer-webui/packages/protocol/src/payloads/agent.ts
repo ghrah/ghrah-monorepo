@@ -108,14 +108,31 @@ export const ExecuteAbilityPayloadSchema = z.object({
   tool_args: z.record(z.unknown()).optional().default({}),
 });
 
-export const HITLResponsePayloadSchema = z.object({
-  promise_id: z.string().optional().default(""),
-  agent_name: z.string().optional().default(""),
-  ability_name: z.string().optional().default(""),
+export const HITLResponsePayloadSchema = z
+  .object({
+    promise_id: z.string().optional().default(""),
+    agent_name: z.string().optional().default(""),
+    ability_name: z.string().optional().default(""),
+    tool_call_id: z.string().optional().default(""),
+    approved: z.boolean(),
+    reason: z.string().nullable().optional(),
+    result: z.unknown().nullable().optional(),
+  })
+  .refine((p) => Boolean(p.promise_id) || (p.agent_name && p.ability_name && p.tool_call_id), {
+    message:
+      "hitl_response requires either promise_id or the complete triplet " +
+      "(agent_name + ability_name + tool_call_id); got neither",
+  });
+
+export const HITLResolvedPayloadSchema = z.object({
+  project_id: z.string().optional().default(""),
+  agent_id: z.string().optional().default(""),
+  cluster_id: z.string().optional().default(""),
+  promise_id: z.string(),
+  agent_name: z.string(),
+  ability_name: z.string(),
   tool_call_id: z.string().optional().default(""),
-  approved: z.boolean(),
-  reason: z.string().nullable().optional(),
-  result: z.unknown().nullable().optional(),
+  status: z.enum(["approved", "rejected", "timeout"]),
 });
 
 export const InitClusterPayloadSchema = z.object({
@@ -361,3 +378,4 @@ export type AgentErrorPayload = z.infer<typeof AgentErrorPayloadSchema>;
 export type HealthStatusPayload = z.infer<typeof HealthStatusPayloadSchema>;
 export type AbilityResultPayload = z.infer<typeof AbilityResultPayloadSchema>;
 export type HITLRequestPayload = z.infer<typeof HITLRequestPayloadSchema>;
+export type HITLResolvedPayload = z.infer<typeof HITLResolvedPayloadSchema>;
