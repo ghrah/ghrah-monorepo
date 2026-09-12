@@ -67,9 +67,12 @@ function usagePayload(
     occupied_tokens: 4096,
     basis: "real",
     budget_tokens: 8192,
+    budget_source: "declared",
     compact_threshold: 0.8,
     real_input_tokens: 4096,
     real_output_tokens: 200,
+    real_cache_read_tokens: 3200,
+    real_cache_write_tokens: 128,
     compaction: null,
     iteration: 3,
     ...overrides,
@@ -173,6 +176,10 @@ describe("AgentList", () => {
     const architectRing = agentItem(wrapper, "architect")!.find("svg");
     expect(architectRing.exists()).toBe(true);
     expect(agentItem(wrapper, "tester")!.find("svg").exists()).toBe(false);
+    // hover title 含三段明细（输入含缓存命中）
+    const title = agentItem(wrapper, "architect")!.find(".inline-flex").attributes("title");
+    expect(title).toContain("Context: 4096 / 8192 tokens (50%)");
+    expect(title).toContain("cache hit 3200");
   });
 
   it("usage ring reflects ratio in stroke-dashoffset", async () => {

@@ -15,15 +15,28 @@ const dashOffset = computed(() => {
 });
 
 const title = computed(() => {
-  if (props.usage.mode === "ratio" && props.usage.percent != null) {
-    return t("agentsOverview.usageTitle", {
-      occupied: props.usage.occupiedTokens ?? 0,
-      budget: props.usage.budgetTokens,
-      percent: props.usage.percent,
-    });
+  const usage = props.usage;
+  if (usage.mode === "ratio" && usage.percent != null) {
+    const lines = [
+      t("agentsOverview.usageTitle", {
+        occupied: usage.occupiedTokens ?? 0,
+        budget: usage.budgetTokens,
+        percent: usage.percent,
+      }),
+    ];
+    if (usage.realInputTokens != null || usage.realOutputTokens != null) {
+      lines.push(
+        t("agentsOverview.usageBreakdown", {
+          input: usage.realInputTokens ?? 0,
+          output: usage.realOutputTokens ?? 0,
+          cacheRead: usage.realCacheReadTokens ?? 0,
+        }),
+      );
+    }
+    return lines.join("\n");
   }
   return t("agentsOverview.usageCumulative", {
-    tokens: props.usage.cumulativeInputTokens,
+    tokens: usage.cumulativeInputTokens,
   });
 });
 </script>

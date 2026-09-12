@@ -182,4 +182,38 @@ describe("AgentsOverviewPanel", () => {
     expect(cumulativeRow.text()).toContain("1234 tokens used");
     expect(cumulativeRow.text()).toContain("No window configured");
   });
+
+  it("renders cache breakdown and budget source tag for budgeted agents", () => {
+    const usage = useContextUsageStore();
+    usage.onContextUsageUpdated(
+      {
+        project_id: "p1",
+        agent_id: "a1",
+        cluster_id: "c1",
+        agent_name: "Coder",
+        phase: "post_call",
+        occupied_tokens: 4096,
+        basis: "real",
+        budget_tokens: 8192,
+        budget_source: "vendor",
+        compact_threshold: 0.8,
+        real_input_tokens: 4096,
+        real_output_tokens: 200,
+        real_cache_read_tokens: 3200,
+        real_cache_write_tokens: 128,
+        compaction: null,
+        iteration: 2,
+      },
+      111,
+    );
+
+    const wrapper = mount(AgentsOverviewPanel, { props: { projectId: "p1" } });
+
+    const row = wrapper.findAll("li")[0];
+    expect(row.find(".agents-overview-usage-breakdown").exists()).toBe(true);
+    expect(row.text()).toContain("in 4096");
+    expect(row.text()).toContain("out 200");
+    expect(row.text()).toContain("cached 3200");
+    expect(row.text()).toContain("vendor");
+  });
 });

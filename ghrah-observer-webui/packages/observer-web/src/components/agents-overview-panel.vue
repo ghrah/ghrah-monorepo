@@ -100,6 +100,15 @@ function openAgent(row: (typeof rows.value)[number]) {
                 <span class="agents-overview-usage-fill" :style="{ width: `${row.usage.percent}%` }" />
               </span>
               <span class="agents-overview-usage-text">{{ row.usage.occupiedTokens ?? 0 }} / {{ row.usage.budgetTokens }} ({{ row.usage.percent }}%)</span>
+              <span
+                v-if="row.usage.realInputTokens != null || row.usage.realOutputTokens != null"
+                class="agents-overview-usage-breakdown"
+              >{{ t("agentsOverview.usageBreakdownShort", { input: row.usage.realInputTokens ?? 0, output: row.usage.realOutputTokens ?? 0, cacheRead: row.usage.realCacheReadTokens ?? 0 }) }}</span>
+              <span
+                v-if="row.usage.budgetSource"
+                class="agents-overview-usage-tag"
+                :title="t('agentsOverview.usageSource', { source: row.usage.budgetSource })"
+              >{{ t(`agentsOverview.budgetSource.${row.usage.budgetSource}`) }}</span>
             </template>
             <template v-else>
               <span class="agents-overview-usage-text">{{ t("agentsOverview.usageCumulative", { tokens: row.usage.cumulativeInputTokens }) }}</span>

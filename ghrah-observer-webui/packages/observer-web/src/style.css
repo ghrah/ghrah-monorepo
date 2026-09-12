@@ -1904,6 +1904,13 @@ button:focus-visible,
   color: #757d8d;
   font-size: var(--font-ui-eyebrow);
 }
+.agents-overview-usage-breakdown {
+  overflow: hidden;
+  color: #8a919f;
+  font-size: var(--font-ui-note);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 :root.dark .agents-overview-usage-bar {
   background: #374151;
 }

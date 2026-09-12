@@ -14,9 +14,12 @@ const payload = (
   occupied_tokens: 4000,
   basis: "real",
   budget_tokens: 8192,
+  budget_source: "declared",
   compact_threshold: 0.8,
   real_input_tokens: 4000,
   real_output_tokens: 300,
+  real_cache_read_tokens: 3000,
+  real_cache_write_tokens: 200,
   compaction: null,
   iteration: 2,
   ...overrides,
@@ -55,6 +58,44 @@ describe("useContextUsageStore", () => {
     store.onContextUsageUpdated(payload({ real_input_tokens: 250 }), 2);
     const display = store.usageFor({ projectId: "p1", agentId: "a1" });
     expect(display?.cumulativeInputTokens).toBe(350);
+  });
+
+  it("projects cache breakdown and budget source into display", () => {
+    const store = useContextUsageStore();
+    store.onContextUsageUpdated(
+      payload({
+        real_input_tokens: 4000,
+        real_output_tokens: 300,
+        real_cache_read_tokens: 3000,
+        real_cache_write_tokens: 200,
+        budget_source: "vendor",
+      }),
+      1,
+    );
+    const display = store.usageFor({ projectId: "p1", agentId: "a1" });
+    expect(display?.realInputTokens).toBe(4000);
+    expect(display?.realOutputTokens).toBe(300);
+    expect(display?.realCacheReadTokens).toBe(3000);
+    expect(display?.realCacheWriteTokens).toBe(200);
+    expect(display?.budgetSource).toBe("vendor");
+    expect(display?.cumulativeOutputTokens).toBe(300);
+    expect(display?.cumulativeCacheReadTokens).toBe(3000);
+  });
+
+  it("defaults cache dimensions to null when vendor omits them", () => {
+    const store = useContextUsageStore();
+    store.onContextUsageUpdated(
+      payload({
+        real_cache_read_tokens: undefined,
+        real_cache_write_tokens: undefined,
+        budget_source: undefined,
+      }),
+      1,
+    );
+    const display = store.usageFor({ projectId: "p1", agentId: "a1" });
+    expect(display?.realCacheReadTokens).toBeNull();
+    expect(display?.realCacheWriteTokens).toBeNull();
+    expect(display?.budgetSource).toBeNull();
   });
 
   it("falls back to cumulative mode when budget is zero", () => {

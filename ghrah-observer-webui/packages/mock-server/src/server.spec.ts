@@ -826,9 +826,16 @@ describe("mock-server 协议层", () => {
       expect(prePayload.agent_name).toBe("planner");
       expect(prePayload.basis).toBe("anchor");
       expect(prePayload.budget_tokens).toBe(8192);
+      expect(prePayload.budget_source).toBe("declared");
+      expect(prePayload.real_cache_read_tokens).toBeNull();
       expect(postPayload.basis).toBe("real");
       expect(postPayload.real_input_tokens).toBeGreaterThan(0);
       expect(postPayload.occupied_tokens).toBeGreaterThan(0);
+      // 归一化口径模拟：缓存命中为总输入的一部分（小于总输入）
+      expect(postPayload.real_cache_read_tokens).toBeGreaterThan(0);
+      expect(postPayload.real_cache_read_tokens).toBeLessThan(
+        postPayload.real_input_tokens as number,
+      );
     } finally {
       await client.disconnect();
       await chainServer.close();

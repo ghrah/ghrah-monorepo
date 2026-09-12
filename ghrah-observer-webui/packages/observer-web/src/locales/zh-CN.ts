@@ -206,8 +206,17 @@ export default {
     missingId: "缺少稳定 agent_id",
     noActiveChain: "没有活跃的 Session 与 Branch",
     usageTitle: "上下文：{occupied} / {budget} tokens（{percent}%）",
+    usageBreakdown: "输入 {input}（缓存命中 {cacheRead}）· 输出 {output}",
+    usageBreakdownShort: "入 {input} · 出 {output} · 缓存 {cacheRead}",
+    usageSource: "预算来源：{source}",
     usageCumulative: "已消耗 {tokens} tokens",
     usageNoWindow: "未配置窗口",
+    budgetSource: {
+      declared: "声明",
+      model_table: "模型表",
+      default: "默认",
+      vendor: "厂商回填",
+    },
     status: {
       active: "运行中",
       running: "运行中",

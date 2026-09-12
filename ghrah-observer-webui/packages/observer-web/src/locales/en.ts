@@ -212,8 +212,17 @@ export default {
     missingId: "Missing stable agent_id",
     noActiveChain: "No active Session and Branch",
     usageTitle: "Context: {occupied} / {budget} tokens ({percent}%)",
+    usageBreakdown: "Input {input} (cache hit {cacheRead}) · Output {output}",
+    usageBreakdownShort: "in {input} · out {output} · cached {cacheRead}",
+    usageSource: "Budget source: {source}",
     usageCumulative: "{tokens} tokens used",
     usageNoWindow: "No window configured",
+    budgetSource: {
+      declared: "declared",
+      model_table: "model table",
+      default: "default",
+      vendor: "vendor",
+    },
     status: {
       active: "Running",
       running: "Running",
