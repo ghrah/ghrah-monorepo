@@ -360,6 +360,70 @@ class TestEmergencyLadder:
         assert len(compact_nodes) == 4  # 4 次紧急 compact（budget 500/250/125/62）
 
     @pytest.mark.asyncio
+    async def test_vendor_window_backfill_corrects_budget(self) -> None:
+        """超限报文含窗口数字 → 预算以厂商口径回填（不减半）→ 重试成功。"""
+        agent = _create_agent(_compact_config(max_tokens=1000))
+        llm = AsyncMock()
+        llm.generate.side_effect = [
+            RuntimeError("prompt is too long: 2000 tokens > 1900 maximum"),
+            LLMResponse(content_blocks=[TextBlock(text="summary")]),
+            LLMResponse(content_blocks=[TextBlock(text="recovered")]),
+            LLMResponse(content_blocks=[TextBlock(text="done")]),
+        ]
+        llm.configure_tools = MagicMock()
+        agent._llm = llm
+        agent._iteration_state.max_iterations = 2
+        agent._iteration_state.reset()
+        cm = agent._context_manager
+        for i in range(3):
+            cm.begin_iteration()
+            cm.add_messages([ChatMessage.user(text_or_blocks=f"seed-{i}")])
+            cm.commit_iteration(ability_names=[f"seed-{i}"])
+        await agent._message_queue.put(ChatMessage.user(text_or_blocks="user-msg"))
+
+        await agent._drive_loop()
+
+        # 预算被厂商口径回填：来源 vendor、值 1900（非减半 500）
+        wm = cm.window_manager
+        assert wm.max_tokens == 1900
+        assert wm.max_tokens_source == "vendor"
+        compact_nodes = _compact_nodes(cm.get_history())
+        assert len(compact_nodes) == 1
+        assert compact_nodes[0].metadata["trigger_source"] == "emergency"
+
+    @pytest.mark.asyncio
+    async def test_vendor_backfill_at_same_budget_falls_to_halving(self) -> None:
+        """报文窗口与当前预算一致仍超限 → 输出挤压，回落减半阶梯。"""
+        agent = _create_agent(_compact_config(max_tokens=1000))
+        llm = AsyncMock()
+        # 首次超限报文窗口恰为当前预算 1000 → 回填不动值但也不重抛，
+        # 走减半；compact 摘要成功后重试成功
+        llm.generate.side_effect = [
+            RuntimeError("maximum context length is 1000 tokens"),
+            LLMResponse(content_blocks=[TextBlock(text="summary")]),
+            LLMResponse(content_blocks=[TextBlock(text="recovered")]),
+            LLMResponse(content_blocks=[TextBlock(text="done")]),
+        ]
+        llm.configure_tools = MagicMock()
+        agent._llm = llm
+        agent._iteration_state.max_iterations = 2
+        agent._iteration_state.reset()
+        cm = agent._context_manager
+        for i in range(3):
+            cm.begin_iteration()
+            cm.add_messages([ChatMessage.user(text_or_blocks=f"seed-{i}")])
+            cm.commit_iteration(ability_names=[f"seed-{i}"])
+        await agent._message_queue.put(ChatMessage.user(text_or_blocks="user-msg"))
+
+        await agent._drive_loop()
+
+        # 值未变（回填拒绝同值），来源仍为 declared
+        wm = cm.window_manager
+        assert wm.max_tokens == 1000
+        assert wm.max_tokens_source == "declared"
+        assert len(_compact_nodes(cm.get_history())) == 1
+
+    @pytest.mark.asyncio
     async def test_non_context_error_skips_ladder(self) -> None:
         """非超限错误不进阶梯，直接 AgentError。"""
         agent = _create_agent(_compact_config())

@@ -7,7 +7,10 @@
 from __future__ import annotations
 
 from ghrah.context.model_windows import lookup_model_window
-from ghrah.context.window import WindowManager
+from ghrah.context.window import (
+    WindowManager,
+    parse_vendor_window_tokens,
+)
 from ghrah.types.config_types import DEFAULT_WINDOW_MAX_TOKENS
 
 
@@ -72,3 +75,41 @@ class TestWindowManagerBudgetSource:
         assert wm.max_tokens == 1000
         assert wm.max_tokens_source == "declared"
 
+    def test_vendor_correction_overrides_declared(self) -> None:
+        wm = WindowManager(max_tokens=1000)
+        assert wm.correct_budget_from_vendor(65_536) is True
+        assert wm.max_tokens == 65_536
+        assert wm.max_tokens_source == "vendor"
+
+    def test_vendor_correction_rejects_non_positive(self) -> None:
+        wm = WindowManager()
+        assert wm.correct_budget_from_vendor(0) is False
+        assert wm.correct_budget_from_vendor(-100) is False
+        assert wm.max_tokens_source == "default"
+
+
+class TestParseVendorWindowTokens:
+    def test_openai_style(self) -> None:
+        msg = (
+            "Error code: 400 - This model's maximum context length is 128000 tokens. "
+            "However, you requested 130000 tokens."
+        )
+        assert parse_vendor_window_tokens(msg) == 128000
+
+    def test_anthropic_style_takes_maximum(self) -> None:
+        msg = "Error code: 400 - prompt is too long: 200000 tokens > 190000 maximum"
+        assert parse_vendor_window_tokens(msg) == 190000
+
+    def test_context_window_of(self) -> None:
+        assert parse_vendor_window_tokens("input exceeds the context window of 200000") == 200000
+
+    def test_context_limit_with_thousands_separator(self) -> None:
+        assert parse_vendor_window_tokens("exceed the context limit (131,072)") == 131_072
+
+    def test_gemini_style(self) -> None:
+        msg = "exceeds the maximum number of tokens allowed (1048576)"
+        assert parse_vendor_window_tokens(msg) == 1_048_576
+
+    def test_no_match_returns_none(self) -> None:
+        assert parse_vendor_window_tokens("some unrelated error") is None
+        assert parse_vendor_window_tokens("") is None

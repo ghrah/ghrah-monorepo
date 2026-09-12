@@ -53,6 +53,7 @@ from ghrah.context.action_session import ActionSession
 from ghrah.context.branch import ActionBranch
 from ghrah.context.iteration_state import IterationState
 from ghrah.context.manager import ContextManager
+from ghrah.context.window import parse_vendor_window_tokens
 from ghrah.core.ability_protocol import AbilityProtocol, ExecutorProtocol
 from ghrah.core.event_publisher import (
     EventPublisher,
@@ -665,23 +666,41 @@ class ActorAgent:
                     await self._message_queue.put(msg)
 
                 # 紧急压缩阶梯：厂商上下文超限（保守类别识别）且仍有减半
-                # 余量时，不重抛——进紧急 compact 回合（预算减半、
-                # trigger_source="emergency"），下一迭代自然重试。
-                # 每次触发都是显式信号（warning + emergency 标记）。
+                # 余量时，不重抛——进紧急 compact 回合（trigger_source=
+                # "emergency"），下一迭代自然重试。每次触发都是显式信号
+                # （warning + emergency 标记）。
+                # 窗口回填优先：报文含真实窗口数字时以厂商口径为真值
+                # 校正预算；校正后仍超限（或解析不到数字）回落减半阶梯。
                 if (
                     _is_context_limit_error(e)
                     and cm.window_manager is not None
                     and emergency_halvings < _MAX_EMERGENCY_HALVINGS
                 ):
-                    emergency_halvings += 1
-                    budget_override = cm.window_manager.max_tokens // 2**emergency_halvings
-                    logger.warning(
-                        "ActorAgent[%s]: vendor context limit exceeded — emergency compact "
-                        "(halving %d/4, budget=%d)",
-                        self.config.name,
-                        emergency_halvings,
-                        budget_override,
-                    )
+                    vendor_window = parse_vendor_window_tokens(str(e))
+                    if vendor_window is not None and vendor_window != cm.window_manager.max_tokens:
+                        cm.window_manager.correct_budget_from_vendor(vendor_window)
+                        budget_override = vendor_window
+                    elif vendor_window is not None:
+                        # 预算已与厂商窗口一致仍超限 → 输出挤压所致，减半
+                        emergency_halvings += 1
+                        budget_override = cm.window_manager.max_tokens // 2**emergency_halvings
+                        logger.warning(
+                            "ActorAgent[%s]: vendor context limit exceeded at corrected "
+                            "budget — emergency compact (halving %d/4, budget=%d)",
+                            self.config.name,
+                            emergency_halvings,
+                            budget_override,
+                        )
+                    else:
+                        emergency_halvings += 1
+                        budget_override = cm.window_manager.max_tokens // 2**emergency_halvings
+                        logger.warning(
+                            "ActorAgent[%s]: vendor context limit exceeded — emergency compact "
+                            "(halving %d/4, budget=%d)",
+                            self.config.name,
+                            emergency_halvings,
+                            budget_override,
+                        )
                     await self._run_compact_round("emergency", budget_override=budget_override)
                     continue
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -39,6 +40,7 @@ __all__ = [
     "WindowManager",
     "estimate_tokens",
     "estimate_message_tokens",
+    "parse_vendor_window_tokens",
 ]
 
 # token 估算常量：1 token ≈ 4 个字符
@@ -244,6 +246,7 @@ class WindowManager:
             window,
         )
         return True
+
     def correct_budget_from_vendor(self, window_tokens: int) -> bool:
         """厂商超限错误解析出的真实窗口回填。
 
@@ -345,3 +348,46 @@ class WindowManager:
             估算的 token 数
         """
         return estimate_tokens(messages)
+
+
+# 厂商超限报文中的窗口数字解析模式 — 只在 _is_context_limit_error 命中后
+# 尝试（白名单前置），模式本身保守：数字必须紧邻窗口上限语义短语。
+# 多捕获组时取最后一组（上限值，而非当前请求 token 数）。
+_VENDOR_WINDOW_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # OpenAI: "maximum context length is 4096 tokens. However, you requested ..."
+    re.compile(r"maximum context length is ([\d,]+)", re.IGNORECASE),
+    # Anthropic: "prompt is too long: 200000 tokens > 190000 maximum"
+    re.compile(r"prompt is too long: ([\d,]+) tokens > ([\d,]+) maximum", re.IGNORECASE),
+    # Gemini: "exceeds the maximum number of tokens allowed (1048576)"
+    re.compile(r"maximum number of tokens allowed \(?([\d,]+)\)?", re.IGNORECASE),
+    # 通用: "exceeds the context window of 200000 tokens"
+    re.compile(r"context window of ([\d,]+)", re.IGNORECASE),
+    # DeepSeek: "exceed the context limit (131072)" / "context limit 131072"
+    re.compile(r"context limit \(?([\d,]+)\)?", re.IGNORECASE),
+)
+
+
+def parse_vendor_window_tokens(message: str) -> int | None:
+    """从厂商上下文超限错误报文中保守解析真实窗口大小。
+
+    仅解析**窗口上限**语义的数字（多捕获组模式取最后一组，即上限，
+    而非当前请求 token 数）。调用方应先以 ``_is_context_limit_error``
+    类别白名单确认错误类别，解析失败返回 None（回落现有减半阶梯）。
+
+    Args:
+        message: 厂商错误报文（异常字符串）
+
+    Returns:
+        窗口 token 数；无匹配返回 None
+    """
+    for pattern in _VENDOR_WINDOW_PATTERNS:
+        match = pattern.search(message)
+        if match is None:
+            continue
+        groups = [g for g in match.groups() if g is not None]
+        if not groups:
+            continue
+        value = int(groups[-1].replace(",", ""))
+        if value > 0:
+            return value
+    return None
