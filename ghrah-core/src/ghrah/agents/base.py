@@ -66,6 +66,7 @@ from ghrah.core.events import (
     BranchArchivedEvent,
     BranchCreatedEvent,
     BranchDeletedEvent,
+    ContextUsageUpdatedEvent,
     SessionActivatedEvent,
     SessionArchivedEvent,
     SessionCreatedEvent,
@@ -170,6 +171,9 @@ class ActorAgent:
             self._ability_executor.update_hook_runner(self._hook_runner)
         self._message_queue: asyncio.Queue[ChatMessage] = asyncio.Queue()
         self._iteration_state = IterationState()
+        # 驱动循环活跃指示：receive() 期间置位，供 request_compact() 区分
+        # "驱动中置标志"与"空闲直接执行"双态
+        self._drive_active: bool = False
 
         # 框架级消息历史（AgentMessage 对象，使用自有 ChatMessage 格式）
         # ContextManager 管理 ChatMessage 消息，这里保留框架 AgentMessage 对象的记录
@@ -454,7 +458,11 @@ class ActorAgent:
                 for key in ("room_id", "project_id", "agent_id")
                 if message.metadata and message.metadata.get(key)
             }
-            await self._drive_loop(delivery_context=delivery_context or None)
+            self._drive_active = True
+            try:
+                await self._drive_loop(delivery_context=delivery_context or None)
+            finally:
+                self._drive_active = False
 
             # 构建最终回复
             response = self._build_response(message)
@@ -486,6 +494,27 @@ class ActorAgent:
                 reply_to=message.id,
             )
             return error_reply
+
+    async def request_compact(self) -> dict[str, Any]:
+        """手动触发链上 compact 回合（命令入口，双态）。
+
+        驱动循环活跃（receive 期间）：置手动标志，由下一轮触发门消费，
+        回 ``{"scheduled": True}``；标志已置位时回 ``{"scheduled": True,
+        "merged": True}``（连续请求合并，幂等）。
+
+        空闲：直接执行一轮 compact（同步等待摘要 LLM 完成），回执即
+        结果——``{"executed": True, "node_id": ...}`` 或窗外为空时
+        ``{"executed": False, "reason": "empty_window"}``。
+
+        Returns:
+            回执 dict（见上）
+        """
+        cm = self._context_manager
+        if self._drive_active:
+            merged = cm.compact_requested
+            cm.request_compact()
+            return {"scheduled": True, "merged": merged}
+        return await self._run_compact_round("manual")
 
     async def _drive_loop(
         self,
@@ -861,6 +890,52 @@ class ActorAgent:
             "post_check": post_check,
         }
 
+    async def _publish_context_usage(self, phase: str, real_usage: Any | None = None) -> None:
+        """发布上下文占用状态事件（fire-and-forget，失败不阻断主循环）。
+
+        pre_call：占用锚点口径（可能为 None），仅配置 window 的 agent 发布；
+        post_call：真实 usage 唯一权威口径（occupied_tokens = 本次真实
+        input_tokens），所有 agent 发布。
+
+        Args:
+            phase: "pre_call" | "post_call"
+            real_usage: 本次调用首响应的 TokenUsage（仅 post_call 提供）
+        """
+        cm = self._context_manager
+        try:
+            status = cm.get_window_status()
+            if phase == "post_call":
+                occupied = real_usage.input_tokens if real_usage is not None else None
+                basis = "real"
+                real_input = real_usage.input_tokens if real_usage is not None else None
+                real_output = real_usage.output_tokens if real_usage is not None else None
+            else:
+                occupied = status["occupied_tokens"]
+                basis = status["basis"]
+                real_input = None
+                real_output = None
+            await self._event_publisher.publish(
+                ContextUsageUpdatedEvent(
+                    agent_name=self.config.name,
+                    phase=phase,
+                    occupied_tokens=occupied,
+                    basis=basis,
+                    budget_tokens=status["budget_tokens"],
+                    compact_threshold=status["compact_threshold"],
+                    real_input_tokens=real_input,
+                    real_output_tokens=real_output,
+                    compaction=cm.evaluate_compaction_decision(),
+                    iteration=self._iteration_state.iteration,
+                )
+            )
+        except Exception as e:
+            logger.warning(
+                "ActorAgent[%s]: failed to publish context usage event (%s): %s",
+                self.config.name,
+                phase,
+                e,
+            )
+
     async def _action(self, accumulated_data: dict[str, Any]) -> dict[str, Any]:
         """执行一次 action：调用 LLM → 解析响应 → 执行 abilities。
 
@@ -885,6 +960,8 @@ class ActorAgent:
                 accumulated_data.update(hook_result.modified_context)
 
         # 2. 调用 LLM
+        if self.config.window is not None:
+            await self._publish_context_usage("pre_call")
         messages = await cm.get_llm_messages()
         llm_response: LLMResponseProtocol = await llm.generate(messages)
         llm_responses: list[LLMResponseProtocol] = [llm_response]
@@ -947,6 +1024,9 @@ class ActorAgent:
         first_usage = token_usages[0] if token_usages else None
         if first_usage is not None:
             cm.record_window_occupied(first_usage.input_tokens)
+
+        # 上下文占用 post_call 事件（所有 agent，真实值口径）
+        await self._publish_context_usage("post_call", real_usage=first_usage)
 
         # 3. 将 AI 响应添加到消息历史
         cm.add_messages([llm_response.to_chat_message(source=f"agent:{self.config.name}")])

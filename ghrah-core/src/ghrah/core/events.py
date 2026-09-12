@@ -25,6 +25,7 @@ __all__ = [
     "ActionChainUpdatedEvent",
     "AgentErrorEvent",
     "AgentResponseEvent",
+    "ContextUsageUpdatedEvent",
     "SessionCreatedEvent",
     "SessionActivatedEvent",
     "SessionArchivedEvent",
@@ -54,6 +55,7 @@ class CoreEventType(str, Enum):  # noqa: UP042
     ACTION_CHAIN_UPDATED = "action_chain_updated"
     AGENT_ERROR = "agent_error"
     AGENT_RESPONSE = "agent_response"
+    CONTEXT_USAGE_UPDATED = "context_usage_updated"
     SESSION_CREATED = "session_created"
     SESSION_ACTIVATED = "session_activated"
     SESSION_ARCHIVED = "session_archived"
@@ -147,6 +149,42 @@ class AgentResponseEvent(CoreEvent):
     content_blocks: list[dict[str, Any]] | None = None
     message_type: str = "result"
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ContextUsageUpdatedEvent(CoreEvent):
+    """上下文占用状态更新事件。
+
+    Agent 每次 LLM 调用前后产生（双相位）：
+    - pre_call（仅配置 window 的 agent）：发送前占用锚点口径；
+    - post_call（所有 agent）：响应后真实 input_tokens 口径。
+
+    真实 usage 唯一权威：post_call 的 occupied_tokens 即本次调用的
+    真实 input_tokens（basis="real"）；pre_call 取占用锚点（可能为
+    None，如首次调用/head 变更后，basis="anchor"）。
+
+    Attributes:
+        phase: 发布相位 "pre_call" | "post_call"
+        occupied_tokens: 占用 token 数（口径随 phase）
+        basis: occupied_tokens 计量口径 "anchor" | "real"
+        budget_tokens: 运营者声明预算（无 WindowManager 时为 0）
+        compact_threshold: 压缩阈值比率（未配置时为 None）
+        real_input_tokens: 本次调用真实 input_tokens（pre_call 为 None）
+        real_output_tokens: 本次调用真实 output_tokens（pre_call 为 None）
+        compaction: 本轮压缩决策记录（未配置窗口时为 None）
+        iteration: 当前迭代号
+    """
+
+    event_type: CoreEventType = field(default=CoreEventType.CONTEXT_USAGE_UPDATED, init=False)
+    phase: str = "pre_call"
+    occupied_tokens: int | None = None
+    basis: str = "anchor"
+    budget_tokens: int = 0
+    compact_threshold: float | None = None
+    real_input_tokens: int | None = None
+    real_output_tokens: int | None = None
+    compaction: dict[str, Any] | None = None
+    iteration: int | None = None
 
 
 @dataclass

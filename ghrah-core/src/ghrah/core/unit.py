@@ -36,6 +36,7 @@ from typing import Any, cast
 from ghrah.protocol.types import (
     AGENT_SCOPED_EVENT_TYPES,
     AbilityResultPayload,
+    AgentCompactContextPayload,
     BranchActivatePayload,
     BranchArchivePayload,
     BranchCreatePayload,
@@ -80,6 +81,7 @@ from ghrah.core.events import (
     BranchArchivedEvent,
     BranchCreatedEvent,
     BranchDeletedEvent,
+    ContextUsageUpdatedEvent,
     CoreEvent,
     CoreEventType,
     HITLRequestEvent,
@@ -203,6 +205,7 @@ _COMMANDS: frozenset[str] = frozenset(
         CommandType.DELEGATE.value,
         CommandType.GET_AGENT_INFO.value,
         CommandType.EXECUTE_ABILITY.value,
+        CommandType.AGENT_COMPACT_CONTEXT.value,
         CommandType.HITL_RESPONSE.value,
         CommandType.SESSION_CREATE.value,
         CommandType.SESSION_ACTIVATE.value,
@@ -234,6 +237,7 @@ def _core_event_to_dict(event: CoreEvent) -> tuple[str, dict[str, Any]]:
         CoreEventType.ACTION_CHAIN_UPDATED.value: "action_chain_updated",
         CoreEventType.AGENT_ERROR.value: "agent_error",
         CoreEventType.AGENT_RESPONSE.value: "agent_response",
+        CoreEventType.CONTEXT_USAGE_UPDATED.value: "context_usage_updated",
         CoreEventType.SESSION_CREATED.value: "session_created",
         CoreEventType.SESSION_ACTIVATED.value: "session_activated",
         CoreEventType.SESSION_ARCHIVED.value: "session_archived",
@@ -270,6 +274,20 @@ def _core_event_to_dict(event: CoreEvent) -> tuple[str, dict[str, Any]]:
         if event.content_blocks is not None:
             payload_update["content_blocks"] = event.content_blocks
         payload.update(payload_update)
+    elif isinstance(event, ContextUsageUpdatedEvent):
+        payload.update(
+            {
+                "phase": event.phase,
+                "occupied_tokens": event.occupied_tokens,
+                "basis": event.basis,
+                "budget_tokens": event.budget_tokens,
+                "compact_threshold": event.compact_threshold,
+                "real_input_tokens": event.real_input_tokens,
+                "real_output_tokens": event.real_output_tokens,
+                "compaction": event.compaction,
+                "iteration": event.iteration,
+            }
+        )
     elif isinstance(event, SessionCreatedEvent):
         payload.update({"session": event.session})
     elif isinstance(event, SessionActivatedEvent):
@@ -500,6 +518,7 @@ class CoreUnit:
             CommandType.HEALTH_CHECK.value: self._handle_health_check,
             CommandType.DELEGATE.value: self._handle_delegate,
             CommandType.GET_AGENT_INFO.value: self._handle_get_agent_info,
+            CommandType.AGENT_COMPACT_CONTEXT.value: self._handle_agent_compact_context,
             CommandType.EXECUTE_ABILITY.value: self._handle_execute_ability,
             CommandType.HITL_RESPONSE.value: self._handle_hitl_response,
             CommandType.SESSION_CREATE.value: self._handle_session_create,
@@ -1017,6 +1036,22 @@ class CoreUnit:
         state = agent_handle.get_state()
         abilities = agent_handle.get_abilities()
         return self._ok({"name": gp.name, "state": state, "abilities": abilities})
+
+    async def _handle_agent_compact_context(
+        self, payload: dict[str, Any], cmd_ctx: Any
+    ) -> dict[str, Any]:
+        """agent_compact_context — 手动触发链上 compact 回合。
+
+        驱动循环活跃时置标志（下一轮触发门消费，回 scheduled）；
+        空闲时直接执行一轮 compact（同步等待摘要 LLM 完成，回执含
+        node_id）。连续多次请求合并（幂等）。
+        """
+        supervisor = self._require_supervisor()
+        cp = AgentCompactContextPayload.model_validate(payload)
+        self._validate_agent(cp.project_id, cp.agent_id, cp.agent_name)
+        agent_handle = await supervisor.get_agent_handle(cp.agent_name)
+        result = await agent_handle.request_compact()
+        return self._ok(result)
 
     # ----------------------------------------------------------------
     # execute_ability（本地执行 + ability_result 事件）

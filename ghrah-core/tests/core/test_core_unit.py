@@ -20,7 +20,7 @@ from ghrah.protocol.types import CommandType, EventType
 from ghrah.abilities.base import Ability
 from ghrah.abilities.context import AbilityExecutionContext
 from ghrah.abilities.hooks import Hook, HookPoint, HookResult
-from ghrah.core.events import HITLRequestEvent
+from ghrah.core.events import ContextUsageUpdatedEvent, HITLRequestEvent
 from ghrah.core.unit import (
     CoreUnit,
     CoreUnitConfig,
@@ -155,7 +155,7 @@ class TestMetaContract:
         assert meta.routes.long_running_commands == frozenset()
         assert meta.routes.events == frozenset()
 
-    def test_meta_commands_exactly_22(self) -> None:
+    def test_meta_commands_exactly_23(self) -> None:
         unit = create_core_unit(CoreUnitConfig(project_id="default"))
         expected = {
             CommandType.SPAWN_AGENT.value,
@@ -169,6 +169,7 @@ class TestMetaContract:
             CommandType.DELEGATE.value,
             CommandType.GET_AGENT_INFO.value,
             CommandType.EXECUTE_ABILITY.value,
+            CommandType.AGENT_COMPACT_CONTEXT.value,
             CommandType.HITL_RESPONSE.value,
             CommandType.SESSION_CREATE.value,
             CommandType.SESSION_ACTIVATE.value,
@@ -181,7 +182,7 @@ class TestMetaContract:
             CommandType.BRANCH_ARCHIVE.value,
             CommandType.BRANCH_DELETE.value,
         }
-        assert len(unit.meta.routes.commands) == 22
+        assert len(unit.meta.routes.commands) == 23
         assert unit.meta.routes.commands == expected
 
 
@@ -478,6 +479,54 @@ class TestReceiptShape:
 
 
 # ----------------------------------------------------------------
+# g+. agent_compact_context 命令入口
+# ----------------------------------------------------------------
+
+
+class TestAgentCompactContextCommand:
+    async def test_idle_agent_compact_receipt(self, unit: CoreUnit) -> None:
+        """空闲 agent：命令直达 request_compact，回执透传（新链窗外为空 → empty_window）。"""
+        await unit.handle_command("spawn_agent", _spawn_payload("agent-1"), None)
+        result = await unit.handle_command(
+            "agent_compact_context",
+            {"project_id": "default", "agent_id": "agent-1", "agent_name": "agent-1"},
+            None,
+        )
+        assert result["success"] is True
+        assert result["data"]["executed"] is False
+        assert result["data"]["reason"] == "empty_window"
+
+    async def test_identity_mismatch_rejected(self, unit: CoreUnit) -> None:
+        """agent_id 对但 agent_name 不匹配 → agent_identity_mismatch。"""
+        await unit.handle_command("spawn_agent", _spawn_payload("agent-1"), None)
+        result = await unit.handle_command(
+            "agent_compact_context",
+            {"project_id": "default", "agent_id": "agent-1", "agent_name": "ghost"},
+            None,
+        )
+        assert result["success"] is False
+        assert result["error"] == "agent_identity_mismatch"
+
+    async def test_unknown_agent_not_found(self, unit: CoreUnit) -> None:
+        """agent 不存在 → AgentNotFoundError 统一回执。"""
+        result = await unit.handle_command(
+            "agent_compact_context",
+            {"project_id": "default", "agent_id": "ghost", "agent_name": "ghost"},
+            None,
+        )
+        assert result["success"] is False
+        assert "error" in result
+
+    async def test_invalid_payload_receipt(self, unit: CoreUnit) -> None:
+        """缺 agent_name → ValidationError 统一回执。"""
+        result = await unit.handle_command(
+            "agent_compact_context", {"project_id": "default", "agent_id": "agent-1"}, None
+        )
+        assert result["success"] is False
+        assert "error" in result
+
+
+# ----------------------------------------------------------------
 # h. stop 幂等 + agents 清空
 # ----------------------------------------------------------------
 
@@ -548,6 +597,35 @@ class TestStandalone:
             )
         )
         assert emitted == []
+
+    async def test_publisher_context_usage_attribution(self) -> None:
+        """context_usage_updated 经 publisher 注入归属并映射 wire 名。"""
+        emitted: list[tuple[str, dict[str, Any]]] = []
+        publisher = UnitEventPublisher(
+            emit=lambda name, payload: emitted.append((name, payload)),
+            project_id="default",
+            cluster_id="c1",
+            agent_id_resolver=lambda name: name or "",
+        )
+        await publisher.publish(
+            ContextUsageUpdatedEvent(
+                agent_name="agent-1",
+                phase="post_call",
+                occupied_tokens=850,
+                basis="real",
+                budget_tokens=1000,
+                iteration=2,
+            )
+        )
+        assert emitted[0][0] == "core:context_usage_updated"
+        payload = emitted[0][1]
+        assert payload["project_id"] == "default"
+        assert payload["cluster_id"] == "c1"
+        assert payload["agent_id"] == "agent-1"
+        assert payload["agent_name"] == "agent-1"
+        assert payload["phase"] == "post_call"
+        assert payload["basis"] == "real"
+        assert payload["occupied_tokens"] == 850
 
     async def test_unit_without_emit_ctx(self) -> None:
         """ctx 无 emit 方法时退化为 Null 行为，不抛异常。"""
