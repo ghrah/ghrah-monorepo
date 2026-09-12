@@ -85,11 +85,13 @@ from ghrah.core.events import (
     CoreEvent,
     CoreEventType,
     HITLRequestEvent,
+    HITLResolvedEvent,
     SessionActivatedEvent,
     SessionArchivedEvent,
     SessionCreatedEvent,
     SessionDeletedEvent,
 )
+from ghrah.core.hitl import HITLPromiseRegistry
 from ghrah.core.room_protocol import SerialRoomBridge
 from ghrah.types.config_types import AgentConfig
 from ghrah.types.results import ActionOutcome
@@ -234,6 +236,7 @@ def _core_event_to_dict(event: CoreEvent) -> tuple[str, dict[str, Any]]:
     """
     event_type_map: dict[str, str] = {
         CoreEventType.HITL_REQUEST.value: "hitl_request",
+        CoreEventType.HITL_RESOLVED.value: "hitl_resolved",
         CoreEventType.ACTION_CHAIN_UPDATED.value: "action_chain_updated",
         CoreEventType.AGENT_ERROR.value: "agent_error",
         CoreEventType.AGENT_RESPONSE.value: "agent_response",
@@ -257,8 +260,20 @@ def _core_event_to_dict(event: CoreEvent) -> tuple[str, dict[str, Any]]:
         payload.update(
             {
                 "ability_name": event.ability_name,
-                "tool_call": event.tool_call,
+                # 协议 HITLRequestPayload 的键名为 tool_args（历史键 tool_call 与
+                # schema 错位导致 Observer 命令摘要无数据）
+                "tool_args": event.tool_call,
                 "context": event.context,
+                "promise_id": event.promise_id,
+            }
+        )
+    elif isinstance(event, HITLResolvedEvent):
+        payload.update(
+            {
+                "promise_id": event.promise_id,
+                "ability_name": event.ability_name,
+                "tool_call_id": event.tool_call_id,
+                "status": event.status,
             }
         )
     elif isinstance(event, ActionChainUpdatedEvent):
@@ -509,6 +524,7 @@ class CoreUnit:
         self._publisher: UnitEventPublisher | None = None
         self._emit: Callable[[str, dict[str, Any]], None] | None = None
         self._stopped = False
+        self._hitl_promises = HITLPromiseRegistry()
 
         self._handlers: dict[str, _CommandHandler] = {
             CommandType.SPAWN_AGENT.value: self._handle_spawn_agent,
@@ -592,10 +608,12 @@ class CoreUnit:
         logger.debug("CoreUnit started")
 
     async def stop(self) -> None:
-        """停止 Unit：清理 pending HITL futures 并终止所有 Agent（幂等）。"""
+        """停止 Unit：清理 pending HITL（futures + promises）并终止所有 Agent（幂等）。"""
         if self._stopped:
             return
         self._stopped = True
+
+        self._hitl_promises.clear()
 
         supervisor = self._supervisor
         if supervisor is None:
@@ -891,10 +909,12 @@ class CoreUnit:
         )
 
     def _apply_hitl_timeout(self, agent_name: str) -> None:
-        """best-effort 将 config.hitl_timeout 应用到 agent 的本地 executor。
+        """best-effort 将 config.hitl_timeout 与 promise 注册表应用到 agent 的本地 executor。
 
         AgentBuilder 不透传 hitl_timeout 到 LocalAbilityExecutor，
         故在 spawn 后直接调整（防御式：找不到 executor 时仅记日志）。
+        promise 注册表为 unit 级单例——所有 agent 的 executor 共用同一张
+        promise_id → 三元组表，hitl_response 命令面据此翻译。
         """
         if self._supervisor is None:
             return
@@ -903,6 +923,8 @@ class CoreUnit:
             executor = getattr(info.actor_handle, "_ability_executor", None)
             if executor is not None and hasattr(executor, "_hitl_timeout"):
                 executor._hitl_timeout = self._config.hitl_timeout
+            if executor is not None and hasattr(executor, "update_hitl_promise_registry"):
+                executor.update_hitl_promise_registry(self._hitl_promises)
         except Exception:
             logger.warning(f"CoreUnit: 应用 hitl_timeout 到 agent '{agent_name}' 失败")
 
@@ -1090,6 +1112,10 @@ class CoreUnit:
         executor = getattr(agent_handle, "_ability_executor", None)
         if executor is None:
             return self._err(f"Agent '{ep.agent_name}' has no ability executor")
+        if executor.hitl_promise_registry is not self._hitl_promises:
+            # 直挂 spawn 旁路了 _apply_hitl_timeout 注入；HITL 请求发出前
+            # 补接线，保证 promise 注册进 unit 级表（幂等）
+            executor.update_hitl_promise_registry(self._hitl_promises)
 
         try:
             context = AbilityExecutionContext(
@@ -1136,32 +1162,66 @@ class CoreUnit:
     # ----------------------------------------------------------------
 
     async def _handle_hitl_response(self, payload: dict[str, Any], cmd_ctx: Any) -> dict[str, Any]:
-        """hitl_response — 单体字段集路径（移植自 router:1044-1077）。
+        """hitl_response — 审批响应解析（promise 优先，三元组回退）。
 
-        经 supervisor 找到 agent，向其 executor 投递审批结果，resolve
-        进程内 HITL future。优先走 executor 层（返回 resolved bool）；
-        无 executor 时回退 ActorAgent.receive_hitl_response。
+        promise 路径：凭 promise_id 从 unit 级注册表翻译回
+        (agent_name, ability_name, tool_call_id) 再 resolve——真实链路
+        Observer 只回传 promise_id。三元组路径：直接按单体字段集定位
+        （存量调用方兼容）。两路皆 miss 时显式失败（不 resolve 任何
+        future，不伪装成功）；拒绝时把 UI 收集的 reason 并入
+        HITLResult.result 透传给 LLM。resolve 成功后发布
+        hitl_resolved 事件（Observer 据此清除审批卡片）。
         """
         supervisor = self._require_supervisor()
         hp = HITLResponsePayload.model_validate(payload)
-        agent_handle = await supervisor.get_agent_handle(hp.agent_name)
+
+        # promise 优先：注册表翻译回三元组（payload 三元组字段缺省时兜底）。
+        agent_name = hp.agent_name
+        ability_name = hp.ability_name
+        tool_call_id = hp.tool_call_id
+        promise_id = hp.promise_id
+        if promise_id:
+            triplet = self._hitl_promises.resolve(promise_id)
+            if triplet is None and not (agent_name and ability_name and tool_call_id):
+                return self._err("HITL promise not found or expired")
+            if triplet is not None:
+                agent_name, ability_name, tool_call_id = triplet
+
+        agent_handle = await supervisor.get_agent_handle(agent_name)
+
+        # 拒绝理由（UI 收集）并入审批附加结果透传给 LLM
+        result: Any = hp.result
+        if not hp.approved and hp.reason and result is None:
+            result = {"reason": hp.reason}
 
         executor = getattr(agent_handle, "_ability_executor", None)
         if executor is not None and hasattr(executor, "receive_hitl_response"):
             resolved = executor.receive_hitl_response(
-                ability_name=hp.ability_name,
-                tool_call_id=hp.tool_call_id,
+                ability_name=ability_name,
+                tool_call_id=tool_call_id,
                 approved=hp.approved,
-                result=hp.result,
+                result=result,
             )
         else:
             await agent_handle.receive_hitl_response(
-                ability_name=hp.ability_name,
-                tool_call_id=hp.tool_call_id,
+                ability_name=ability_name,
+                tool_call_id=tool_call_id,
                 approved=hp.approved,
-                result=hp.result,
+                result=result,
             )
             resolved = True
+
+        if resolved:
+            self._emit_event(
+                EventType.HITL_RESOLVED.value,
+                {
+                    "agent_name": agent_name,
+                    "promise_id": promise_id,
+                    "ability_name": ability_name,
+                    "tool_call_id": tool_call_id,
+                    "status": "approved" if hp.approved else "rejected",
+                },
+            )
 
         return self._ok({"resolved": bool(resolved)})
 

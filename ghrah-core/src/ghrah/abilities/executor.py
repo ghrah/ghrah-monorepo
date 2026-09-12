@@ -21,7 +21,7 @@ import logging
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from ghrah.abilities.context import AbilityExecutionContext
 from ghrah.abilities.hook_context import HookContext
@@ -32,8 +32,8 @@ from ghrah.abilities.paths import ABILITY_PATH_SPECS
 from ghrah.chat.content import ToolCallBlock
 from ghrah.core.ability_protocol import AbilityProtocol
 from ghrah.core.event_publisher import EventPublisher
-from ghrah.core.events import HITLRequestEvent
-from ghrah.core.hitl import HITLFutureStore, HITLResult
+from ghrah.core.events import HITLRequestEvent, HITLResolvedEvent
+from ghrah.core.hitl import HITLFutureStore, HITLPromiseRegistry, HITLResult
 from ghrah.types.results import ActionOutcome, ActionResult
 
 if TYPE_CHECKING:
@@ -44,8 +44,12 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "AbilityExecutor",
+    "HitlOutcome",
     "LocalAbilityExecutor",
 ]
+
+# HITL 审批终态：批准 / 人工拒绝 / 等待超时
+HitlOutcome = Literal["approved", "rejected", "timeout"]
 
 
 class AbilityExecutor(ABC):
@@ -109,7 +113,7 @@ class AbilityExecutor(ABC):
         self,
         hook_result: HookResult,
         context: AbilityExecutionContext,
-    ) -> bool:
+    ) -> HitlOutcome:
         """处理 HITL Hook 结果。
 
         当 PRE_EXECUTE Hook 返回 should_continue=False 且 requires_hitl=True 时，
@@ -120,7 +124,7 @@ class AbilityExecutor(ABC):
             context: 当前执行上下文
 
         Returns:
-            True 表示继续执行，False 表示需要等待 HITL 批准
+            审批终态："approved"（继续执行）/ "rejected"（人工拒绝）/ "timeout"（等待超时）
         """
         ...
 
@@ -190,6 +194,7 @@ class LocalAbilityExecutor(AbilityExecutor):
         event_publisher: EventPublisher | None = None,
         hitl_timeout: float = 300.0,
         workspace_root: str | None = None,
+        hitl_promise_registry: HITLPromiseRegistry | None = None,
     ) -> None:
         """初始化本地执行器。
 
@@ -200,6 +205,8 @@ class LocalAbilityExecutor(AbilityExecutor):
             event_publisher: 事件发布器（默认 NullEventPublisher）
             hitl_timeout: HITL 等待超时时间（秒）
             workspace_root: 工作区根目录，用于将相对路径解析到沙盒内（None 表示不解析）
+            hitl_promise_registry: HITL promise 注册表（CoreUnit 注入，unit 命令面
+                按 promise_id 翻译回三元组；None 时 standalone 模式跳过注册）
         """
         self._agent_name = agent_name
         self._hook_store = HookStore()
@@ -215,11 +222,21 @@ class LocalAbilityExecutor(AbilityExecutor):
         self._hitl_store = HITLFutureStore()
         self._hitl_timeout = hitl_timeout
         self._workspace_root = Path(workspace_root).resolve() if workspace_root else None
+        self._hitl_promise_registry = hitl_promise_registry
 
     @property
     def hitl_store(self) -> HITLFutureStore:
         """获取 HITL Future 存储（供外部 resolve 使用）。"""
         return self._hitl_store
+
+    @property
+    def hitl_promise_registry(self) -> HITLPromiseRegistry | None:
+        """获取 HITL promise 注册表（无注入时为 None，standalone 兼容）。"""
+        return self._hitl_promise_registry
+
+    def update_hitl_promise_registry(self, registry: HITLPromiseRegistry) -> None:
+        """同步更新 HITL promise 注册表（CoreUnit spawn 后 best-effort 注入）。"""
+        self._hitl_promise_registry = registry
 
     def update_hooks(self, hooks: list[Hook]) -> None:
         """兼容旧接口：替换本地私有 HookStore 中的 hooks。
@@ -273,9 +290,22 @@ class LocalAbilityExecutor(AbilityExecutor):
             if not hook_result.should_continue:
                 if hook_result.requires_hitl:
                     # 需要 HITL 审批：创建 Future 等待人工审批
-                    should_continue = await self.handle_hitl_hook_result(hook_result, context)
-                    if not should_continue:
-                        # HITL 拒绝或超时
+                    hitl_outcome = await self.handle_hitl_hook_result(hook_result, context)
+                    if hitl_outcome != "approved":
+                        # 人工拒绝或等待超时——错误信息区分两者，超时不得
+                        # 折算成"用户拒绝"信号进 LLM 上下文
+                        if hitl_outcome == "timeout":
+                            return ActionResult(
+                                outcome=ActionOutcome.FAILURE,
+                                data={
+                                    "error": (
+                                        f"HITL approval timed out after {self._hitl_timeout}s "
+                                        f"with no response delivered; "
+                                        f"ability={context.current_ability_name}"
+                                    ),
+                                    "hitl_timeout": True,
+                                },
+                            )
                         return ActionResult(
                             outcome=ActionOutcome.FAILURE,
                             data={
@@ -471,12 +501,12 @@ class LocalAbilityExecutor(AbilityExecutor):
         self,
         hook_result: HookResult,
         context: AbilityExecutionContext,
-    ) -> bool:
+    ) -> HitlOutcome:
         """处理 HITL Hook 结果。
 
         在单体模式下，创建 asyncio.Future 等待 HITL 审批：
-        1. 发布 HITLRequestEvent 到 EventPublisher
-        2. 创建 HITL Future 并等待
+        1. 生成 promise_id，发布 HITLRequestEvent（携带 promise_id）到 EventPublisher
+        2. 创建 HITL Future（promise 登记到注册表）并等待
         3. 收到审批结果后继续或终止
 
         Args:
@@ -484,18 +514,20 @@ class LocalAbilityExecutor(AbilityExecutor):
             context: 当前执行上下文
 
         Returns:
-            True 表示继续执行，False 表示需要等待 HITL 批准或被拒绝
+            审批终态："approved" / "rejected" / "timeout"
         """
-        # 生成 tool_call_id
+        # 生成 tool_call_id 与 promise_id
         tool_call_id = context.tool_args.get("call_id", "") or uuid.uuid4().hex[:12]
+        promise_id = uuid.uuid4().hex
 
-        # 发布 HITL 请求事件
+        # 发布 HITL 请求事件（promise_id 随载荷下发，Observer 凭此回发审批）
         await self._event_publisher.publish(
             HITLRequestEvent(
                 agent_name=self._agent_name,
                 ability_name=context.current_ability_name,
                 tool_call=context.tool_args,
                 context={"tool_call_id": tool_call_id},
+                promise_id=promise_id,
             )
         )
 
@@ -505,28 +537,55 @@ class LocalAbilityExecutor(AbilityExecutor):
             ability_name=context.current_ability_name,
             tool_call_id=tool_call_id,
         )
+        if self._hitl_promise_registry is not None:
+            self._hitl_promise_registry.register(
+                promise_id=promise_id,
+                agent_name=self._agent_name,
+                ability_name=context.current_ability_name,
+                tool_call_id=tool_call_id,
+            )
 
         # 等待 HITL 结果（带超时）
         try:
             hitl_result: HITLResult = await asyncio.wait_for(future, timeout=self._hitl_timeout)
-            if hitl_result.approved:
-                logger.info(
-                    f"LocalAbilityExecutor[{self._agent_name}] HITL approved: "
-                    f"ability={context.current_ability_name}, tool_call_id={tool_call_id}"
+            outcome: HitlOutcome = "approved" if hitl_result.approved else "rejected"
+            if self._hitl_promise_registry is not None:
+                self._hitl_promise_registry.remove(promise_id)
+            logger.info(
+                f"LocalAbilityExecutor[{self._agent_name}] HITL {outcome}: "
+                f"ability={context.current_ability_name}, tool_call_id={tool_call_id}"
+            )
+            await self._event_publisher.publish(
+                HITLResolvedEvent(
+                    agent_name=self._agent_name,
+                    promise_id=promise_id,
+                    ability_name=context.current_ability_name,
+                    tool_call_id=tool_call_id,
+                    status=outcome,
                 )
-                return True
-            else:
-                logger.info(
-                    f"LocalAbilityExecutor[{self._agent_name}] HITL rejected: "
-                    f"ability={context.current_ability_name}, tool_call_id={tool_call_id}"
-                )
-                return False
+            )
+            return outcome
         except TimeoutError:
             logger.warning(
                 f"LocalAbilityExecutor[{self._agent_name}] HITL request timed out: "
                 f"ability={context.current_ability_name}, tool_call_id={tool_call_id}"
             )
-            return False
+            if self._hitl_promise_registry is not None:
+                self._hitl_promise_registry.remove_triplet(
+                    agent_name=self._agent_name,
+                    ability_name=context.current_ability_name,
+                    tool_call_id=tool_call_id,
+                )
+            await self._event_publisher.publish(
+                HITLResolvedEvent(
+                    agent_name=self._agent_name,
+                    promise_id=promise_id,
+                    ability_name=context.current_ability_name,
+                    tool_call_id=tool_call_id,
+                    status="timeout",
+                )
+            )
+            return "timeout"
 
     def receive_hitl_response(
         self,

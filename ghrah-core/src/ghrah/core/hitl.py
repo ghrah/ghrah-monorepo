@@ -7,9 +7,10 @@
 提供 Future-based 的 HITL 结果等待和解析，用于单体模式下快速构建HITL型审批。
 
 核心流程：
-1. Agent 驱动循环遇到需要 HITL 的操作时，创建 asyncio.Future
-2. 发布 HITLRequestEvent 到 客户端
-3. Observer 审批后，Core调用receive_hitl_response() 解析对应的 Future，驱动循环继续
+1. Agent 驱动循环遇到需要 HITL 的操作时，生成 promise_id 并创建 asyncio.Future
+2. 发布 HITLRequestEvent（携带 promise_id）到 客户端
+3. Observer 审批后凭 promise_id 回发 hitl_response，Core 经
+   HITLPromiseRegistry 翻译回三元组并 resolve 对应 Future，驱动循环继续
 
 线程安全：所有操作在 asyncio 事件循环中执行。
 """
@@ -23,7 +24,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["HITLResult", "HITLFutureStore"]
+__all__ = ["HITLResult", "HITLFutureStore", "HITLPromiseRegistry"]
 
 
 @dataclass
@@ -209,3 +210,85 @@ class HITLFutureStore:
         if agent_name is not None:
             return [k for k in self._futures if k[0] == agent_name]
         return list(self._futures.keys())
+
+
+class HITLPromiseRegistry:
+    """HITL promise 注册表：promise_id → (agent_name, ability_name, tool_call_id)。
+
+    hitl_request 事件携带 Core 生成的 promise_id 下发 Observer；Observer 的
+    hitl_response 仅凭 promise_id 回程，CoreUnit 据此表翻译回三元组并 resolve
+    HITLFutureStore。超时/已 resolve 的 promise 由 resolve/remove 惰性清除。
+    """
+
+    def __init__(self) -> None:
+        # promise_id → (agent_name, ability_name, tool_call_id)
+        self._promises: dict[str, tuple[str, str, str]] = {}
+
+    def register(
+        self,
+        promise_id: str,
+        agent_name: str,
+        ability_name: str,
+        tool_call_id: str,
+    ) -> None:
+        """登记一个 pending promise。
+
+        同一 promise_id 重复登记时覆盖并告警（正常流程 uuid 不会重复）。
+
+        Args:
+            promise_id: promise 标识
+            agent_name: Agent 名称
+            ability_name: Ability 名称
+            tool_call_id: 工具调用 ID
+        """
+        if promise_id in self._promises:
+            logger.warning(f"HITL promise already registered for '{promise_id}', replacing")
+        self._promises[promise_id] = (agent_name, ability_name, tool_call_id)
+
+    def resolve(self, promise_id: str) -> tuple[str, str, str] | None:
+        """取出并移除 promise 对应的三元组。
+
+        Args:
+            promise_id: promise 标识
+
+        Returns:
+            三元组 (agent_name, ability_name, tool_call_id)；不存在时返回 None
+        """
+        return self._promises.pop(promise_id, None)
+
+    def remove(self, promise_id: str) -> None:
+        """移除一个 promise（不存在时静默）。"""
+        self._promises.pop(promise_id, None)
+
+    def remove_triplet(self, agent_name: str, ability_name: str, tool_call_id: str) -> None:
+        """按三元组移除对应 promise（超时惰性清理用）。"""
+        triplet = (agent_name, ability_name, tool_call_id)
+        stale = [pid for pid, t in self._promises.items() if t == triplet]
+        for pid in stale:
+            del self._promises[pid]
+
+    def clear(self, agent_name: str | None = None) -> None:
+        """清空注册表（可按 Agent 清）。
+
+        Args:
+            agent_name: 如果指定，只清该 Agent 的 promise
+        """
+        if agent_name is None:
+            self._promises.clear()
+            return
+        stale = [pid for pid, t in self._promises.items() if t[0] == agent_name]
+        for pid in stale:
+            del self._promises[pid]
+
+    def list_pending(self, agent_name: str | None = None) -> list[str]:
+        """列出 pending promise_id。
+
+        Args:
+            agent_name: 如果指定，只列该 Agent 的 promise
+
+        Returns:
+            promise_id 列表
+        """
+        if agent_name is not None:
+            return [pid for pid, t in self._promises.items() if t[0] == agent_name]
+        return list(self._promises.keys())

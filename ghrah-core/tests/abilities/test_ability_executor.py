@@ -24,7 +24,8 @@ from ghrah.abilities.hook_context import HookContext
 from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 from ghrah.chat.content import ToolCallBlock
 from ghrah.core.event_publisher import EventPublisher, NullEventPublisher
-from ghrah.core.events import HITLRequestEvent
+from ghrah.core.events import HITLRequestEvent, HITLResolvedEvent
+from ghrah.core.hitl import HITLPromiseRegistry
 
 # ─── 测试用 Ability 和 Hook ───
 
@@ -487,7 +488,10 @@ class TestLocalAbilityExecutor:
         asyncio.create_task(approve_after_delay())
 
         result = await executor.handle_hitl_hook_result(hook_result, context)
-        assert result is True  # 审批通过
+        assert result == "approved"  # 审批通过
+
+        # promise 已随审批终结移除（无注册表时跳过）
+        assert executor.hitl_promise_registry is None
 
     @pytest.mark.asyncio
     async def test_handle_hitl_hook_result_with_rejection(self):
@@ -517,7 +521,7 @@ class TestLocalAbilityExecutor:
         asyncio.create_task(reject_after_delay())
 
         result = await executor.handle_hitl_hook_result(hook_result, context)
-        assert result is False  # 审批拒绝
+        assert result == "rejected"  # 审批拒绝
 
     @pytest.mark.asyncio
     async def test_handle_hitl_hook_result_timeout(self):
@@ -537,7 +541,7 @@ class TestLocalAbilityExecutor:
 
         # 不 resolve Future，等待超时
         result = await executor.handle_hitl_hook_result(hook_result, context)
-        assert result is False  # 超时
+        assert result == "timeout"  # 超时与拒绝语义分离
 
     def test_receive_hitl_response_no_pending_future(self):
         """测试没有等待中的 Future 时接收 HITL 响应。"""
@@ -575,12 +579,59 @@ class TestLocalAbilityExecutor:
         # 触发 HITL 流程（会超时）
         await executor.handle_hitl_hook_result(hook_result, context)
 
-        # 验证事件被发布
-        mock_publisher.publish.assert_called_once()
-        event = mock_publisher.publish.call_args[0][0]
-        assert isinstance(event, HITLRequestEvent)
-        assert event.agent_name == "test-agent"
-        assert event.ability_name == "write_file"
+        # 验证两类事件均被发布：请求 + 超时终结
+        assert mock_publisher.publish.await_count == 2
+        request_event = mock_publisher.publish.await_args_list[0][0][0]
+        assert isinstance(request_event, HITLRequestEvent)
+        assert request_event.agent_name == "test-agent"
+        assert request_event.ability_name == "write_file"
+        assert request_event.promise_id  # promise 随请求下发
+        resolved_event = mock_publisher.publish.await_args_list[1][0][0]
+        assert isinstance(resolved_event, HITLResolvedEvent)
+        assert resolved_event.status == "timeout"
+        assert resolved_event.promise_id == request_event.promise_id
+
+    @pytest.mark.asyncio
+    async def test_hitl_promise_registry_lifecycle(self):
+        """promise 注册表：请求时登记 → 审批后移除；超时按三元组惰性清理。"""
+        registry = HITLPromiseRegistry()
+        mock_publisher = AsyncMock(spec=EventPublisher)
+        executor = LocalAbilityExecutor(
+            agent_name="test-agent",
+            event_publisher=mock_publisher,
+            hitl_timeout=0.1,
+            hitl_promise_registry=registry,
+        )
+
+        context = AbilityExecutionContext(
+            current_ability_name="write_file",
+            tool_args={"file_path": "/tmp/test.txt", "call_id": "call_p1"},
+            agent_state={},
+            accumulated_data={},
+        )
+        hook_result = HookResult.hitl(message="Human approval required")
+
+        # 超时路径：promise 登记后按三元组惰性清除
+        outcome = await executor.handle_hitl_hook_result(hook_result, context)
+        assert outcome == "timeout"
+        request_event = mock_publisher.publish.await_args_list[0][0][0]
+        assert registry.resolve(request_event.promise_id) is None
+
+        # 批准路径：promise 登记后随 resolve 移除
+        async def approve_after_delay():
+            await asyncio.sleep(0.05)
+            executor.receive_hitl_response(
+                ability_name="write_file",
+                tool_call_id="call_p1",
+                approved=True,
+            )
+
+        asyncio.create_task(approve_after_delay())
+        outcome = await executor.handle_hitl_hook_result(hook_result, context)
+        assert outcome == "approved"
+        request_event2 = mock_publisher.publish.await_args_list[-2][0][0]
+        assert isinstance(request_event2, HITLRequestEvent)
+        assert registry.resolve(request_event2.promise_id) is None  # 已消费
 
     @pytest.mark.asyncio
     async def test_execute_ability_with_hitl_approval(self):

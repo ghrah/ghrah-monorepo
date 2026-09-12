@@ -42,6 +42,7 @@ class CoreEventType(str, Enum):  # noqa: UP042
 
     与 ghrah-protocol 的 EventType 对齐：
     - HITL_REQUEST ↔ EventType.HITL_REQUEST
+    - HITL_RESOLVED ↔ EventType.HITL_RESOLVED
     - ACTION_CHAIN_UPDATED ↔ EventType.ACTION_CHAIN_UPDATED
     - AGENT_ERROR ↔ EventType.AGENT_ERROR
     - AGENT_RESPONSE ↔ EventType.AGENT_RESPONSE
@@ -52,6 +53,7 @@ class CoreEventType(str, Enum):  # noqa: UP042
     """
 
     HITL_REQUEST = "hitl_request"
+    HITL_RESOLVED = "hitl_resolved"
     ACTION_CHAIN_UPDATED = "action_chain_updated"
     AGENT_ERROR = "agent_error"
     AGENT_RESPONSE = "agent_response"
@@ -98,6 +100,29 @@ class HITLRequestEvent(CoreEvent):
     ability_name: str = ""
     tool_call: dict[str, Any] = field(default_factory=dict)
     context: dict[str, Any] = field(default_factory=dict)
+    promise_id: str = ""
+    """审批响应定位键：Observer 凭此回发 hitl_response"""
+
+
+@dataclass
+class HITLResolvedEvent(CoreEvent):
+    """HITL 审批终结事件。
+
+    审批等待终结（approved / rejected / timeout）时发布，Observer 据此清除
+    审批卡片——超时或另端已处理时前端不再悬挂。
+
+    Attributes:
+        promise_id: 对应请求的 promise 标识
+        ability_name: 请求 HITL 的 Ability 名称
+        tool_call_id: 工具调用 ID
+        status: 终态（"approved" / "rejected" / "timeout"）
+    """
+
+    event_type: CoreEventType = field(default=CoreEventType.HITL_RESOLVED, init=False)
+    promise_id: str = ""
+    ability_name: str = ""
+    tool_call_id: str = ""
+    status: str = ""
 
 
 @dataclass

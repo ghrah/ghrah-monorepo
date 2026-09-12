@@ -13,7 +13,7 @@
 
 import pytest
 
-from ghrah.core.hitl import HITLFutureStore, HITLResult
+from ghrah.core.hitl import HITLFutureStore, HITLPromiseRegistry, HITLResult
 
 
 class TestHITLResult:
@@ -197,3 +197,49 @@ class TestHITLFutureStore:
 
         hitl_result2 = await future2
         assert hitl_result2.approved is False
+
+
+class TestHITLPromiseRegistry:
+    """HITLPromiseRegistry（promise_id → 三元组翻译表）测试。"""
+
+    def setup_method(self) -> None:
+        self.registry = HITLPromiseRegistry()
+
+    def test_register_and_resolve(self) -> None:
+        """登记后 resolve 取出三元组并移除。"""
+        self.registry.register("p-1", "agent-1", "write_file", "call-1")
+        assert self.registry.resolve("p-1") == ("agent-1", "write_file", "call-1")
+        assert self.registry.resolve("p-1") is None  # 消费后移除
+
+    def test_resolve_unknown_returns_none(self) -> None:
+        """未知 promise：返回 None（不抛错）。"""
+        assert self.registry.resolve("nope") is None
+
+    def test_register_replaces_existing(self) -> None:
+        """同 promise_id 重复登记：覆盖。"""
+        self.registry.register("p-1", "agent-1", "write_file", "call-1")
+        self.registry.register("p-1", "agent-1", "write_file", "call-2")
+        assert self.registry.resolve("p-1") == ("agent-1", "write_file", "call-2")
+
+    def test_remove_triplet(self) -> None:
+        """按三元组惰性清理（超时路径）。"""
+        self.registry.register("p-1", "agent-1", "write_file", "call-1")
+        self.registry.register("p-2", "agent-1", "read_file", "call-2")
+        self.registry.remove_triplet("agent-1", "write_file", "call-1")
+        assert self.registry.resolve("p-1") is None
+        assert self.registry.resolve("p-2") == ("agent-1", "read_file", "call-2")
+
+    def test_clear_scoped_by_agent(self) -> None:
+        """按 Agent 清空。"""
+        self.registry.register("p-1", "agent-1", "write_file", "call-1")
+        self.registry.register("p-2", "agent-2", "write_file", "call-2")
+        self.registry.clear(agent_name="agent-1")
+        assert self.registry.resolve("p-1") is None
+        assert self.registry.resolve("p-2") is not None
+
+    def test_list_pending(self) -> None:
+        """列出 pending promise_id（可按 Agent 过滤）。"""
+        self.registry.register("p-1", "agent-1", "write_file", "call-1")
+        self.registry.register("p-2", "agent-2", "write_file", "call-2")
+        assert set(self.registry.list_pending()) == {"p-1", "p-2"}
+        assert self.registry.list_pending(agent_name="agent-1") == ["p-1"]

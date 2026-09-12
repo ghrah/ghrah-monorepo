@@ -443,6 +443,170 @@ class TestHITL:
             assert result["success"] is False or result["data"]["success"] is False
         assert ability.execute_count == 0
 
+    async def test_hitl_promise_roundtrip(self, unit: CoreUnit, ctx: FakeCtx) -> None:
+        """事故场景回归：Observer 只回传 promise_id（WebUI 真实形状）也能 resolve。
+
+        hitl_request 事件携带 promise_id 下发 → hitl_response 仅凭
+        promise_id（无 agent_name/ability_name/tool_call_id）→ 翻译回三元组
+        → future resolve → ability 执行成功。
+        """
+        assert unit.supervisor is not None
+        ability = MockAbility(hooks=[HITLBlockingHook()])
+        await unit.supervisor.spawn_agent(AgentConfig(name="agent-1"), abilities=[ability])
+
+        task = asyncio.create_task(
+            unit.handle_command(
+                "execute_ability",
+                {
+                    "request_id": "req-promise",
+                    "agent_name": "agent-1",
+                    "ability_name": "mock_ability",
+                    "tool_args": {"call_id": "call-p"},
+                },
+                None,
+            )
+        )
+
+        handle = await unit.supervisor.get_agent_handle("agent-1")
+        for _ in range(100):
+            if handle._ability_executor.hitl_store.list_pending():
+                break
+            await asyncio.sleep(0.01)
+
+        # hitl_request 事件携带 promise_id 与 tool_args（协议键名）
+        name, payload = next(
+            e for e in ctx.events if e[0] == f"core:{EventType.HITL_REQUEST.value}"
+        )
+        assert payload["promise_id"]
+        assert payload["tool_args"] == {"call_id": "call-p"}
+        promise_id = payload["promise_id"]
+
+        # WebUI 真实形状：仅 promise_id + approved
+        resp = await unit.handle_command(
+            "hitl_response",
+            {"promise_id": promise_id, "approved": True},
+            None,
+        )
+        assert resp["success"] is True
+        assert resp["data"]["resolved"] is True
+
+        result = await asyncio.wait_for(task, timeout=2.0)
+        assert result["success"] is True
+        assert ability.execute_count == 1
+
+        # hitl_resolved 事件发布（Observer 据此清除审批卡片）
+        resolved = [e for e in ctx.events if e[0] == f"core:{EventType.HITL_RESOLVED.value}"]
+        assert resolved
+        assert resolved[0][1]["promise_id"] == promise_id
+        assert resolved[0][1]["status"] == "approved"
+
+        # promise 消费后移除：再次响应同 promise 显式失败
+        resp2 = await unit.handle_command(
+            "hitl_response",
+            {"promise_id": promise_id, "approved": True},
+            None,
+        )
+        assert resp2["success"] is False
+        assert "not found or expired" in resp2["error"]
+
+    async def test_hitl_response_unknown_promise_without_triplet(self, unit: CoreUnit) -> None:
+        """未知 promise 且无三元组：显式失败回执（不再空名炸 AgentNotFoundError）。"""
+        assert unit.supervisor is not None
+        resp = await unit.handle_command(
+            "hitl_response",
+            {"promise_id": "ghost-promise", "approved": True},
+            None,
+        )
+        assert resp["success"] is False
+        assert "not found or expired" in resp["error"]
+
+    async def test_hitl_response_degenerate_payload_rejected(self, unit: CoreUnit) -> None:
+        """定位键全缺：协议层 fail-closed 校验拒绝。"""
+        resp = await unit.handle_command(
+            "hitl_response",
+            {"approved": True},
+            None,
+        )
+        assert resp["success"] is False
+
+    async def test_hitl_timeout_distinct_from_rejection(self, unit: CoreUnit, ctx: FakeCtx) -> None:
+        """超时与拒绝语义分离：FAILURE.data 标记 hitl_timeout 而非 hitl_rejected。"""
+        assert unit.supervisor is not None
+        ability = MockAbility(hooks=[HITLBlockingHook()])
+        await unit.supervisor.spawn_agent(AgentConfig(name="agent-1"), abilities=[ability])
+
+        handle = await unit.supervisor.get_agent_handle("agent-1")
+        handle._ability_executor._hitl_timeout = 0.05
+
+        result = await unit.handle_command(
+            "execute_ability",
+            {
+                "request_id": "req-tmo",
+                "agent_name": "agent-1",
+                "ability_name": "mock_ability",
+                "tool_args": {"call_id": "call-tmo"},
+            },
+            None,
+        )
+        assert result["success"] is True
+        assert result["data"]["success"] is False
+        assert result["data"]["result"]["hitl_timeout"] is True
+        assert "timed out" in result["data"]["result"]["error"]
+        assert not result["data"]["result"].get("hitl_rejected")
+
+        # 超时也发布 hitl_resolved(status=timeout)
+        resolved = [
+            e
+            for e in ctx.events
+            if e[0] == f"core:{EventType.HITL_RESOLVED.value}" and e[1]["status"] == "timeout"
+        ]
+        assert resolved
+        assert ability.execute_count == 0
+
+    async def test_hitl_reject_reason_passed_to_result(self, unit: CoreUnit, ctx: FakeCtx) -> None:
+        """拒绝时 UI 收集的 reason 并入 HITLResult.result 透传给 LLM。"""
+        assert unit.supervisor is not None
+        ability = MockAbility(hooks=[HITLBlockingHook()])
+        await unit.supervisor.spawn_agent(AgentConfig(name="agent-1"), abilities=[ability])
+
+        task = asyncio.create_task(
+            unit.handle_command(
+                "execute_ability",
+                {
+                    "request_id": "req-rej",
+                    "agent_name": "agent-1",
+                    "ability_name": "mock_ability",
+                    "tool_args": {"call_id": "call-r"},
+                },
+                None,
+            )
+        )
+
+        handle = await unit.supervisor.get_agent_handle("agent-1")
+        for _ in range(100):
+            if handle._ability_executor.hitl_store.list_pending():
+                break
+            await asyncio.sleep(0.01)
+
+        resp = await unit.handle_command(
+            "hitl_response",
+            {
+                "promise_id": "will-fallback",
+                "agent_name": "agent-1",
+                "ability_name": "mock_ability",
+                "tool_call_id": "call-r",
+                "approved": False,
+                "reason": "不安全的目录",
+            },
+            None,
+        )
+        assert resp["success"] is True
+        assert resp["data"]["resolved"] is True
+
+        result = await asyncio.wait_for(task, timeout=2.0)
+        assert result["data"]["success"] is False
+        assert result["data"]["result"]["hitl_rejected"] is True
+
 
 # ----------------------------------------------------------------
 # g. 回执形状
