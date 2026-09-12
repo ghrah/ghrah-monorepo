@@ -14,8 +14,14 @@ ghrah-protocol/
 ├── LICENSES/
 │   └── Apache-2.0.txt
 └── src/ghrah/protocol/
-    ├── __init__.py       # Public API re-exports
-    └── types.py          # All type definitions: enums, payload models, Message envelope, helpers
+    ├── __init__.py       # Package re-exports (via the types.py facade)
+    ├── types.py          # Compatibility facade: re-exports everything below
+    ├── enums.py          # Enums: ClientType / CommandType / EventType / SystemType / domain enums
+    ├── routing.py        # Command routing groups (*_COMMANDS) + agent-scoped event contract
+    ├── payloads/         # Payload models by domain (agent, persist, workspace, manifest,
+    │                     #   session, task, project, room, system)
+    ├── envelope.py       # Envelope, type → payload registries, envelope_from_dict
+    └── factories.py      # create_command_result / create_event / ... helpers
 ```
 
 ## License
