@@ -31,8 +31,13 @@ def extract_token_usage(response: LLMResponse) -> TokenUsage | None:
             return tu
 
     if response.response_metadata and isinstance(response.response_metadata, dict):
-        raw_usage = response.response_metadata.get("token_usage")
-        if isinstance(raw_usage, dict):
+        raw_usage: dict[str, Any] | None = None
+        for key in ("token_usage", "usage"):
+            candidate = response.response_metadata.get(key)
+            if isinstance(candidate, dict):
+                raw_usage = candidate
+                break
+        if raw_usage is not None:
             return TokenUsage(
                 input_tokens=raw_usage.get("prompt_tokens", 0),
                 output_tokens=raw_usage.get("completion_tokens", 0),

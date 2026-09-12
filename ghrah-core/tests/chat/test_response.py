@@ -51,6 +51,46 @@ class TestExtractTokenUsage:
         assert result.output_tokens == 80
         assert result.total_tokens == 280
 
+    def test_fallback_reads_usage_key(self) -> None:
+        """厂商把用量写在 metadata "usage" key 时同样可提取。"""
+        resp = LLMResponse(
+            content_blocks=[TextBlock(text="Hello")],
+            response_metadata={
+                "usage": {
+                    "prompt_tokens": 300,
+                    "completion_tokens": 120,
+                    "total_tokens": 420,
+                },
+            },
+        )
+        result = extract_token_usage(resp)
+        assert result is not None
+        assert result.input_tokens == 300
+        assert result.output_tokens == 120
+        assert result.total_tokens == 420
+
+    def test_token_usage_key_preferred_over_usage_key(self) -> None:
+        """两 key 并存时 "token_usage" 优先。"""
+        resp = LLMResponse(
+            content_blocks=[TextBlock(text="Hello")],
+            response_metadata={
+                "token_usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+                "usage": {
+                    "prompt_tokens": 999,
+                    "completion_tokens": 999,
+                    "total_tokens": 999,
+                },
+            },
+        )
+        result = extract_token_usage(resp)
+        assert result is not None
+        assert result.input_tokens == 10
+        assert result.total_tokens == 15
+
     def test_no_metadata_returns_none(self) -> None:
         resp = LLMResponse(content_blocks=[TextBlock(text="Hello")])
         assert extract_token_usage(resp) is None

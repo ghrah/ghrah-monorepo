@@ -303,6 +303,24 @@ class TestParseResponse:
         assert result.token_usage.input_tokens == 100
         assert result.token_usage.output_tokens == 50
 
+    def test_token_usage_total_fallback_to_input_plus_output(self) -> None:
+        """usage 无 total 字段时 total = input + output。"""
+        fmt = AnthropicFormat(model="claude-3-sonnet")
+        usage = SimpleNamespace(input_tokens=100, output_tokens=50)
+        resp = _make_anthropic_response(usage=usage)
+        result = fmt._parse_response(resp)
+        assert result.token_usage is not None
+        assert result.token_usage.total_tokens == 150
+
+    def test_token_usage_total_passthrough_when_present(self) -> None:
+        """usage 带 total 字段时原样透传，不回退计算。"""
+        fmt = AnthropicFormat(model="claude-3-sonnet")
+        usage = SimpleNamespace(input_tokens=100, output_tokens=50, total_tokens=999)
+        resp = _make_anthropic_response(usage=usage)
+        result = fmt._parse_response(resp)
+        assert result.token_usage is not None
+        assert result.token_usage.total_tokens == 999
+
     def test_response_metadata(self) -> None:
         fmt = AnthropicFormat(model="claude-3-sonnet")
         resp = _make_anthropic_response(model="claude-3-opus", stop_reason="tool_use")

@@ -209,6 +209,21 @@ class ContextManager:
         return self._window_manager
 
     @property
+    def compact_threshold(self) -> float | None:
+        """链上 compact 触发阈值（None 禁用）。"""
+        return self._compact_threshold
+
+    @property
+    def compact_keep_recent(self) -> int:
+        """compact 保留窗节点数。"""
+        return self._compact_keep_recent
+
+    @property
+    def compact_method(self) -> str:
+        """compact 综合方法名。"""
+        return self._compact_method
+
+    @property
     def persistence(self) -> PersistenceBackend | None:
         """持久化后端（只读访问）。"""
         return self._persistence
@@ -1069,6 +1084,7 @@ class ContextManager:
         system_prompt: str | None = None,
         state_filter: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         snapshot_interval: int | None = None,
+        window_manager: WindowManager | None = None,
     ) -> ContextManager:
         """为子 Agent fork 出独立的上下文。
 
@@ -1083,6 +1099,9 @@ class ContextManager:
             system_prompt: 覆盖 system_prompt（可选，None 继承父 Agent 的）
             state_filter: 状态过滤函数，选择性继承状态（可选）
             snapshot_interval: 快照间隔（可选，默认使用父 CM 的设置）
+            window_manager: 子 Agent 的窗口管理器（可选，None 不配置）。
+                必须传入独立实例——共享会使摘要策略状态与压缩排水记录
+                跨 Agent 互串
 
         Returns:
             子 Agent 的 ContextManager
@@ -1098,6 +1117,7 @@ class ContextManager:
             inherit_state=True,
             state_filter=state_filter,
             snapshot_interval=snapshot_interval,
+            window_manager=window_manager,
         )
 
     # ----------------------------------------------------------------

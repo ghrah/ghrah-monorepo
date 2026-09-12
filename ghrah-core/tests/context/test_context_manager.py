@@ -547,6 +547,42 @@ class TestContextManagerFork:
         child = cm.fork_for_sub_agent("child-agent", snapshot_interval=10)
         assert child.message_store.snapshot_interval == 10
 
+    def test_fork_default_no_window_manager(self) -> None:
+        """默认不继承 window_manager（子 CM 无 wm，行为与现状一致）。"""
+        cm = _make_cm(window_manager=_make_window_manager())
+        child = cm.fork_for_sub_agent("child-agent")
+        assert child.window_manager is None
+
+    def test_fork_with_independent_window_manager(self) -> None:
+        """显式传入独立实例时子 CM 使用该实例。"""
+        cm = _make_cm(window_manager=_make_window_manager())
+        child_wm = _make_window_manager(max_tokens=500)
+        child = cm.fork_for_sub_agent("child-agent", window_manager=child_wm)
+        assert child.window_manager is child_wm
+        assert child.window_manager is not cm.window_manager
+
+    def test_fork_propagates_compact_config(self) -> None:
+        """compact 配置随 fork 传播（threshold/keep_recent/method）。"""
+        cm = _make_cm(
+            window_manager=_make_window_manager(),
+            compact_threshold=0.75,
+            compact_keep_recent=3,
+            compact_method="ghrah.builtin",
+        )
+        child = cm.fork_for_sub_agent("child-agent")
+        assert child.compact_threshold == 0.75
+        assert child.compact_keep_recent == 3
+        assert child.compact_method == "ghrah.builtin"
+
+    def test_fork_propagated_threshold_without_wm_not_armed(self) -> None:
+        """无 wm 时 threshold 传播不武装决策门（get_window_status 口径不变）。"""
+        cm = _make_cm(compact_threshold=0.8)
+        child = cm.fork_for_sub_agent("child-agent")
+        status = child.get_window_status()
+        assert child.window_manager is None
+        assert status["budget_tokens"] == 0
+        assert status["compact_threshold"] is None
+
 
 # ----------------------------------------------------------------
 # TestContextManagerBuildContext — 上下文构建
