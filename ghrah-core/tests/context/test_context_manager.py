@@ -928,13 +928,14 @@ class TestWindowOccupancyAnchor:
         assert cm._window_occupied is None
 
     def test_get_window_status_shape(self) -> None:
-        """观测出口字段齐全；无 wm 时 budget=0、threshold=None。"""
+        """观测出口字段齐全；无 wm 时 budget=0、budget_source=None、threshold=None。"""
         bare = _make_cm()
         status = bare.get_window_status()
 
         assert status["occupied_tokens"] is None
         assert status["basis"] == "anchor"
         assert status["budget_tokens"] == 0
+        assert status["budget_source"] is None
         assert status["compact_threshold"] is None
         assert status["compact_keep_recent"] == 2
         assert status["compact_method"] == "ghrah.builtin"
@@ -950,6 +951,7 @@ class TestWindowOccupancyAnchor:
 
         assert status["occupied_tokens"] == 1500
         assert status["budget_tokens"] == 2000
+        assert status["budget_source"] == "declared"
         assert status["compact_threshold"] == 0.75
         assert status["compact_keep_recent"] == 3
 

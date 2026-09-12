@@ -1053,13 +1053,16 @@ class ContextManager:
             状态 dict：occupied_tokens 为锚点值（可能为 None）；
             basis 恒为 "anchor"（同步快照即锚点口径；"real" 保留给
             post_call 事件相位）；无 WindowManager 时 budget_tokens 为 0、
-            compact_threshold 为 None
+            budget_source 为 None、compact_threshold 为 None
         """
         return {
             "occupied_tokens": self._window_occupied,
             "basis": "anchor",
             "budget_tokens": (
                 self._window_manager.max_tokens if self._window_manager is not None else 0
+            ),
+            "budget_source": (
+                self._window_manager.max_tokens_source if self._window_manager is not None else None
             ),
             "compact_threshold": (
                 self._compact_threshold if self._window_manager is not None else None

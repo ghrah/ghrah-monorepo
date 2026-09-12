@@ -383,6 +383,12 @@ class ActorAgent:
 
             self._inject_llm_into_summary_strategy(self._llm)
 
+            # 预算来源解析：未显式声明 max_tokens 时按模型名查内置窗口表
+            # （幂等；declared/vendor 已落定不受影响）
+            wm = self._context_manager.window_manager
+            if wm is not None:
+                wm.resolve_budget_from_model(self._llm.model)
+
             self._initialized = True
 
             logger.info(f"ActorAgent[{self.config.name}] LLM initialized: {self._llm.model}")
@@ -933,6 +939,7 @@ class ActorAgent:
                     occupied_tokens=occupied,
                     basis=basis,
                     budget_tokens=status["budget_tokens"],
+                    budget_source=status["budget_source"],
                     compact_threshold=status["compact_threshold"],
                     real_input_tokens=real_input,
                     real_output_tokens=real_output,

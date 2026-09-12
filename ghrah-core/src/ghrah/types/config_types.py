@@ -23,11 +23,13 @@ class WindowConfig:
     控制如何将对话历史压缩到 LLM 的 token 预算内。
 
     Attributes:
-        max_tokens: LLM 上下文窗口大小（token 预算），默认
-            DEFAULT_WINDOW_MAX_TOKENS（32768）；manifest/wire 显式覆盖优先。
-            预算是运营者声明合约：引擎永不推断目标模型的真实窗口，
+        max_tokens: LLM 上下文窗口大小（token 预算）；None 表示未声明，
+            未声明时首线 LLM 就绪后按模型名查内置窗口表落定
+            （``ghrah.context.model_windows``），查表未命中回落
+            DEFAULT_WINDOW_MAX_TOKENS（32768）。
+            显式声明是运营者声明合约：引擎永不推断目标模型的真实窗口，
             须按目标模型真实窗口 − 输出余量设定；厂商上下文超限错误是
-            唯一运行时真相信号（触发紧急压缩阶梯）
+            唯一运行时真相信号（触发预算回填与紧急压缩阶梯）
         strategies: 策略名称列表，按执行顺序排列
             可选值: "tool_call_fold", "sliding_window", "truncation", "llm_summary"
         tool_call_max_length: ToolCallFoldStrategy 的最大 content 长度
@@ -38,7 +40,7 @@ class WindowConfig:
         compact_method: compact 综合方法名，当前唯一合法值为 "ghrah.builtin"
     """
 
-    max_tokens: int = DEFAULT_WINDOW_MAX_TOKENS
+    max_tokens: int | None = None
     strategies: list[str] = field(default_factory=lambda: ["tool_call_fold", "truncation"])
     tool_call_max_length: int = 500
     sliding_window_size: int = 20

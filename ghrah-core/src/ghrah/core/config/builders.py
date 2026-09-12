@@ -16,7 +16,6 @@ from typing import Any
 from ghrah.types.config_types import (
     DEFAULT_COMPACT_KEEP_RECENT,
     DEFAULT_COMPACT_METHOD,
-    DEFAULT_WINDOW_MAX_TOKENS,
     ContextConfig,
     ModelOverrides,
     WindowConfig,
@@ -33,9 +32,13 @@ __all__ = [
 
 
 def build_window_from_dict(data: dict[str, Any]) -> WindowConfig:
-    """从 dict 构建 WindowConfig（wire payload 格式）。"""
+    """从 dict 构建 WindowConfig（wire payload 格式）。
+
+    ``max_tokens`` 缺省透传 None（未声明），由 WindowManager 在 LLM
+    就绪后查模型窗口表落定。
+    """
     return WindowConfig(
-        max_tokens=data.get("max_tokens", DEFAULT_WINDOW_MAX_TOKENS),
+        max_tokens=data.get("max_tokens"),
         strategies=data.get("strategies", ["tool_call_fold", "truncation"]),
         tool_call_max_length=data.get("tool_call_max_length", 500),
         sliding_window_size=data.get("sliding_window_size", 20),
@@ -68,11 +71,12 @@ def build_model_overrides_from_dict(data: dict[str, Any]) -> ModelOverrides:
 
 
 def build_window_from_overrides(overrides: Any) -> WindowConfig:
-    """从 WindowOverrides (manifest dataclass) 构建 WindowConfig。"""
+    """从 WindowOverrides (manifest dataclass) 构建 WindowConfig。
+
+    ``max_tokens`` 未声明时透传 None，由 WindowManager 查模型窗口表落定。
+    """
     return WindowConfig(
-        max_tokens=(
-            overrides.max_tokens if overrides.max_tokens is not None else DEFAULT_WINDOW_MAX_TOKENS
-        ),
+        max_tokens=overrides.max_tokens,
         strategies=(
             overrides.strategies
             if overrides.strategies is not None

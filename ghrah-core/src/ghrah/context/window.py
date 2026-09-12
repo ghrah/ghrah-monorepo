@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -30,6 +31,8 @@ from ghrah.core.window_protocol import (
     WindowableMessage,
 )
 from ghrah.types.config_types import DEFAULT_WINDOW_MAX_TOKENS
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "WindowStrategy",
@@ -173,26 +176,99 @@ class WindowManager:
     3. SlidingWindowStrategy — 确保总消息数在窗口内
     4. TruncationStrategy    — 最终兜底，暴力截断
 
+    预算来源三级：显式声明（declared）> 模型窗口表（model_table）>
+    内置默认（default）。``max_tokens=None`` 表示未声明，首线 LLM 就绪后
+    经 :meth:`resolve_budget_from_model` 查表落定；厂商超限错误的运行时
+    回填经 :meth:`correct_budget_from_vendor`，口径以厂商为真值。
+
     Args:
         strategies: 策略列表（按执行顺序）
-        max_tokens: 默认 token 预算
+        max_tokens: token 预算；None 表示未声明（待查表/回落默认）
         message_factory: 消息构造工厂（用于需要构造新消息的策略）
     """
 
     def __init__(
         self,
         strategies: list[WindowStrategy] | None = None,
-        max_tokens: int = DEFAULT_WINDOW_MAX_TOKENS,
+        max_tokens: int | None = None,
         message_factory: MessageFactory | None = None,
     ) -> None:
         self._strategies: list[WindowStrategy] = list(strategies) if strategies else []
-        self._max_tokens = max_tokens
         self._message_factory = message_factory
+        if max_tokens is not None:
+            self._max_tokens = max_tokens
+            self._max_tokens_source = "declared"
+        else:
+            self._max_tokens = DEFAULT_WINDOW_MAX_TOKENS
+            self._max_tokens_source = "default"
 
     @property
     def max_tokens(self) -> int:
-        """默认 token 预算。"""
+        """token 预算（声明值或解析后的落定值）。"""
         return self._max_tokens
+
+    @property
+    def max_tokens_source(self) -> str:
+        """预算来源："declared" | "model_table" | "default" | "vendor"。"""
+        return self._max_tokens_source
+
+    def resolve_budget_from_model(self, model_name: str) -> bool:
+        """未声明预算时按模型名查内置窗口表落定。
+
+        幂等：已声明或已落定（含 vendor 回填）时不动。查表命中与否均
+        打日志（零隐式：来源可观测）。
+
+        Args:
+            model_name: 模型标识（如 "claude-sonnet-4-20250514"）
+
+        Returns:
+            是否发生了预算落定（即本次调用改变了预算）
+        """
+        from ghrah.context.model_windows import lookup_model_window
+
+        if self._max_tokens_source != "default":
+            return False
+        window = lookup_model_window(model_name)
+        if window is None:
+            logger.info(
+                "WindowManager: model %r not in window table; budget stays %d (default)",
+                model_name,
+                self._max_tokens,
+            )
+            return False
+        self._max_tokens = window
+        self._max_tokens_source = "model_table"
+        logger.info(
+            "WindowManager: budget resolved from model table — model=%r budget=%d",
+            model_name,
+            window,
+        )
+        return True
+    def correct_budget_from_vendor(self, window_tokens: int) -> bool:
+        """厂商超限错误解析出的真实窗口回填。
+
+        厂商口径为真值：无论当前来源为何（含 declared）均覆盖，并记
+        prominent 日志。正值校验，非正值拒绝。
+
+        Args:
+            window_tokens: 厂商报文中的上下文窗口大小
+
+        Returns:
+            是否接受了回填
+        """
+        if window_tokens <= 0:
+            return False
+        previous = (self._max_tokens, self._max_tokens_source)
+        self._max_tokens = window_tokens
+        self._max_tokens_source = "vendor"
+        logger.warning(
+            "WindowManager: budget corrected from vendor context-limit error — "
+            "budget=%d (was %d/%s)",
+            window_tokens,
+            previous[0],
+            previous[1],
+        )
+        return True
 
     @property
     def strategies(self) -> list[WindowStrategy]:

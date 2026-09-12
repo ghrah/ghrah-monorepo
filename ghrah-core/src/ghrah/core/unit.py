@@ -281,6 +281,7 @@ def _core_event_to_dict(event: CoreEvent) -> tuple[str, dict[str, Any]]:
                 "occupied_tokens": event.occupied_tokens,
                 "basis": event.basis,
                 "budget_tokens": event.budget_tokens,
+                "budget_source": event.budget_source,
                 "compact_threshold": event.compact_threshold,
                 "real_input_tokens": event.real_input_tokens,
                 "real_output_tokens": event.real_output_tokens,
