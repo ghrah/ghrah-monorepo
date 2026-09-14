@@ -6,7 +6,9 @@ import { useObserver } from "@/composables/useObserver";
 
 const { t } = useI18n();
 
-const props = defineProps<{ request: HitlRequest }>();
+const props = defineProps<{ request: HitlRequest; selectable?: boolean; selected?: boolean }>();
+
+const emit = defineEmits<{ toggleSelect: [promiseId: string] }>();
 
 const { sendHitlResponse } = useObserver();
 
@@ -61,6 +63,14 @@ async function handleRejectSubmit() {
 <template>
   <li class="flex flex-col gap-1 p-2 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
     <div class="flex items-center gap-2">
+      <input
+        v-if="selectable"
+        type="checkbox"
+        class="accent-blue-600"
+        :checked="selected"
+        :aria-label="t('hitl.selectForBatch')"
+        @change="emit('toggleSelect', request.promiseId)"
+      />
       <span class="text-amber-500 font-bold text-xs">⏳</span>
       <span class="font-medium text-sm">{{ request.abilityName }}</span>
       <span class="text-gray-400 dark:text-gray-500 text-xs font-mono truncate">{{ toolArgsSummary }}</span>

@@ -174,6 +174,10 @@ export default {
     reasonPlaceholder: "Reason for rejection (optional)",
     confirmReject: "Confirm Reject",
     approve: "Approve",
+    selectForBatch: "Select for batch approval",
+    selectAll: "Select All",
+    deselectAll: "Deselect All",
+    batchApprove: "Batch Approve",
     reject: "Reject",
   },
   actionChain: {

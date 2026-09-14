@@ -50,3 +50,32 @@ describe("useHitlStore", () => {
     expect(store.requests).toEqual([]);
   });
 });
+
+describe("hitl batch selection", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+
+  it("toggles, selects all, and clears selection", () => {
+    const store = useHitlStore();
+    store.onHitlRequest(payload());
+    store.onHitlRequest(payload({ promise_id: "h2" }));
+
+    store.toggleSelected("h1");
+    expect(store.selectedIds.has("h1")).toBe(true);
+    store.toggleSelected("h1");
+    expect(store.selectedIds.has("h1")).toBe(false);
+
+    store.selectAll();
+    expect(store.selectedIds.size).toBe(2);
+    store.clearSelection();
+    expect(store.selectedIds.size).toBe(0);
+  });
+
+  it("removeRequest also drops the id from selection", () => {
+    const store = useHitlStore();
+    store.onHitlRequest(payload());
+    store.selectAll();
+    store.removeRequest("h1");
+    expect(store.requests).toHaveLength(0);
+    expect(store.selectedIds.has("h1")).toBe(false);
+  });
+});

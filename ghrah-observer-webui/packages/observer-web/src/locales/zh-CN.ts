@@ -169,6 +169,10 @@ export default {
     reasonPlaceholder: "拒绝原因（可选）",
     confirmReject: "确认拒绝",
     approve: "批准",
+    selectForBatch: "选择以批量批准",
+    selectAll: "全选",
+    deselectAll: "取消全选",
+    batchApprove: "批量批准",
     reject: "拒绝",
   },
   actionChain: {

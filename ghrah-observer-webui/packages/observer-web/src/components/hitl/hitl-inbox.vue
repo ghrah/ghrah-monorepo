@@ -1,11 +1,37 @@
 <script setup lang="ts">
 import { useHitlStore } from "@ghrah/observer-core";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useObserver } from "@/composables/useObserver";
 import HitlRequestItem from "./hitl-request-item.vue";
 
 const { t } = useI18n();
 
 const hitl = useHitlStore();
+const { sendHitlResponse } = useObserver();
+
+const batchRunning = ref(false);
+
+const batchable = computed(() => hitl.pendingRequests.length > 1);
+const selectedIds = computed(() => [...hitl.selectedIds]);
+const allSelected = computed(
+  () => batchable.value && selectedIds.value.length === hitl.pendingRequests.length,
+);
+
+async function handleBatchApprove() {
+  if (selectedIds.value.length === 0 || batchRunning.value) return;
+  batchRunning.value = true;
+  try {
+    // 逐条并行发送（协议为单 promise 的 hitl_response）；成功项经
+    // sendHitlResponse 内部回执判断移除，失败项保留待重试
+    await Promise.allSettled(
+      selectedIds.value.map((promiseId) => sendHitlResponse(promiseId, true)),
+    );
+    hitl.clearSelection();
+  } finally {
+    batchRunning.value = false;
+  }
+}
 </script>
 
 <template>
@@ -21,12 +47,33 @@ const hitl = useHitlStore();
       {{ t("hitl.empty") }}
     </div>
 
-    <ul v-else class="space-y-2">
-      <HitlRequestItem
-        v-for="req in hitl.pendingRequests"
-        :key="req.promiseId"
-        :request="req"
-      />
-    </ul>
+    <template v-else>
+      <div v-if="batchable" class="flex items-center gap-2 mb-2">
+        <button
+          class="btn-secondary"
+          @click="allSelected ? hitl.clearSelection() : hitl.selectAll()"
+        >
+          {{ allSelected ? t("hitl.deselectAll") : t("hitl.selectAll") }}
+        </button>
+        <button
+          class="btn-primary"
+          :disabled="selectedIds.length === 0 || batchRunning"
+          @click="handleBatchApprove"
+        >
+          {{ t("hitl.batchApprove") }}{{ selectedIds.length > 0 ? ` (${selectedIds.length})` : "" }}
+        </button>
+      </div>
+
+      <ul class="space-y-2">
+        <HitlRequestItem
+          v-for="req in hitl.pendingRequests"
+          :key="req.promiseId"
+          :request="req"
+          :selectable="batchable"
+          :selected="hitl.selectedIds.has(req.promiseId)"
+          @toggle-select="hitl.toggleSelected"
+        />
+      </ul>
+    </template>
   </div>
 </template>

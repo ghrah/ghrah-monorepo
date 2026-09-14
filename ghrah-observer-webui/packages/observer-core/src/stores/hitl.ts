@@ -17,6 +17,7 @@ export interface HitlRequest {
 export const useHitlStore = defineStore("ghrah-hitl", () => {
   const requests = ref<HitlRequest[]>([]);
   const pendingRequests = computed(() => requests.value);
+  const selectedIds = ref<Set<string>>(new Set());
 
   function onHitlRequest(payload: HITLRequestPayload): boolean {
     if (!payload.project_id || !payload.agent_id) return false;
@@ -36,6 +37,25 @@ export const useHitlStore = defineStore("ghrah-hitl", () => {
 
   function removeRequest(promiseId: string) {
     requests.value = requests.value.filter((request) => request.promiseId !== promiseId);
+    selectedIds.value.delete(promiseId);
+  }
+
+  function toggleSelected(promiseId: string) {
+    const next = new Set(selectedIds.value);
+    if (next.has(promiseId)) {
+      next.delete(promiseId);
+    } else {
+      next.add(promiseId);
+    }
+    selectedIds.value = next;
+  }
+
+  function selectAll() {
+    selectedIds.value = new Set(requests.value.map((request) => request.promiseId));
+  }
+
+  function clearSelection() {
+    selectedIds.value = new Set();
   }
 
   function clearAgent(target: AgentTarget) {
@@ -50,13 +70,18 @@ export const useHitlStore = defineStore("ghrah-hitl", () => {
 
   function clearAll() {
     requests.value = [];
+    selectedIds.value = new Set();
   }
 
   return {
     requests,
     pendingRequests,
+    selectedIds,
     onHitlRequest,
     removeRequest,
+    toggleSelected,
+    selectAll,
+    clearSelection,
     clearAgent,
     clearProject,
     clearAll,
