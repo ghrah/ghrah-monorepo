@@ -403,6 +403,54 @@ class TestLocalAbilityExecutor:
         assert results[0]["tool_call_id"] == "call_123"
 
     @pytest.mark.asyncio
+    async def test_execute_tool_calls_injects_supervisor(self):
+        """断线回归：tool-call 路径须注入 supervisor/manifest_store。
+
+        此前 _execute_single_with_context 只注入 agent_name/context_manager，
+        LLM 工具调用集群类 ability（query_agents 等）拿到 supervisor=None，
+        误报 standalone。
+        """
+
+        class SupervisorProbeAbility(Ability):
+            @property
+            def name(self) -> str:
+                return "supervisor_probe"
+
+            async def execute(self, context: AbilityExecutionContext) -> ActionResult:
+                return ActionResult(
+                    outcome=ActionOutcome.SUCCESS,
+                    data={
+                        "has_supervisor": context.supervisor is not None,
+                        "has_manifest_store": context.manifest_store is not None,
+                    },
+                )
+
+            def get_hooks(self) -> list[Hook]:
+                return []
+
+            def bind_tool(self) -> dict | None:
+                return None
+
+        supervisor = MagicMock()
+        supervisor.manifest_store = object()
+        executor = LocalAbilityExecutor(agent_name="test-agent", supervisor=supervisor)
+
+        mock_cm = MagicMock()
+        mock_cm.get_current_state.return_value = {}
+
+        results = await executor.execute_tool_calls(
+            tool_calls=[ToolCallBlock(name="supervisor_probe", arguments={}, id="call_sup")],
+            abilities={"supervisor_probe": SupervisorProbeAbility()},
+            accumulated_data={},
+            context_manager=mock_cm,
+            last_action_result=None,
+        )
+
+        data = results[0]["action_result"].data
+        assert data["has_supervisor"] is True
+        assert data["has_manifest_store"] is True
+
+    @pytest.mark.asyncio
     async def test_execute_tool_calls_unknown_ability(self):
         """测试未知 ability 的 tool_call。"""
         executor = LocalAbilityExecutor(agent_name="test-agent")

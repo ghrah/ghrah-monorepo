@@ -270,6 +270,7 @@ class AgentBuilder:
                 hooks=[],
                 event_publisher=event_publisher or NullEventPublisher(),
                 workspace_root=config.workspace_root,
+                supervisor=supervisor,
             )
 
         agent = ActorAgent(

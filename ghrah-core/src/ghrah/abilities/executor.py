@@ -213,6 +213,7 @@ class LocalAbilityExecutor(AbilityExecutor):
         hitl_timeout: float = 300.0,
         workspace_root: str | None = None,
         hitl_promise_registry: HITLPromiseRegistry | None = None,
+        supervisor: Any = None,
     ) -> None:
         """初始化本地执行器。
 
@@ -225,6 +226,8 @@ class LocalAbilityExecutor(AbilityExecutor):
             workspace_root: 工作区根目录，用于将相对路径解析到沙盒内（None 表示不解析）
             hitl_promise_registry: HITL promise 注册表（CoreUnit 注入，unit 命令面
                 按 promise_id 翻译回三元组；None 时 standalone 模式跳过注册）
+            supervisor: Supervisor 引用（tool-call 路径注入集群上下文用；
+                None 时集群类 ability 在 LLM 工具调用下按 standalone 报错指路）
         """
         self._agent_name = agent_name
         self._hook_store = HookStore()
@@ -241,6 +244,7 @@ class LocalAbilityExecutor(AbilityExecutor):
         self._hitl_timeout = hitl_timeout
         self._workspace_root = Path(workspace_root).resolve() if workspace_root else None
         self._hitl_promise_registry = hitl_promise_registry
+        self._supervisor = supervisor
 
     @property
     def hitl_store(self) -> HITLFutureStore:
@@ -477,11 +481,19 @@ class LocalAbilityExecutor(AbilityExecutor):
         """
         resolved_args = self._resolve_paths(tool_args, ability.name)
 
+        # 集群服务注入：与 ActorAgent._build_ability_context 对齐——tool-call
+        # 路径此前不注入 supervisor/manifest_store，LLM 工具调用集群类 ability
+        # （query_agents 等）拿到的 supervisor 恒为 None，误报 standalone。
+        supervisor = getattr(self, "_supervisor", None)
+        manifest_store = getattr(supervisor, "manifest_store", None)
+
         per_ability_context = AbilityExecutionContext(
             current_ability_name=ability.name,
             tool_args=resolved_args,
             agent_state=context_manager.get_current_state(),
             context_manager=context_manager,
+            supervisor=supervisor,
+            manifest_store=manifest_store,
             accumulated_data={
                 **copy.deepcopy(accumulated_data),
                 "tool_args": resolved_args,
