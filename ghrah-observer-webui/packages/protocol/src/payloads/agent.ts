@@ -343,6 +343,7 @@ export const HITLRequestPayloadSchema = z.object({
   ability_name: z.string(),
   tool_args: z.record(z.unknown()).optional().default({}),
   context: z.record(z.unknown()).optional().default({}),
+  reason: z.string().optional().default(""),
 });
 
 export type AgentConfigPayload = z.infer<typeof AgentConfigPayloadSchema>;

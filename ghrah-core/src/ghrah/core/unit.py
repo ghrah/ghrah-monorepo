@@ -265,6 +265,7 @@ def _core_event_to_dict(event: CoreEvent) -> tuple[str, dict[str, Any]]:
                 "tool_args": event.tool_call,
                 "context": event.context,
                 "promise_id": event.promise_id,
+                "reason": event.reason,
             }
         )
     elif isinstance(event, HITLResolvedEvent):

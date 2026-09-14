@@ -718,6 +718,17 @@ describe("Event payload schemas", () => {
     });
     expect(result.tool_args).toEqual({});
     expect(result.context).toEqual({});
+    expect(result.reason).toBe("");
+  });
+
+  it("HITLRequestPayloadSchema parses approval reason", () => {
+    const result = HITLRequestPayloadSchema.parse({
+      promise_id: "p-002",
+      agent_name: "agent-1",
+      ability_name: "execute_command",
+      reason: "Command requires approval: pnpm type-check",
+    });
+    expect(result.reason).toBe("Command requires approval: pnpm type-check");
   });
 });
 

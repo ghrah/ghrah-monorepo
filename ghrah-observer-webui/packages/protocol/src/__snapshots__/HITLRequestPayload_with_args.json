@@ -10,5 +10,6 @@
   },
   "context": {
     "risk": "high"
-  }
+  },
+  "reason": "Command requires approval: rm -rf /"
 }

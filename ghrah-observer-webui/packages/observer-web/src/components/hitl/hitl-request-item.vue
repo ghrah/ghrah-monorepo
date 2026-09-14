@@ -32,8 +32,10 @@ const toolArgsSummary = computed(() => {
 const contextDesc = computed(() => {
   const ctx = props.request.context;
   if (!ctx) return "";
-  return String(ctx.description ?? ctx.reason ?? "");
+  return String(ctx.description ?? "");
 });
+
+const approvalReason = computed(() => props.request.reason || "");
 
 async function handleApprove() {
   loading.value = true;
@@ -63,6 +65,10 @@ async function handleRejectSubmit() {
       <span class="font-medium text-sm">{{ request.abilityName }}</span>
       <span class="text-gray-400 dark:text-gray-500 text-xs font-mono truncate">{{ toolArgsSummary }}</span>
       <span class="ml-auto text-xs text-gray-500 dark:text-gray-400">{{ request.agentName }}</span>
+    </div>
+
+    <div v-if="approvalReason" class="text-xs text-amber-600 dark:text-amber-400 pl-5">
+      {{ t("hitl.approvalReason") }}: {{ approvalReason }}
     </div>
 
     <div v-if="contextDesc" class="text-xs text-gray-500 dark:text-gray-400 italic pl-5">

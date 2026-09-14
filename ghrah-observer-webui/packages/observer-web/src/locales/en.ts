@@ -170,6 +170,7 @@ export default {
   hitl: {
     inbox: "HITL Inbox",
     empty: "No pending requests",
+    approvalReason: "Trigger reason",
     reasonPlaceholder: "Reason for rejection (optional)",
     confirmReject: "Confirm Reject",
     approve: "Approve",

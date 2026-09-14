@@ -11,6 +11,7 @@ export interface HitlRequest {
   abilityName: string;
   toolArgs: Record<string, unknown>;
   context: Record<string, unknown>;
+  reason: string;
 }
 
 export const useHitlStore = defineStore("ghrah-hitl", () => {
@@ -28,6 +29,7 @@ export const useHitlStore = defineStore("ghrah-hitl", () => {
       abilityName: payload.ability_name,
       toolArgs: payload.tool_args,
       context: payload.context,
+      reason: payload.reason ?? "",
     });
     return true;
   }

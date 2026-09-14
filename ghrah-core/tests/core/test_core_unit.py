@@ -743,6 +743,7 @@ class TestStandalone:
         )
         assert emitted[0][0] == "core:hitl_request"
         assert emitted[0][1]["ability_name"] == "mock_ability"
+        assert emitted[0][1]["reason"] == ""  # 触发原因进 wire 载荷（默认空）
 
     async def test_publisher_drops_unattributed_agent_scoped_event(self) -> None:
         """Agent 作用域事件缺失归属（project_id/agent_id）时跳过发布。"""

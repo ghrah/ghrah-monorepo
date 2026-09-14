@@ -12,6 +12,7 @@ const payload = (overrides: Partial<HITLRequestPayload> = {}): HITLRequestPayloa
   ability_name: "write_file",
   tool_args: {},
   context: {},
+  reason: "",
   ...overrides,
 });
 
@@ -25,6 +26,12 @@ describe("useHitlStore", () => {
     expect(store.requests).toEqual([
       expect.objectContaining({ projectId: "p1", agentId: "a1", agentName: "coder" }),
     ]);
+  });
+
+  it("keeps approval reason from the request payload", () => {
+    const store = useHitlStore();
+    store.onHitlRequest(payload({ reason: "Command requires approval: pnpm test" }));
+    expect(store.requests[0].reason).toBe("Command requires approval: pnpm test");
   });
 
   it("rejects requests without project-scoped identity", () => {

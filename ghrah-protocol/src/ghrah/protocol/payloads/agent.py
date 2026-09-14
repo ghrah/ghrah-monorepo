@@ -238,6 +238,8 @@ class HITLRequestPayload(BaseModel):
     ability_name: str
     tool_args: dict[str, Any] = Field(default_factory=dict)
     context: dict[str, Any] = Field(default_factory=dict)
+    reason: str = ""
+    """触发审批的原因（Hook 拦截说明，如 "Command requires approval: ..."）"""
 
 
 class ContextUsageUpdatedPayload(BaseModel):

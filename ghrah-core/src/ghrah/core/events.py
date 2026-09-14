@@ -102,6 +102,8 @@ class HITLRequestEvent(CoreEvent):
     context: dict[str, Any] = field(default_factory=dict)
     promise_id: str = ""
     """审批响应定位键：Observer 凭此回发 hitl_response"""
+    reason: str = ""
+    """触发审批的原因（Hook 拦截说明，如 "Command requires approval: pnpm ..."）"""
 
 
 @dataclass

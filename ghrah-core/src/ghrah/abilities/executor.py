@@ -590,7 +590,8 @@ class LocalAbilityExecutor(AbilityExecutor):
         tool_call_id = context.tool_args.get("call_id", "") or uuid.uuid4().hex[:12]
         promise_id = uuid.uuid4().hex
 
-        # 发布 HITL 请求事件（promise_id 随载荷下发，Observer 凭此回发审批）
+        # 发布 HITL 请求事件（promise_id 随载荷下发，Observer 凭此回发审批；
+        # reason 为触发审批的 Hook 拦截原因，审批人可见"为何要审"）
         await self._event_publisher.publish(
             HITLRequestEvent(
                 agent_name=self._agent_name,
@@ -598,6 +599,7 @@ class LocalAbilityExecutor(AbilityExecutor):
                 tool_call=context.tool_args,
                 context={"tool_call_id": tool_call_id},
                 promise_id=promise_id,
+                reason=hook_result.message or "",
             )
         )
 

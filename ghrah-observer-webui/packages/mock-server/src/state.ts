@@ -1458,6 +1458,7 @@ export class MockState {
       ability_name: abilityName,
       tool_args: toolArgs,
       context,
+      reason: "Mock HITL request (mock-server development link)",
     };
     this.pendingHitl.set(payload.promise_id, { payload, status: "pending", reason: null });
     const timer = setTimeout(() => {

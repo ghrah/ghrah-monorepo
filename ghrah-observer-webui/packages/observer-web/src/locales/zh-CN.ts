@@ -165,6 +165,7 @@ export default {
   hitl: {
     inbox: "HITL 收件箱",
     empty: "暂无待处理请求",
+    approvalReason: "触发原因",
     reasonPlaceholder: "拒绝原因（可选）",
     confirmReject: "确认拒绝",
     approve: "批准",

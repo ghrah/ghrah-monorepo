@@ -708,6 +708,8 @@ class TestLocalAbilityExecutor:
         assert request_event.agent_name == "test-agent"
         assert request_event.ability_name == "write_file"
         assert request_event.promise_id  # promise 随请求下发
+        # 触发原因（Hook 拦截说明）随请求下发，审批人可见"为何要审"
+        assert "Human approval required" in request_event.reason
         resolved_event = mock_publisher.publish.await_args_list[1][0][0]
         assert isinstance(resolved_event, HITLResolvedEvent)
         assert resolved_event.status == "timeout"
