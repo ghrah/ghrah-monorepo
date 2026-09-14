@@ -44,6 +44,8 @@ class ListDirectoryInput(BaseModel):
 
     dir_path: str
     recursive: bool = False
+    offset: int = 0
+    limit: int = 0
 
 
 class ListDirectoryAbility(Ability):
@@ -86,7 +88,11 @@ class ListDirectoryAbility(Ability):
                 "description": (
                     "List files and directories at the specified path. "
                     "Returns entry names, types (file/directory), and sizes. "
-                    "Use recursive=true to list all nested contents."
+                    "Use recursive=true to list all nested contents. "
+                    "For large directories, set offset/limit to paginate "
+                    "(0-based entry index); the response then carries "
+                    "total_entries/truncated/offset/limit. Without "
+                    "offset/limit the whole listing is returned."
                 ),
                 "parameters": ListDirectoryInput.model_json_schema(),
             },
@@ -94,8 +100,10 @@ class ListDirectoryAbility(Ability):
 
     def to_prompt_description(self) -> str:
         return (
-            "list_directory(dir_path: str, recursive: bool = False): "
-            "List files and directories at the specified path"
+            "list_directory(dir_path: str, recursive: bool = False, "
+            "offset: int = 0, limit: int = 0): "
+            "List files and directories at the specified path; "
+            "offset/limit paginate entries (0 = legacy full listing)"
         )
 
     def get_hooks(self) -> list[Hook]:
@@ -115,6 +123,9 @@ class ListDirectoryAbility(Ability):
         tool_args = context.tool_args or context.accumulated_data.get("tool_args", {})
         dir_path = tool_args.get("dir_path", "")
         recursive = tool_args.get("recursive", False)
+        offset = int(tool_args.get("offset", 0) or 0)
+        limit = int(tool_args.get("limit", 0) or 0)
+        paginated = offset > 0 or limit > 0
 
         if not dir_path:
             return ActionResult(
@@ -150,12 +161,24 @@ class ListDirectoryAbility(Ability):
 
             logger.debug(f"ListDirectoryAbility: found {len(entries)} entries in {dir_path}")
 
+            data: dict[str, Any] = {
+                "dir_path": dir_path,
+                "total_entries": len(entries),
+            }
+            if paginated:
+                window_end = offset + limit if limit > 0 else len(entries)
+                selected = entries[offset:window_end]
+                data["entries"] = selected
+                data["offset"] = offset
+                data["limit"] = limit
+                data["truncated"] = window_end < len(entries) or offset > 0
+                data["next_offset"] = window_end if window_end < len(entries) else None
+            else:
+                data["entries"] = entries
+
             return ActionResult(
                 outcome=ActionOutcome.SUCCESS,
-                data={
-                    "dir_path": dir_path,
-                    "entries": entries,
-                },
+                data=data,
             )
         except PermissionError:
             return ActionResult(

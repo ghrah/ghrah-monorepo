@@ -928,3 +928,101 @@ class TestListDirectoryAbility:
             result = await ability.execute(ctx)
 
             assert result.outcome == ActionOutcome.SUCCESS
+
+    async def test_pagination_legacy_mode_without_offset_limit(self) -> None:
+        """offset=0/limit=0（默认）→ 旧行为：全量返回，无分页元数据。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i in range(5):
+                with open(os.path.join(tmpdir, f"f{i}.txt"), "w") as f:
+                    f.write("x")
+
+            ctx = _make_context(tool_args={"dir_path": tmpdir})
+            result = await ListDirectoryAbility().execute(ctx)
+
+            assert result.outcome == ActionOutcome.SUCCESS
+            assert len(result.data["entries"]) == 5
+            assert result.data["total_entries"] == 5
+            # 旧行为：无 offset/limit/truncated/next_offset 键
+            assert "truncated" not in result.data
+            assert "offset" not in result.data
+            assert "next_offset" not in result.data
+
+    async def test_pagination_limit_only(self) -> None:
+        """仅 limit → 返回前 N 条 + truncated/next_offset。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i in range(5):
+                with open(os.path.join(tmpdir, f"f{i}.txt"), "w") as f:
+                    f.write("x")
+
+            ctx = _make_context(tool_args={"dir_path": tmpdir, "limit": 2})
+            result = await ListDirectoryAbility().execute(ctx)
+
+            assert result.outcome == ActionOutcome.SUCCESS
+            assert [e["name"] for e in result.data["entries"]] == ["f0.txt", "f1.txt"]
+            assert result.data["total_entries"] == 5
+            assert result.data["offset"] == 0
+            assert result.data["limit"] == 2
+            assert result.data["truncated"] is True
+            assert result.data["next_offset"] == 2
+
+    async def test_pagination_offset_and_limit(self) -> None:
+        """offset+limit → 窗口切片；末页 next_offset=None。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i in range(5):
+                with open(os.path.join(tmpdir, f"f{i}.txt"), "w") as f:
+                    f.write("x")
+
+            ability = ListDirectoryAbility()
+            ctx = _make_context(tool_args={"dir_path": tmpdir, "offset": 1, "limit": 2})
+            result = await ability.execute(ctx)
+            assert [e["name"] for e in result.data["entries"]] == ["f1.txt", "f2.txt"]
+            assert result.data["truncated"] is True
+            assert result.data["next_offset"] == 3
+
+            # 末页：正好取完剩余条目
+            ctx = _make_context(tool_args={"dir_path": tmpdir, "offset": 3, "limit": 2})
+            result = await ability.execute(ctx)
+            assert [e["name"] for e in result.data["entries"]] == ["f3.txt", "f4.txt"]
+            assert result.data["truncated"] is True  # offset>0 即视为分页窗口
+            assert result.data["next_offset"] is None
+
+    async def test_pagination_offset_only_tail(self) -> None:
+        """仅 offset → 从 offset 到末尾。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i in range(4):
+                with open(os.path.join(tmpdir, f"f{i}.txt"), "w") as f:
+                    f.write("x")
+
+            ctx = _make_context(tool_args={"dir_path": tmpdir, "offset": 2})
+            result = await ListDirectoryAbility().execute(ctx)
+            assert [e["name"] for e in result.data["entries"]] == ["f2.txt", "f3.txt"]
+            assert result.data["truncated"] is True
+            assert result.data["next_offset"] is None
+
+    async def test_pagination_recursive_truncates_walk(self) -> None:
+        """recursive + limit → 递归遍历结果同样截断。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.makedirs(os.path.join(tmpdir, "sub"))
+            for i in range(3):
+                with open(os.path.join(tmpdir, f"f{i}.txt"), "w") as f:
+                    f.write("x")
+            with open(os.path.join(tmpdir, "sub", "deep.txt"), "w") as f:
+                f.write("d")
+
+            ctx = _make_context(tool_args={"dir_path": tmpdir, "recursive": True, "limit": 2})
+            result = await ListDirectoryAbility().execute(ctx)
+            assert len(result.data["entries"]) == 2
+            assert result.data["total_entries"] == 5  # sub + 3 files + deep.txt
+            assert result.data["truncated"] is True
+
+    async def test_pagination_offset_beyond_end_returns_empty(self) -> None:
+        """offset 越界 → 空列表（不报错）。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with open(os.path.join(tmpdir, "f.txt"), "w") as f:
+                f.write("x")
+
+            ctx = _make_context(tool_args={"dir_path": tmpdir, "offset": 10, "limit": 5})
+            result = await ListDirectoryAbility().execute(ctx)
+            assert result.outcome == ActionOutcome.SUCCESS
+            assert result.data["entries"] == []
+            assert result.data["total_entries"] == 1
