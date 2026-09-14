@@ -19,6 +19,31 @@ from ghrah.protocol.types import RecoveryAction
 logger = logging.getLogger(__name__)
 
 
+def _split_tokens(value: str) -> list[str]:
+    """按逗号/分号/空白切分并去空（safe 命令扩展白名单解析）。"""
+    tokens = value.replace(";", ",").replace("\t", ",").replace(" ", ",").split(",")
+    return [tok for tok in tokens if tok]
+
+
+def _parse_sub_commands(value: str) -> dict[str, list[str]]:
+    """解析 ``base:sub1,sub2;base2:sub3`` 形状的子命令扩展白名单。
+
+    冒号前为基础命令，逗号分隔子命令；分号（或空白）分隔多组
+    （组内逗号是子命令分隔符，不在组间切割）。
+    """
+    result: dict[str, list[str]] = {}
+    for group in [g for g in value.replace("\t", ";").replace(" ", ";").split(";") if g]:
+        if ":" not in group:
+            continue
+        base, _, subs = group.partition(":")
+        base = base.strip().lower()
+        if base and subs:
+            result.setdefault(base, []).extend(
+                s.strip().lower() for s in subs.split(",") if s.strip()
+            )
+    return result
+
+
 def _safe_float(value: str, default: float, name: str) -> float:
     try:
         return float(value)
@@ -46,6 +71,9 @@ class HITLPolicyConfig:
     - require_approval_by_default：对未在 manifest 中注册的能力的兜底策略
     - allowed_paths：允许访问的路径白名单（用于文件系统权限检查）
     - workspace_root：工作区根路径，此路径下的操作自动放行
+    - safe_extra_commands：部署方追加的基础命令 safe 白名单（如 pnpm、make）
+    - safe_extra_sub_commands：部署方追加的子命令 safe 白名单
+      （{"pnpm": ("test", "type-check")} 形状；只增不减，保持 fail-closed）
 
     注意：能力的 require_hitl/fs_write/fs_read_only/shell_access 标记
     从 manifest PermissionFlags 中获取，不再在此配置中指定。
@@ -55,6 +83,8 @@ class HITLPolicyConfig:
     require_approval_by_default: bool = True
     allowed_paths: list[str] = field(default_factory=list)
     workspace_root: str | None = None
+    safe_extra_commands: list[str] = field(default_factory=list)
+    safe_extra_sub_commands: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -337,6 +367,9 @@ class SubjectConfig:
         - GHRAH_SUBJECT_RECOVERY_BOOTSTRAP_DEFAULT_PROJECT
         - GHRAH_SUBJECT_ROOM_FILTER_ENABLED
         - GHRAH_SUBJECT_ROOM_FILTER_ABILITIES（逗号分隔白名单能力名）
+        - GHRAH_SUBJECT_SAFE_EXTRA_COMMANDS（逗号/分号/空白分隔，追加基础命令 safe 白名单）
+        - GHRAH_SUBJECT_SAFE_EXTRA_SUB_COMMANDS（base:sub1,sub2;base2:sub3 形状，
+          追加子命令 safe 白名单；只增不减，保持 fail-closed）
         """
         hitl_policy = HITLPolicyConfig(
             auto_approve_abilities=os.environ.get(
@@ -352,6 +385,12 @@ class SubjectConfig:
             if os.environ.get("GHRAH_SUBJECT_HITL_ALLOWED_PATHS")
             else [],
             workspace_root=os.environ.get("GHRAH_SUBJECT_HITL_WORKSPACE_ROOT"),
+            safe_extra_commands=_split_tokens(
+                os.environ.get("GHRAH_SUBJECT_SAFE_EXTRA_COMMANDS", "")
+            ),
+            safe_extra_sub_commands=_parse_sub_commands(
+                os.environ.get("GHRAH_SUBJECT_SAFE_EXTRA_SUB_COMMANDS", "")
+            ),
         )
 
         core = CoreTransportConfig(

@@ -128,6 +128,10 @@ class CoreUnitConfig:
             侧旧 HITLPolicy 的同名覆盖层）。
         require_approval_by_default: 对 manifest 未声明审批要求的能力的兜底
             策略（语义平移自旧 HITLPolicy）。
+        safe_extra_commands: 部署方追加的基础命令 safe 白名单（如 pnpm、
+            make）。与内置 DEFAULT_SAFE_COMMANDS 并集合并，只增不减。
+        safe_extra_sub_commands: 部署方追加的子命令 safe 白名单
+            （{"pnpm": ("test", "lint")} 形状），与内置表并集合并。
         command_runner: execute_command 能力的命令执行器注入（per-cluster
             构造期注入，duck-typed ``run_command``；None = standalone 直跑
             subprocess）。Subject 挂载模式下传 SandboxExecutor。
@@ -154,6 +158,8 @@ class CoreUnitConfig:
     workspace_root: str | None = None
     auto_approve_abilities: tuple[str, ...] = ()
     require_approval_by_default: bool = True
+    safe_extra_commands: tuple[str, ...] = ()
+    safe_extra_sub_commands: tuple[tuple[str, tuple[str, ...]], ...] = ()
     command_runner: Any = None
     persistence_factory: Callable[[Any], Any] | None = None
     # duck-typed ManifestStoreProtocol；None = standalone（manifest_ref spawn 报错）
@@ -411,6 +417,8 @@ def _create_ability_from_def(
     command_runner: Any = None,
     auto_approve_abilities: tuple[str, ...] = (),
     require_approval_by_default: bool = True,
+    safe_extra_commands: tuple[str, ...] = (),
+    safe_extra_sub_commands: tuple[tuple[str, tuple[str, ...]], ...] = (),
 ) -> AbilityProtocol:
     """将 AbilityDefinitionPayload 转换为 Ability 实例。
 
@@ -482,6 +490,13 @@ def _create_ability_from_def(
         else:
             require_approval = require_approval_by_default
         command_checker = CommandSafetyChecker(require_approval=require_approval)
+        # 部署方 safe 白名单扩展（只增不减，与内置并集）
+        if safe_extra_commands or safe_extra_sub_commands:
+            sub_map = dict(safe_extra_sub_commands) if safe_extra_sub_commands else None
+            command_checker.extend_safe_lists(
+                extra_commands=safe_extra_commands,
+                extra_sub_commands=sub_map,
+            )
         params["command_checker"] = command_checker
         params["hooks"] = [CommandApprovalHook(command_checker)]
         if command_runner is not None:
@@ -794,6 +809,8 @@ class CoreUnit:
                 auto_approve_abilities=self._config.auto_approve_abilities,
                 require_approval_by_default=self._config.require_approval_by_default,
                 command_runner=self._config.command_runner,
+                safe_extra_commands=self._config.safe_extra_commands,
+                safe_extra_sub_commands=self._config.safe_extra_sub_commands,
             )
             if not ability_instances:
                 # fail-closed：manifest 全 non-builtin/解析出 0 能力时明确报错，
@@ -870,6 +887,8 @@ class CoreUnit:
                         command_runner=self._config.command_runner,
                         auto_approve_abilities=self._config.auto_approve_abilities,
                         require_approval_by_default=(self._config.require_approval_by_default),
+                        safe_extra_commands=self._config.safe_extra_commands,
+                        safe_extra_sub_commands=self._config.safe_extra_sub_commands,
                     )
                     ability_instances.append(ability)
                 except KeyError as e:

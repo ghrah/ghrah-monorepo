@@ -307,3 +307,20 @@ class TestFromEnv:
 
         config = SubjectConfig.from_env()
         assert config.sandbox.workspace_root == str(tmp_path / "env-ws2")
+
+    def test_from_env_safe_extra_commands(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """safe 白名单扩展 env：GHRAH_SUBJECT_SAFE_EXTRA_COMMANDS / _SUB_COMMANDS。"""
+        monkeypatch.setenv("GHRAH_SUBJECT_SAFE_EXTRA_COMMANDS", "pnpm, make; just")
+        monkeypatch.setenv("GHRAH_SUBJECT_SAFE_EXTRA_SUB_COMMANDS", "pnpm:test,type-check; uv:run")
+
+        config = SubjectConfig.from_env()
+        assert config.hitl_policy.safe_extra_commands == ["pnpm", "make", "just"]
+        assert config.hitl_policy.safe_extra_sub_commands == {
+            "pnpm": ["test", "type-check"],
+            "uv": ["run"],
+        }
+
+    def test_from_env_safe_extra_commands_default_empty(self) -> None:
+        config = SubjectConfig.from_env()
+        assert config.hitl_policy.safe_extra_commands == []
+        assert config.hitl_policy.safe_extra_sub_commands == {}

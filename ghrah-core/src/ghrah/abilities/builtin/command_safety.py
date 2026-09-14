@@ -276,6 +276,29 @@ class CommandSafetyChecker:
         )
         self._require_approval = require_approval
 
+    def extend_safe_lists(
+        self,
+        extra_commands: set[str] | tuple[str, ...] | list[str] | None = None,
+        extra_sub_commands: dict[str, set[str]] | dict[str, tuple[str, ...]] | None = None,
+    ) -> None:
+        """部署方追加 safe 白名单（与内置名单并集，只增不减）。
+
+        配置驱动通道（Subject env → CoreUnitConfig → 装配点）：追加基础
+        命令与子命令白名单，供 type-check / lint / test 类语义只读命令
+        免审批放行。不收窄内置名单——DANGEROUS 名单不受此影响。
+
+        Args:
+            extra_commands: 追加的基础命令名（小写归一）
+            extra_sub_commands: 追加的子命令白名单（base → subs）
+        """
+        if extra_commands:
+            self._safe_commands = self._safe_commands | {c.lower() for c in extra_commands}
+        if extra_sub_commands:
+            merged = {base: set(subs) for base, subs in self._safe_sub_commands.items()}
+            for base, subs in extra_sub_commands.items():
+                merged[base.lower()] = merged.get(base.lower(), set()) | {s.lower() for s in subs}
+            self._safe_sub_commands = merged
+
     def check_command(self, command: str) -> CommandSafetyVerdict:
         """检查命令安全性。
 

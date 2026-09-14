@@ -331,6 +331,11 @@ def default_core_unit_factory(
             workspace_root=config.workspace_root,
             auto_approve_abilities=tuple(config.hitl_policy.auto_approve_abilities),
             require_approval_by_default=config.hitl_policy.require_approval_by_default,
+            safe_extra_commands=tuple(config.hitl_policy.safe_extra_commands),
+            safe_extra_sub_commands=tuple(
+                (base, tuple(subs))
+                for base, subs in config.hitl_policy.safe_extra_sub_commands.items()
+            ),
             persistence_factory=persistence_factory,
             manifest_store=manifest_store,
             # 部署方显式声明（C2 fail-closed 兼容通道）：空配置 → None →

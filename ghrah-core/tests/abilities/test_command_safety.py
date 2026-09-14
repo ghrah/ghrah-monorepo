@@ -310,3 +310,37 @@ class TestCommandApprovalHook:
         result = await hook.execute(context, None)
         assert result.should_continue is False
         assert result.requires_hitl is False
+
+
+class TestExtendSafeLists:
+    """部署方 safe 白名单扩展（配置驱动，只增不减）。"""
+
+    def test_extra_base_command_becomes_safe(self) -> None:
+        checker = CommandSafetyChecker(require_approval=True)
+        verdict_before = checker.check_command("pnpm build")
+        assert verdict_before.category == CommandSafetyCategory.REQUIRE_HITL
+
+        checker.extend_safe_lists(extra_commands={"pnpm", "make"})
+        assert checker.check_command("pnpm build").category == CommandSafetyCategory.SAFE
+        assert checker.check_command("make").category == CommandSafetyCategory.SAFE
+
+    def test_extra_sub_commands_become_safe(self) -> None:
+        checker = CommandSafetyChecker(require_approval=True)
+        checker.extend_safe_lists(extra_sub_commands={"pnpm": {"test", "type-check"}})
+        assert checker.check_command("pnpm test").category == CommandSafetyCategory.SAFE
+        assert (
+            checker.check_command("pnpm exec biome check").category
+            == CommandSafetyCategory.REQUIRE_HITL  # 未列入的子命令仍需审批
+        )
+
+    def test_extension_does_not_touch_dangerous(self) -> None:
+        checker = CommandSafetyChecker(require_approval=True)
+        checker.extend_safe_lists(extra_commands={"rm"}, extra_sub_commands={"git": {"clean"}})
+        # 只增不减：扩展不能把 DANGEROUS 名单中的命令翻成 SAFE
+        assert checker.check_command("rm -rf /").category == CommandSafetyCategory.DANGEROUS
+        assert checker.check_command("git clean -fdx").category == CommandSafetyCategory.DANGEROUS
+
+    def test_builtin_safe_list_preserved_after_extension(self) -> None:
+        checker = CommandSafetyChecker(require_approval=True)
+        checker.extend_safe_lists(extra_commands={"pnpm"})
+        assert checker.check_command("git status").category == CommandSafetyCategory.SAFE

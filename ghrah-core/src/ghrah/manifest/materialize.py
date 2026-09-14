@@ -120,6 +120,8 @@ def instantiate_resolved_abilities(
     auto_approve_abilities: tuple[str, ...] = (),
     require_approval_by_default: bool = True,
     command_runner: Any = None,
+    safe_extra_commands: tuple[str, ...] = (),
+    safe_extra_sub_commands: tuple[tuple[str, tuple[str, ...]], ...] = (),
 ) -> list[AbilityProtocol]:
     """ResolvedAbility → Ability 实例列表（对齐独立库 runner 范式）。
 
@@ -138,6 +140,8 @@ def instantiate_resolved_abilities(
         require_approval_by_default: manifest 未声明审批要求时的兜底策略
         command_runner: execute_command 能力的命令执行器注入
             （None = standalone 直跑 subprocess）
+        safe_extra_commands: 部署方追加的基础命令 safe 白名单（并集合并）
+        safe_extra_sub_commands: 部署方追加的子命令 safe 白名单（并集合并）
 
     Returns:
         已实例化的 Ability 列表（非 builtin 已跳过 + warning）
@@ -161,6 +165,8 @@ def instantiate_resolved_abilities(
             auto_approved=handler in auto_approve_abilities,
             require_approval_by_default=require_approval_by_default,
             command_runner=command_runner,
+            safe_extra_commands=safe_extra_commands,
+            safe_extra_sub_commands=safe_extra_sub_commands,
         )
         abilities.append(ability)
     return abilities
@@ -175,6 +181,8 @@ def _instantiate_ability(
     auto_approved: bool,
     require_approval_by_default: bool,
     command_runner: Any,
+    safe_extra_commands: tuple[str, ...] = (),
+    safe_extra_sub_commands: tuple[tuple[str, tuple[str, ...]], ...] = (),
 ) -> AbilityProtocol:
     """单个 ResolvedAbility → Ability（对齐 runner._instantiate_ability）。"""
     permissions = ra.permissions
@@ -207,6 +215,8 @@ def _instantiate_ability(
             auto_approved=auto_approved,
             require_approval_by_default=require_approval_by_default,
             command_runner=command_runner,
+            safe_extra_commands=safe_extra_commands,
+            safe_extra_sub_commands=safe_extra_sub_commands,
         )
         params: dict[str, Any] = {
             "command_checker": command_checker,
@@ -283,6 +293,8 @@ def _make_command_approval(
     auto_approved: bool,
     require_approval_by_default: bool,
     command_runner: Any,
+    safe_extra_commands: tuple[str, ...] = (),
+    safe_extra_sub_commands: tuple[tuple[str, tuple[str, ...]], ...] = (),
 ) -> tuple[CommandSafetyChecker, list[CommandApprovalHook]]:
     """execute_command 审批构造（对齐 _create_ability_from_def 的 execute_command 分支）。"""
     if auto_approved:
@@ -290,4 +302,11 @@ def _make_command_approval(
     else:
         require_approval = bool(permissions.require_hitl) or require_approval_by_default
     command_checker = CommandSafetyChecker(require_approval=require_approval)
+    # 部署方 safe 白名单扩展（只增不减，与内置并集）
+    if safe_extra_commands or safe_extra_sub_commands:
+        sub_map = dict(safe_extra_sub_commands) if safe_extra_sub_commands else None
+        command_checker.extend_safe_lists(
+            extra_commands=safe_extra_commands,
+            extra_sub_commands=sub_map,
+        )
     return command_checker, [CommandApprovalHook(command_checker)]
