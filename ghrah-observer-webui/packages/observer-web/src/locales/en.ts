@@ -148,6 +148,7 @@ export default {
       toTarget: "To {'@'}{name}...",
       broadcast: "Message this room (broadcast); {'@'}name or chips to target...",
       send: "Send",
+      hint: "Enter to send · Shift+Enter for newline",
     },
     header: {
       you: "you",

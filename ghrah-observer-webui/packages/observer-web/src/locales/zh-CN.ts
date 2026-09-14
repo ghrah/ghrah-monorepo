@@ -143,6 +143,7 @@ export default {
       toTarget: "发送给 {'@'}{name}...",
       broadcast: "向此 room 广播；可用 {'@'}name 或 chips 指定目标...",
       send: "发送",
+      hint: "Enter 发送 · Shift+Enter 换行",
     },
     header: {
       you: "你",

@@ -205,8 +205,8 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
           </div>
         </template>
 
-        <!-- 无块：纯 content -->
-        <span v-else class="text-base">{{ entry.content }}</span>
+        <!-- 无块：纯 content（与富块 text 同走 Markdown 渲染） -->
+        <div v-else class="markdown-body" v-html="renderMarkdown(entry.content)" />
       </div>
     </div>
 
@@ -333,5 +333,84 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
 }
 :root.dark .markdown-body :deep(pre) {
   background: rgba(0, 0, 0, 0.3);
+}
+
+/* 列表：UnoCSS preflight 会重置 list-style 与缩进，此处恢复 */
+.markdown-body :deep(ul) {
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
+  list-style-type: disc;
+}
+.markdown-body :deep(ol) {
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
+  list-style-type: decimal;
+}
+.markdown-body :deep(li) {
+  margin: 0.125rem 0;
+}
+
+/* 行内 code（pre 内的 code 由 pre 自身提供背景，去重） */
+.markdown-body :deep(code) {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 0.25rem;
+  padding: 0 0.25rem;
+  font-size: 0.875rem;
+}
+.markdown-body :deep(pre code) {
+  background: transparent;
+  padding: 0;
+}
+:root.dark .markdown-body :deep(code) {
+  background: rgba(255, 255, 255, 0.12);
+}
+:root.dark .markdown-body :deep(pre code) {
+  background: transparent;
+}
+
+.markdown-body :deep(a) {
+  text-decoration: underline;
+}
+
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  font-weight: 600;
+  margin: 0.25rem 0;
+}
+.markdown-body :deep(h1) {
+  font-size: 1.125rem;
+}
+.markdown-body :deep(h2) {
+  font-size: 1rem;
+}
+.markdown-body :deep(h3),
+.markdown-body :deep(h4) {
+  font-size: 0.9375rem;
+}
+
+.markdown-body :deep(blockquote) {
+  margin: 0.25rem 0;
+  padding-left: 0.5rem;
+  border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+:root.dark .markdown-body :deep(blockquote) {
+  border-left-color: rgba(255, 255, 255, 0.2);
+}
+
+.markdown-body :deep(table) {
+  border-collapse: collapse;
+  margin: 0.25rem 0;
+  font-size: 0.875rem;
+}
+.markdown-body :deep(th),
+.markdown-body :deep(td) {
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  padding: 0.25rem 0.5rem;
+}
+:root.dark .markdown-body :deep(th),
+:root.dark .markdown-body :deep(td) {
+  border-color: rgba(255, 255, 255, 0.2);
 }
 </style>

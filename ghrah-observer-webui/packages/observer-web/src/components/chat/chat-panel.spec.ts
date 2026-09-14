@@ -131,7 +131,7 @@ describe("ChatPanel", () => {
     roomSendMock.mockResolvedValueOnce({ success: true });
     const wrapper = mount(ChatPanel);
     await wrapper.vm.$nextTick();
-    await wrapper.find('input[type="text"]').setValue("hello room");
+    await wrapper.find("textarea").setValue("hello room");
     await wrapper.find("form").trigger("submit");
     expect(roomSendMock).toHaveBeenCalledWith("r1", "hello room", []);
     const pending = chat.allEntries.find((e) => e.content === "hello room");
@@ -145,7 +145,7 @@ describe("ChatPanel", () => {
     roomSendMock.mockResolvedValueOnce({ success: true });
     const wrapper = mount(ChatPanel);
     await wrapper.vm.$nextTick();
-    await wrapper.find('input[type="text"]').setValue("echo me");
+    await wrapper.find("textarea").setValue("echo me");
     await wrapper.find("form").trigger("submit");
     expect(wrapper.text()).toContain("echo me");
     // 模拟 bind 的 ROOM_LOG_APPENDED 分发：rooms 追加 + chat echo 确认
@@ -166,7 +166,7 @@ describe("ChatPanel", () => {
     roomSendMock.mockResolvedValueOnce(null);
     const wrapper = mount(ChatPanel);
     await wrapper.vm.$nextTick();
-    await wrapper.find('input[type="text"]').setValue("boom");
+    await wrapper.find("textarea").setValue("boom");
     await wrapper.find("form").trigger("submit");
     await vi.waitFor(() => {
       expect(chat.allEntries.some((e) => e.error)).toBe(true);
@@ -187,7 +187,7 @@ describe("ChatPanel", () => {
     await wrapper.vm.$nextTick();
     const chips = wrapper.findAll('button[type="button"]');
     await chips[0].trigger("click"); // @frontend
-    await wrapper.find('input[type="text"]').setValue("please review");
+    await wrapper.find("textarea").setValue("please review");
     await wrapper.find("form").trigger("submit");
     expect(roomSendMock).toHaveBeenCalledWith("r1", "please review", ["frontend"]);
   });
@@ -213,5 +213,16 @@ describe("ChatPanel", () => {
     await wrapper.vm.$nextTick();
     await wrapper.find("form").trigger("submit");
     expect(roomSendMock).not.toHaveBeenCalled();
+  });
+
+  it("无块回退分支走 Markdown 渲染", async () => {
+    const { rooms } = setup();
+    rooms.setActiveRoom("r1");
+    rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "**bold** log entry")]);
+    const wrapper = mount(ChatPanel);
+    await wrapper.vm.$nextTick();
+    const body = wrapper.find(".chat-entry .markdown-body");
+    expect(body.exists()).toBe(true);
+    expect(body.html()).toContain("<strong>bold</strong>");
   });
 });

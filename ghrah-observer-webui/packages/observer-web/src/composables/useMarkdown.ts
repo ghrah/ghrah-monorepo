@@ -15,7 +15,9 @@ function validateLink(rawUrl: string): boolean {
 const md = new MarkdownIt({
   html: false,
   linkify: true,
-  breaks: false,
+  // 聊天场景唯一消费方是 chat-panel：多行消息的单换行语义必须保留（转 <br>）；
+  // 列表/代码块等块级语法不受影响。
+  breaks: true,
 });
 md.validateLink = validateLink;
 

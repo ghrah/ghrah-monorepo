@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRoomsStore } from "@ghrah/observer-core";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
@@ -11,7 +11,32 @@ const emit = defineEmits<{ send: [targets: string[], content: string] }>();
 const rooms = useRoomsStore();
 
 const input = ref("");
+const inputEl = ref<HTMLTextAreaElement | null>(null);
 const selectedTargets = ref<Set<string>>(new Set());
+
+/** autosize：内容变化时高度自适应；CSS max-h-40 封顶后转滚动。
+ *  happy-dom 无真实布局（scrollHeight=0），单测中此函数为无害空转。 */
+function autosize() {
+  const el = inputEl.value;
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${el.scrollHeight}px`;
+}
+
+watch(input, () => {
+  autosize();
+});
+
+/** 键位接管：textarea 的 Enter 不再触发 form submit（HTML 规范仅单行输入隐式提交）。
+ *  Enter（无 Shift、非 IME 组合期）→ 发送；Shift+Enter → 默认插入换行；
+ *  Ctrl/Cmd+Enter 顺带覆盖（保持旧快捷键）；isComposing 期间忽略，保证中文候选词确认。 */
+function onKeydown(e: KeyboardEvent) {
+  if (e.key !== "Enter") return;
+  if (e.isComposing) return;
+  if (e.shiftKey) return;
+  e.preventDefault();
+  handleSubmit();
+}
 
 /** 候选 = 当前 room 的 agent 成员（定向范围不超出本 room）。 */
 const memberAgents = computed(() =>
@@ -25,8 +50,8 @@ const mentionQuery = computed(() => {
   const v = input.value;
   if (!v.startsWith("@")) return null;
   const rest = v.slice(1);
-  // 仅当尚未空格分隔（仍在输入 name 阶段）时弹补全
-  if (rest.includes(" ")) return null;
+  // 仅当尚未空白符分隔（仍在输入 name 阶段）时弹补全；换行与空格同义（多行输入场景）
+  if (/\s/.test(rest)) return null;
   return rest.toLowerCase();
 });
 
@@ -121,13 +146,14 @@ const placeholder = computed(() =>
     </div>
 
     <div class="relative flex gap-2">
-      <input
+      <textarea
+        ref="inputEl"
         v-model="input"
-        type="text"
+        rows="1"
         :disabled="props.disabled"
-        class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm dark:text-gray-100 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm dark:text-gray-100 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed resize-none overflow-y-auto max-h-40"
         :placeholder="placeholder"
-        @keydown.ctrl.enter="handleSubmit"
+        @keydown="onKeydown"
       />
       <!-- @-补全下拉 -->
       <ul
@@ -151,5 +177,7 @@ const placeholder = computed(() =>
         {{ t("chat.input.send") }}
       </button>
     </div>
+
+    <div class="text-xs text-gray-400 dark:text-gray-500">{{ t("chat.input.hint") }}</div>
   </form>
 </template>
