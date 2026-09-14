@@ -8,24 +8,13 @@ import AgentActionMenu from "./agent-action-menu.vue";
 
 const agentCompactContext = vi.fn();
 const terminateAgent = vi.fn();
-const createWorkspace = vi.fn();
-const workspaceSnapshot = vi.fn();
-const workspaceDiff = vi.fn();
 
 vi.mock("@/composables/useObserver", () => ({
   useObserver: () => ({
     agentCompactContext,
     terminateAgent,
-    createWorkspace,
-    workspaceSnapshot,
-    workspaceDiff,
     error: { value: null },
   }),
-}));
-
-// 隔离 MonacoDiff（其 monaco-editor 依赖链在测试环境不可解析）
-vi.mock("@/components/monaco-diff.vue", () => ({
-  default: { template: "<div />" },
 }));
 
 function mountMenu() {
@@ -42,9 +31,7 @@ describe("AgentActionMenu compact context", () => {
     agentCompactContext.mockReset();
     agentCompactContext.mockResolvedValue({ success: true, data: { executed: true } });
     terminateAgent.mockReset();
-    createWorkspace.mockReset();
-    workspaceSnapshot.mockReset();
-    workspaceDiff.mockReset();
+    terminateAgent.mockResolvedValue({ success: true, data: {} });
     const agents = useAgentsStore();
     agents.selectAgent({ projectId: "p1", agentId: "a1", agentName: "coder" });
   });
@@ -86,5 +73,41 @@ describe("AgentActionMenu compact context", () => {
     await compactButton!.trigger("click");
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain("Not connected to server");
+  });
+});
+
+describe("AgentActionMenu menu chrome", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    agentCompactContext.mockReset();
+    agentCompactContext.mockResolvedValue({ success: true, data: { executed: true } });
+    terminateAgent.mockReset();
+    terminateAgent.mockResolvedValue({ success: true, data: {} });
+    const agents = useAgentsStore();
+    agents.selectAgent({ projectId: "p1", agentId: "a1", agentName: "coder" });
+  });
+
+  it("only offers compact and terminate actions", async () => {
+    const wrapper = mountMenu();
+    await openMenu(wrapper);
+    const labels = wrapper.findAll(".agent-menu-item").map((b) => b.text());
+    expect(labels).toEqual(["Compact Context", "Terminate Agent"]);
+    expect(wrapper.find(".agent-menu-header").text()).toBe("coder");
+  });
+
+  it("closes on Escape", async () => {
+    const wrapper = mountMenu();
+    await openMenu(wrapper);
+    expect(wrapper.find(".agent-menu").exists()).toBe(true);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".agent-menu").exists()).toBe(false);
+  });
+
+  it("closes on outside click", async () => {
+    const wrapper = mountMenu();
+    await openMenu(wrapper);
+    await wrapper.find(".fixed.inset-0").trigger("click");
+    expect(wrapper.find(".agent-menu").exists()).toBe(false);
   });
 });

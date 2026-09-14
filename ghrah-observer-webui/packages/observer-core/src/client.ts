@@ -428,42 +428,6 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
-  async workspaceSnapshot(target: AgentTarget, message = ""): Promise<CommandResultPayload> {
-    const msg: ServerMessage = {
-      type: CommandType.WORKSPACE_SNAPSHOT,
-      payload: { ...agentTargetPayload(target), message },
-      request_id: generateRequestId(),
-      client_type: ClientType.OBSERVER,
-    };
-    return this.request(msg, 30_000);
-  }
-
-  async workspaceRollback(target: AgentTarget, snapshotId: string): Promise<CommandResultPayload> {
-    const msg: ServerMessage = {
-      type: CommandType.WORKSPACE_ROLLBACK,
-      payload: { ...agentTargetPayload(target), snapshot_id: snapshotId },
-      request_id: generateRequestId(),
-      client_type: ClientType.OBSERVER,
-    };
-    return this.request(msg, 30_000);
-  }
-
-  async workspaceDiff(
-    target: AgentTarget,
-    snapshotId?: string | null,
-  ): Promise<CommandResultPayload> {
-    const payload: Record<string, unknown> = agentTargetPayload(target);
-    if (snapshotId != null) payload["snapshot_id"] = snapshotId;
-
-    const msg: ServerMessage = {
-      type: CommandType.WORKSPACE_DIFF,
-      payload,
-      request_id: generateRequestId(),
-      client_type: ClientType.OBSERVER,
-    };
-    return this.request(msg, 30_000);
-  }
-
   async workspaceStatus(target: AgentTarget): Promise<CommandResultPayload> {
     const msg: ServerMessage = {
       type: CommandType.WORKSPACE_STATUS,

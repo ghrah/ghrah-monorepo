@@ -161,18 +161,6 @@ export function useObserver() {
     return withClient((c) => c.agentCompactContext(target));
   }
 
-  async function createWorkspace(target: AgentTarget) {
-    return withClient((c) => c.createWorkspace(target));
-  }
-
-  async function workspaceSnapshot(target: AgentTarget, message = "") {
-    return withClient((c) => c.workspaceSnapshot(target, message));
-  }
-
-  async function workspaceDiff(target: AgentTarget, snapshotId?: string | null) {
-    return withClient((c) => c.workspaceDiff(target, snapshotId ?? undefined));
-  }
-
   // ── Room / Project / 导航 ──
 
   /** 人类向 room 发消息（author 默认对齐 DEFAULT_HUMAN_AUTHOR）。 */
@@ -436,9 +424,6 @@ export function useObserver() {
     spawnAgent,
     terminateAgent,
     agentCompactContext,
-    createWorkspace,
-    workspaceSnapshot,
-    workspaceDiff,
     roomSend,
     listRooms,
     createRoom,

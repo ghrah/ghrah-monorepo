@@ -10,6 +10,31 @@
 - `ghrah-observer-webui/` — TS 观察端（pnpm workspace: packages/* + vscode-extension）
 - `scripts/start_all.py` — 全栈一键启动入口（subject :4112 内嵌 Core + webui dev :5173）
 
+## 架构原则（SSOT / CQRS）
+
+分布式下组件不共享内存、只共享消息，因此每一个被多方共享的"事实"必须有**唯一的权威来源**；其余副本只能是**派生**（生成 / 校验 / 读通 / 缓存），且必须**单向、可重建**。
+
+- **单一权威**：写同一份逻辑状态或定义的路径只能有一条。禁止任何形式的第二写路径（尤其"事件驱动落库"式投影写回）。
+- **派生副本**：不得独立写；必须能从权威完整重建；同步方向单向且幂等。
+- **判断标准**：一份副本若能被独立写、或不能从权威重建，它就不是副本，而是第二权威（违规）。
+
+### 本仓的 CQRS 模型（现状）
+
+- **写侧权威**：Core `ContextManager` 的 sqlite（ActionChain / session / branch / messages 的唯一真相源）。
+- **读侧投影**：
+  - Subject `ActionChainLedger` 为**只读投影**，经同文件 WAL 双连接直读 Core sqlite，**无写侧**；
+  - Observer stores 由 `core:*` 事件驱动实时更新，并在（重）连接时经 `get_chain_history` 从权威**重建**——事件是实时投影，读通量是重建路径。
+- **契约平面**：`ghrah-protocol` 是 wire 契约的唯一权威；TS `packages/protocol` 与其对齐（双侧同步 + 一致性测试），不得单侧手改。
+- **身份/请求关联**：HITL pending 的权威是 Core `HITLPromiseRegistry`（`promise_id`）；Observer 只持 `promise_id` 引用，不复制真相。
+
+### 新增共享状态/事件时的检查清单
+
+1. 这份事实的唯一权威在哪（谁写）？
+2. 其他出现的地方是生成 / 校验 / 读通 / 缓存？能否被独立写？
+3. 能否从权威重建？重建指令是什么？
+4. 是否引入了第二条写路径？
+5. 跨机部署后此方案是否仍成立？（读通式投影依赖共享存储边界；跨机须改为"权威 + 单向复制/CDC + 可重建投影"）
+
 ## 工具链
 
 - Python：uv（单一 `uv.lock` 在根；**成员内禁止 `uv lock`**）

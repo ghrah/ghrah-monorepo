@@ -15,7 +15,7 @@ import { mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// 隔离 AgentActionMenu（其 monaco-diff 依赖链在测试环境不可解析）
+// 隔离 AgentActionMenu（与本组件渲染无关的动作浮层）
 vi.mock("@/components/agent-action-menu.vue", () => ({
   default: { template: "<div />" },
 }));
