@@ -270,9 +270,77 @@ class TestLocalAbilityExecutor:
         asyncio.create_task(reject())
 
         result = await executor.execute_ability(ability, context)
-        # HITL 拒绝后应返回 FAILURE 且包含 hitl_rejected 标记
+        # HITL 拒绝后应返回 FAILURE 且包含 hitl_rejected 标记与归因字段
         assert result.outcome == ActionOutcome.FAILURE
         assert result.data.get("hitl_rejected") is True
+        assert result.data.get("promise_id")  # 归因字段随终态回执下发
+        assert result.data.get("tool_call_id") == "call_hitl_reject"
+
+    @pytest.mark.asyncio
+    async def test_execute_ability_hitl_rejected_reason_passthrough(self):
+        """审批人拒绝理由（HITLResult.result）须透传进错误信息，不被丢弃。"""
+        ability = MockAbility()
+        hook = HITLBlockingHook(
+            target_ability="execute_command", message="Command requires approval"
+        )
+        executor = LocalAbilityExecutor(
+            agent_name="test-agent",
+            hooks=[hook],
+            hitl_timeout=5.0,
+        )
+
+        context = AbilityExecutionContext(
+            current_ability_name="execute_command",
+            tool_args={"command": "pnpm type-check", "call_id": "call_reason"},
+            agent_state={},
+            accumulated_data={},
+        )
+
+        async def reject_with_reason():
+            await asyncio.sleep(0.1)
+            executor.receive_hitl_response(
+                ability_name="execute_command",
+                tool_call_id="call_reason",
+                approved=False,
+                # unit._handle_hitl_response 组装的形状：{"reason": <UI 填写的理由>}
+                result={"reason": "too risky for this workspace"},
+            )
+
+        asyncio.create_task(reject_with_reason())
+
+        result = await executor.execute_ability(ability, context)
+        assert result.outcome == ActionOutcome.FAILURE
+        assert result.data.get("hitl_rejected") is True
+        # 拒绝理由到达 LLM 上下文（bug A 修复点）
+        assert "too risky for this workspace" in result.data.get("error", "")
+
+    @pytest.mark.asyncio
+    async def test_execute_ability_hitl_timeout_attribution(self):
+        """超时错误须携带命令摘要与归因 id（并行双超时可归因到具体调用）。"""
+        ability = MockAbility()
+        hook = HITLBlockingHook(
+            target_ability="execute_command", message="Command requires approval"
+        )
+        executor = LocalAbilityExecutor(
+            agent_name="test-agent",
+            hooks=[hook],
+            hitl_timeout=0.05,
+        )
+
+        context = AbilityExecutionContext(
+            current_ability_name="execute_command",
+            tool_args={"command": "pnpm build", "call_id": "call_t1"},
+            agent_state={},
+            accumulated_data={},
+        )
+
+        result = await executor.execute_ability(ability, context)
+        assert result.outcome == ActionOutcome.FAILURE
+        assert result.data.get("hitl_timeout") is True
+        assert result.data.get("promise_id")
+        assert result.data.get("tool_call_id") == "call_t1"
+        # 命令摘要进错误文本，并行超时可凭命令归因
+        assert "pnpm build" in result.data.get("error", "")
 
     @pytest.mark.asyncio
     async def test_execute_ability_with_post_execute_hook(self):
@@ -488,7 +556,9 @@ class TestLocalAbilityExecutor:
         asyncio.create_task(approve_after_delay())
 
         result = await executor.handle_hitl_hook_result(hook_result, context)
-        assert result == "approved"  # 审批通过
+        assert result.outcome == "approved"  # 审批通过
+        assert result.promise_id  # 归因字段随回执下发
+        assert result.tool_call_id == "call_789"
 
         # promise 已随审批终结移除（无注册表时跳过）
         assert executor.hitl_promise_registry is None
@@ -521,7 +591,9 @@ class TestLocalAbilityExecutor:
         asyncio.create_task(reject_after_delay())
 
         result = await executor.handle_hitl_hook_result(hook_result, context)
-        assert result == "rejected"  # 审批拒绝
+        assert result.outcome == "rejected"  # 审批拒绝
+        assert result.promise_id
+        assert result.tool_call_id == "call_101"
 
     @pytest.mark.asyncio
     async def test_handle_hitl_hook_result_timeout(self):
@@ -541,7 +613,9 @@ class TestLocalAbilityExecutor:
 
         # 不 resolve Future，等待超时
         result = await executor.handle_hitl_hook_result(hook_result, context)
-        assert result == "timeout"  # 超时与拒绝语义分离
+        assert result.outcome == "timeout"  # 超时与拒绝语义分离
+        assert result.promise_id  # 超时也带归因字段（并行超时可归因）
+        assert result.tool_call_id  # 无 call_id 时兜底生成
 
     def test_receive_hitl_response_no_pending_future(self):
         """测试没有等待中的 Future 时接收 HITL 响应。"""
@@ -613,7 +687,7 @@ class TestLocalAbilityExecutor:
 
         # 超时路径：promise 登记后按三元组惰性清除
         outcome = await executor.handle_hitl_hook_result(hook_result, context)
-        assert outcome == "timeout"
+        assert outcome.outcome == "timeout"
         request_event = mock_publisher.publish.await_args_list[0][0][0]
         assert registry.resolve(request_event.promise_id) is None
 
@@ -628,7 +702,7 @@ class TestLocalAbilityExecutor:
 
         asyncio.create_task(approve_after_delay())
         outcome = await executor.handle_hitl_hook_result(hook_result, context)
-        assert outcome == "approved"
+        assert outcome.outcome == "approved"
         request_event2 = mock_publisher.publish.await_args_list[-2][0][0]
         assert isinstance(request_event2, HITLRequestEvent)
         assert registry.resolve(request_event2.promise_id) is None  # 已消费

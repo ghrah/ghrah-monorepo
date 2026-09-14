@@ -20,6 +20,7 @@ import copy
 import logging
 import uuid
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -45,11 +46,27 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "AbilityExecutor",
     "HitlOutcome",
+    "HITLWaitResult",
     "LocalAbilityExecutor",
 ]
 
 # HITL 审批终态：批准 / 人工拒绝 / 等待超时
 HitlOutcome = Literal["approved", "rejected", "timeout"]
+
+
+@dataclass(frozen=True)
+class HITLWaitResult:
+    """HITL 等待终态回执（携带归因字段）。
+
+    agent 侧错误自足的最小信息面：outcome 之外附 promise_id / tool_call_id
+    （并行工具调用各自超时时可归因到具体调用），rejected 时携带审批人
+    拒绝理由（HITLResult.result 中 unit 组装的 {"reason": ...}）。
+    """
+
+    outcome: HitlOutcome
+    promise_id: str = ""
+    tool_call_id: str = ""
+    reason: Any = None
 
 
 class AbilityExecutor(ABC):
@@ -113,7 +130,7 @@ class AbilityExecutor(ABC):
         self,
         hook_result: HookResult,
         context: AbilityExecutionContext,
-    ) -> HitlOutcome:
+    ) -> HITLWaitResult:
         """处理 HITL Hook 结果。
 
         当 PRE_EXECUTE Hook 返回 should_continue=False 且 requires_hitl=True 时，
@@ -124,7 +141,8 @@ class AbilityExecutor(ABC):
             context: 当前执行上下文
 
         Returns:
-            审批终态："approved"（继续执行）/ "rejected"（人工拒绝）/ "timeout"（等待超时）
+            审批终态回执：outcome（"approved" / "rejected" / "timeout"）
+            附 promise_id / tool_call_id / 拒绝理由（归因字段）
         """
         ...
 
@@ -290,27 +308,39 @@ class LocalAbilityExecutor(AbilityExecutor):
             if not hook_result.should_continue:
                 if hook_result.requires_hitl:
                     # 需要 HITL 审批：创建 Future 等待人工审批
-                    hitl_outcome = await self.handle_hitl_hook_result(hook_result, context)
-                    if hitl_outcome != "approved":
+                    hitl_wait = await self.handle_hitl_hook_result(hook_result, context)
+                    if hitl_wait.outcome != "approved":
                         # 人工拒绝或等待超时——错误信息区分两者，超时不得
                         # 折算成"用户拒绝"信号进 LLM 上下文
-                        if hitl_outcome == "timeout":
+                        attribution = self._hitl_attribution(hitl_wait, context)
+                        if hitl_wait.outcome == "timeout":
                             return ActionResult(
                                 outcome=ActionOutcome.FAILURE,
                                 data={
                                     "error": (
                                         f"HITL approval timed out after {self._hitl_timeout}s "
-                                        f"with no response delivered; "
-                                        f"ability={context.current_ability_name}"
+                                        f"with no response delivered; {attribution}"
                                     ),
                                     "hitl_timeout": True,
+                                    "promise_id": hitl_wait.promise_id,
+                                    "tool_call_id": hitl_wait.tool_call_id,
                                 },
                             )
+                        # 人工拒绝：优先透传审批人填写的理由（unit 组装进
+                        # HITLResult.result），无理由时退回 hook 拦截原因
+                        reason = self._extract_reject_reason(hitl_wait.reason)
+                        error_msg = (
+                            f"HITL request rejected by human: {reason}"
+                            if reason
+                            else (hook_result.message or "Execution blocked by HITL")
+                        )
                         return ActionResult(
                             outcome=ActionOutcome.FAILURE,
                             data={
-                                "error": hook_result.message or "Execution blocked by HITL",
+                                "error": error_msg,
                                 "hitl_rejected": True,
+                                "promise_id": hitl_wait.promise_id,
+                                "tool_call_id": hitl_wait.tool_call_id,
                             },
                         )
                     # HITL 批准，继续执行
@@ -497,11 +527,39 @@ class LocalAbilityExecutor(AbilityExecutor):
 
         return resolved
 
+    @staticmethod
+    def _hitl_attribution(hitl_wait: HITLWaitResult, context: AbilityExecutionContext) -> str:
+        """组装超时错误的归因片段（ability + 调用参数摘要 + promise/tool_call id）。
+
+        并行工具调用各自超时时，LLM 凭参数摘要与 id 将报错归因到具体调用。
+        摘要取 tool_args 中的 command / file_path / dir_path，无则退 ability 名。
+        """
+        args = context.tool_args or {}
+        summary = (
+            args.get("command") or args.get("file_path") or args.get("dir_path") or args.get("path")
+        )
+        if summary:
+            target = f"{context.current_ability_name}({summary})"
+        else:
+            target = context.current_ability_name
+        return (
+            f"ability={target}, promise_id={hitl_wait.promise_id}, "
+            f"tool_call_id={hitl_wait.tool_call_id}"
+        )
+
+    @staticmethod
+    def _extract_reject_reason(reason: Any) -> str:
+        """从 HITLResult.result 提取审批人拒绝理由（unit 组装的 {"reason": ...}）。"""
+        if isinstance(reason, dict):
+            value = reason.get("reason")
+            return value.strip() if isinstance(value, str) else ""
+        return reason.strip() if isinstance(reason, str) and reason.strip() else ""
+
     async def handle_hitl_hook_result(
         self,
         hook_result: HookResult,
         context: AbilityExecutionContext,
-    ) -> HitlOutcome:
+    ) -> HITLWaitResult:
         """处理 HITL Hook 结果。
 
         在单体模式下，创建 asyncio.Future 等待 HITL 审批：
@@ -514,7 +572,7 @@ class LocalAbilityExecutor(AbilityExecutor):
             context: 当前执行上下文
 
         Returns:
-            审批终态："approved" / "rejected" / "timeout"
+            审批终态回执：outcome 附 promise_id / tool_call_id / 拒绝理由（归因字段）
         """
         # 生成 tool_call_id 与 promise_id
         tool_call_id = context.tool_args.get("call_id", "") or uuid.uuid4().hex[:12]
@@ -564,7 +622,12 @@ class LocalAbilityExecutor(AbilityExecutor):
                     status=outcome,
                 )
             )
-            return outcome
+            return HITLWaitResult(
+                outcome=outcome,
+                promise_id=promise_id,
+                tool_call_id=tool_call_id,
+                reason=hitl_result.result,
+            )
         except TimeoutError:
             logger.warning(
                 f"LocalAbilityExecutor[{self._agent_name}] HITL request timed out: "
@@ -585,7 +648,11 @@ class LocalAbilityExecutor(AbilityExecutor):
                     status="timeout",
                 )
             )
-            return "timeout"
+            return HITLWaitResult(
+                outcome="timeout",
+                promise_id=promise_id,
+                tool_call_id=tool_call_id,
+            )
 
     def receive_hitl_response(
         self,
