@@ -138,6 +138,12 @@ class AgentConfig:
         cluster_context_injection: 集群身份注入开关——True 时 AgentBuilder
             在 system_prompt 头部拼接 [Cluster Context] 段（cluster_id +
             成员清单）。默认 False（零隐式：prompt 内容不因挂进集群而变化）
+        environment_context_injection: 环境信息注入开关——True 且
+            environment_info 提供时，AgentBuilder 在 system_prompt 头部拼接
+            [Environment] 段（授权根/工作区/部署形态/HITL 参数）。默认 False
+        environment_info: 环境快照（CoreUnit spawn 流程组装：deployment/
+            workspace_root/allowed_roots/hitl_timeout 等）；仅注入用，
+            不参与任何运行时判定
     """
 
     name: str
@@ -153,6 +159,8 @@ class AgentConfig:
     model_overrides: ModelOverrides | None = None
     workspace_root: str | None = None
     cluster_context_injection: bool = False
+    environment_context_injection: bool = False
+    environment_info: dict[str, Any] | None = None
 
     @property
     def effective_agent_config_name(self) -> str:

@@ -137,6 +137,9 @@ class CoreUnitConfig:
             错误中声明审批通道疑似离线（引导 agent 收敛/end_task）；任何
             approve/reject 即复位。0 = 禁用（默认，零隐式）。
         hitl_degraded_timeout: 熔断降级后的 HITL 等待秒数。
+        environment_injection: 环境信息注入开关——True 时 spawn 流程组装
+            环境快照（部署形态/授权根/HITL 参数）注入 AgentConfig，经
+            AgentBuilder 渲染 [Environment] prompt 段。默认 False（零隐式）。
         command_runner: execute_command 能力的命令执行器注入（per-cluster
             构造期注入，duck-typed ``run_command``；None = standalone 直跑
             subprocess）。Subject 挂载模式下传 SandboxExecutor。
@@ -167,6 +170,7 @@ class CoreUnitConfig:
     safe_extra_sub_commands: tuple[tuple[str, tuple[str, ...]], ...] = ()
     hitl_consecutive_timeout_limit: int = 0
     hitl_degraded_timeout: float = 30.0
+    environment_injection: bool = False
     command_runner: Any = None
     persistence_factory: Callable[[Any], Any] | None = None
     # duck-typed ManifestStoreProtocol；None = standalone（manifest_ref spawn 报错）
@@ -768,6 +772,73 @@ class CoreUnit:
         if self._agent_id_for_name(agent_name) != agent_id:
             raise ValueError("agent_identity_mismatch")
 
+    def _environment_snapshot(self, abilities: list[AbilityProtocol] | None) -> dict[str, Any]:
+        """组装环境快照（[Environment] 注入与 session_info 的静态部分）。
+
+        数据源均为 CoreUnitConfig / 已实例化 ability 的现成事实，本方法
+        只聚合不判定。allowed_roots 从各 FS ability 的 permission_checker
+        property 收集去重。
+
+        Args:
+            abilities: spawn 时实例化的 ability 列表（可为 None）。
+
+        Returns:
+            环境快照 dict（deployment/workspace_root/allowed_roots/hitl 参数等）。
+        """
+        roots: list[str] = []
+        if self._config.workspace_root:
+            roots.append(self._config.workspace_root)
+        for ability in abilities or []:
+            checker = getattr(ability, "_checker", None)
+            if checker is None:
+                continue
+            for prop in ("allowed_paths", "workspace_root"):
+                try:
+                    value = getattr(checker, prop, None)
+                except Exception:
+                    value = None
+                if not value:
+                    continue
+                values = value if isinstance(value, list) else [value]
+                for item in values:
+                    item = str(item)
+                    if item not in roots:
+                        roots.append(item)
+        deployment = "subject-mounted" if self._config.manifest_store is not None else "standalone"
+        return {
+            "deployment": deployment,
+            "project_id": self._config.project_id,
+            "cluster_id": self._config.cluster_id,
+            "workspace_root": self._config.workspace_root,
+            "default_working_dir": self._config.workspace_root,
+            "allowed_roots": roots,
+            "hitl_timeout": self._config.hitl_timeout,
+            "hitl_consecutive_timeout_limit": self._config.hitl_consecutive_timeout_limit,
+            "hitl_degraded_timeout": self._config.hitl_degraded_timeout,
+        }
+
+    @staticmethod
+    def _inject_session_info_snapshot(
+        abilities: list[AbilityProtocol] | None, config: AgentConfig
+    ) -> None:
+        """将环境快照写入已实例化的 SessionInfoAbility（duck-typed best-effort）。
+
+        SessionInfoAbility 经 AbilityRegistry 裸实例化（无参），静态部署
+        快照由本方法在 spawn 装配期回填——快照单一真源在
+        ``_environment_snapshot``，此处只做单向派生注入。
+
+        Args:
+            abilities: spawn 时实例化的 ability 列表（可为 None）。
+            config: 已带 environment_info 的 AgentConfig（快照来源）。
+        """
+        if not config.environment_info:
+            return
+        for ability in abilities or []:
+            if getattr(ability, "name", None) == "session_info" and hasattr(
+                ability, "set_environment_info"
+            ):
+                ability.set_environment_info(config.environment_info)
+
     @staticmethod
     def _ok(data: Any = None) -> dict[str, Any]:
         return {"success": True, "data": data}
@@ -832,6 +903,13 @@ class CoreUnit:
                     resolved.config,
                     agent_id=sp.config.agent_id,
                 )
+                if self._config.environment_injection:
+                    resolved_config = replace(
+                        resolved_config,
+                        environment_context_injection=True,
+                        environment_info=self._environment_snapshot(ability_instances),
+                    )
+                    self._inject_session_info_snapshot(ability_instances, resolved_config)
                 agent_name = await supervisor.spawn_agent(
                     resolved_config,
                     abilities=ability_instances,
@@ -883,6 +961,8 @@ class CoreUnit:
             ),
             workspace_root=self._config.workspace_root,
         )
+        # 环境快照在 abilities 实例化后组装（需从 FS checker 收集授权根）；
+        # 注入开关关闭时 session_info 工具同样拿不到快照——快照仅此一处组装。
 
         ability_instances = None
         if sp.abilities:
@@ -908,6 +988,15 @@ class CoreUnit:
                         f"Invalid params for ability '{ability_def.ability_type}' "
                         f"for agent '{sp.config.name}': {e}"
                     )
+        # 直传路径的快照组装晚于 abilities 实例化（checker 授权根可收集），
+        # 与 manifest_ref 路径共用 _inject_session_info_snapshot。
+        if self._config.environment_injection and ability_instances is not None:
+            core_config = replace(
+                core_config,
+                environment_context_injection=True,
+                environment_info=self._environment_snapshot(ability_instances),
+            )
+            self._inject_session_info_snapshot(ability_instances, core_config)
 
         try:
             agent_name = await supervisor.spawn_agent(

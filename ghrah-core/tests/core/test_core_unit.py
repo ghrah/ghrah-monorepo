@@ -1289,3 +1289,69 @@ async def test_same_name_agents_in_different_clusters_use_uuid_snapshot_keys(
         assert cm.active_head.id == heads[agent_id]
         assert cm.get_current_state() == {"cluster": cluster_id}
         await unit.stop()
+
+
+# ----------------------------------------------------------------
+# 环境信息注入（008 T-2）：spawn 装配接线
+# ----------------------------------------------------------------
+
+
+class TestEnvironmentInjection:
+    async def test_default_off_no_environment(self, unit: CoreUnit) -> None:
+        """开关默认关：spawn 后 config 无 environment 字段（零隐式）。"""
+        await unit.handle_command("spawn_agent", _spawn_payload("env-off"), None)
+        info = unit.supervisor._registry.get_info("env-off")
+        assert info.config.environment_context_injection is False
+        assert info.config.environment_info is None
+
+    async def test_snapshot_wired_into_prompt_and_session_info(self, ctx: FakeCtx) -> None:
+        """开关开启 → 快照注入 AgentConfig + session_info 工具回填。
+
+        直传 abilities 路径：快照组装在 abilities 实例化后（可从 FS
+        checker 收集授权根）。
+        """
+        unit = create_core_unit(
+            CoreUnitConfig(
+                project_id="default",
+                workspace_root="/tmp/kilo/env-ws",
+                environment_injection=True,
+            )
+        )
+        await unit.init(ctx)
+
+        result = await unit.handle_command(
+            "spawn_agent",
+            _spawn_payload_with_abilities(
+                "env-on",
+                [
+                    _ability_def("read_file", {"workspace_root": "/tmp/kilo/env-ws"}),
+                    _ability_def("session_info"),
+                ],
+            ),
+            None,
+        )
+        assert result["success"] is True
+
+        info = unit.supervisor._registry.get_info("env-on")
+        assert info.config.environment_context_injection is True
+        snapshot = info.config.environment_info
+        assert snapshot is not None
+        assert snapshot["deployment"] == "standalone"
+        assert snapshot["workspace_root"] == "/tmp/kilo/env-ws"
+        # FS checker 的 workspace_root 被收进授权根（快照在实例化后组装）
+        assert "/tmp/kilo/env-ws" in snapshot["allowed_roots"]
+
+        # session_info 工具回填同一快照（单一真源派生）
+        actor = _actor_of(unit, "env-on")
+        session_info_ability = actor._abilities["session_info"]
+        assert session_info_ability._environment == snapshot
+
+    async def test_session_info_without_injection_stays_bare(self, unit: CoreUnit) -> None:
+        """开关关闭 → session_info 工具保持裸实例（environment=None）。"""
+        await unit.handle_command(
+            "spawn_agent",
+            _spawn_payload_with_abilities("bare", [_ability_def("session_info")]),
+            None,
+        )
+        actor = _actor_of(unit, "bare")
+        assert actor._abilities["session_info"]._environment is None

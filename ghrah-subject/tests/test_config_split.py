@@ -338,3 +338,24 @@ class TestFromEnv:
         config = SubjectConfig.from_env()
         assert config.hitl_policy.hitl_consecutive_timeout_limit == 3
         assert config.hitl_policy.hitl_degraded_timeout == 15.5
+
+    def test_from_env_environment_injection_default_off(self) -> None:
+        """环境注入 env：默认关（零隐式）。"""
+        config = SubjectConfig.from_env()
+        assert config.hitl_policy.environment_injection is False
+
+    def test_from_env_environment_injection_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_ENVIRONMENT_INJECTION", "true")
+        config = SubjectConfig.from_env()
+        assert config.hitl_policy.environment_injection is True
+
+    def test_from_env_environment_injection_truthy_variants(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """truthy 变体（1/yes）识别；非 truthy 值保持关闭。"""
+        monkeypatch.setenv("GHRAH_SUBJECT_ENVIRONMENT_INJECTION", "1")
+        assert SubjectConfig.from_env().hitl_policy.environment_injection is True
+        monkeypatch.setenv("GHRAH_SUBJECT_ENVIRONMENT_INJECTION", "Yes")
+        assert SubjectConfig.from_env().hitl_policy.environment_injection is True
+        monkeypatch.setenv("GHRAH_SUBJECT_ENVIRONMENT_INJECTION", "false")
+        assert SubjectConfig.from_env().hitl_policy.environment_injection is False

@@ -77,6 +77,8 @@ class HITLPolicyConfig:
     - hitl_consecutive_timeout_limit：连续超时熔断阈值（连续 N 次审批超时后
       后续等待降级为 hitl_degraded_timeout；0 = 禁用，默认零隐式）
     - hitl_degraded_timeout：熔断降级后的等待秒数
+    - environment_injection：环境信息注入开关——True 时 CoreUnit spawn
+      流程组装环境快照注入 [Environment] prompt 段。默认 False（零隐式）
 
     注意：能力的 require_hitl/fs_write/fs_read_only/shell_access 标记
     从 manifest PermissionFlags 中获取，不再在此配置中指定。
@@ -90,6 +92,7 @@ class HITLPolicyConfig:
     safe_extra_sub_commands: dict[str, list[str]] = field(default_factory=dict)
     hitl_consecutive_timeout_limit: int = 0
     hitl_degraded_timeout: float = 30.0
+    environment_injection: bool = False
 
 
 @dataclass
@@ -377,6 +380,7 @@ class SubjectConfig:
           追加子命令 safe 白名单；只增不减，保持 fail-closed）
         - GHRAH_SUBJECT_HITL_CONSECUTIVE_TIMEOUT_LIMIT（连续超时熔断阈值，0=禁用）
         - GHRAH_SUBJECT_HITL_DEGRADED_TIMEOUT（熔断降级后的等待秒数，默认 30）
+        - GHRAH_SUBJECT_ENVIRONMENT_INJECTION（环境信息注入开关，true/false）
         """
         hitl_policy = HITLPolicyConfig(
             auto_approve_abilities=os.environ.get(
@@ -409,6 +413,10 @@ class SubjectConfig:
                 30.0,
                 "GHRAH_SUBJECT_HITL_DEGRADED_TIMEOUT",
             ),
+            environment_injection=os.environ.get(
+                "GHRAH_SUBJECT_ENVIRONMENT_INJECTION", "false"
+            ).lower()
+            in ("true", "1", "yes"),
         )
 
         core = CoreTransportConfig(

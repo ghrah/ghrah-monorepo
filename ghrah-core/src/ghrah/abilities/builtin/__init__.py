@@ -24,6 +24,8 @@
 - TerminateAgentAbility: 终止集群中的 Agent
 - QueryManifestsAbility: 只读查询 agent manifest 定义（含能力清单）
 - SendAbility: 向 room 发消息（send 工具：成员展开 + Supervisor 投递 + RoomLog 落账）
+- RecallContextAbility: 按动作链历史精确回忆消息（compact 配套召回面）
+- SessionInfoAbility: 环境/会话自省（静态部署快照 + 动态运行信息）
 
 权限模块：
 - FSPermissionChecker: 文件系统路径权限检查器
@@ -64,6 +66,7 @@ from ghrah.abilities.builtin.recall_context import RecallContextAbility
 from ghrah.abilities.builtin.search_files import SearchFilesAbility
 from ghrah.abilities.builtin.send import SendAbility
 from ghrah.abilities.builtin.send_message import SendMessageAbility
+from ghrah.abilities.builtin.session_info import SessionInfoAbility
 from ghrah.abilities.builtin.spawn_agent import SpawnAgentAbility
 from ghrah.abilities.builtin.terminate_agent import TerminateAgentAbility
 from ghrah.abilities.builtin.write_file import WriteFileAbility
@@ -92,6 +95,7 @@ __all__ = [
     "QueryManifestsAbility",
     "RecallContextAbility",
     "SendAbility",
+    "SessionInfoAbility",
     # 文件系统权限模块
     "FSPermissionChecker",
     "AccessApprovalHook",

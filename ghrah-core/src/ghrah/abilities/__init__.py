@@ -67,6 +67,7 @@ from ghrah.abilities.builtin.recall_context import RecallContextAbility
 from ghrah.abilities.builtin.search_files import SearchFilesAbility
 from ghrah.abilities.builtin.send import SendAbility
 from ghrah.abilities.builtin.send_message import SendMessageAbility
+from ghrah.abilities.builtin.session_info import SessionInfoAbility
 from ghrah.abilities.builtin.spawn_agent import SpawnAgentAbility
 from ghrah.abilities.builtin.terminate_agent import TerminateAgentAbility
 from ghrah.abilities.builtin.write_file import WriteFileAbility
@@ -160,6 +161,7 @@ def _register_builtin_abilities() -> None:
     AbilityRegistry.register("query_manifests", QueryManifestsAbility)
     AbilityRegistry.register("recall_context", RecallContextAbility)
     AbilityRegistry.register("send", SendAbility)
+    AbilityRegistry.register("session_info", SessionInfoAbility)
 
 
 # 模块加载时自动注册内置 Ability
@@ -222,6 +224,7 @@ __all__ = [
     "QueryManifestsAbility",
     "RecallContextAbility",
     "SendAbility",
+    "SessionInfoAbility",
     # 文件系统权限模块
     "FSPermissionChecker",
     "AccessApprovalHook",

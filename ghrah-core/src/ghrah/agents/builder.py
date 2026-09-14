@@ -118,6 +118,45 @@ def _render_cluster_context_section(cluster_context: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _render_environment_section(environment_info: dict[str, Any]) -> str:
+    """渲染 [Environment] prompt 注入段（授权边界可查询，008 T-2）。
+
+    形状（由 CoreUnit spawn 流程组装快照）：
+        [Environment]
+        deployment: subject-mounted
+        workspace_root: /path/to/ws
+        allowed_roots:
+        - /path/to/ws
+        hitl_timeout: 300s
+        hitl_consecutive_timeout_limit: 0 (disabled)
+
+    Args:
+        environment_info: 环境快照 dict
+
+    Returns:
+        渲染后的 prompt 段（不含尾随空行，由拼接方决定间距）
+    """
+    lines = ["[Environment]"]
+    deployment = environment_info.get("deployment", "")
+    lines.append(f"deployment: {deployment or 'standalone'}")
+    for key in ("workspace_root", "default_working_dir"):
+        value = environment_info.get(key)
+        if value:
+            lines.append(f"{key}: {value}")
+    roots = environment_info.get("allowed_roots") or []
+    if roots:
+        lines.append("allowed_roots:")
+        lines.extend(f"- {root}" for root in roots)
+    hitl_timeout = environment_info.get("hitl_timeout")
+    if hitl_timeout is not None:
+        lines.append(f"hitl_timeout: {hitl_timeout}s")
+    limit = environment_info.get("hitl_consecutive_timeout_limit")
+    if limit:
+        lines.append(f"hitl_consecutive_timeout_limit: {limit}")
+        lines.append(f"hitl_degraded_timeout: {environment_info.get('hitl_degraded_timeout')}s")
+    return "\n".join(lines)
+
+
 def _build_context_manager(
     config: AgentConfig,
     persistence_factory: Callable[[AgentConfig], Any] | None = None,
@@ -163,6 +202,24 @@ def _build_context_manager(
                 "or lacks get_cluster_context — skipping injection for '%s'",
                 config.name,
             )
+
+    # 环境信息注入（[Environment] 段前置；零隐式——须显式开关 + 快照齐备）
+    if config.environment_context_injection and config.environment_info:
+        try:
+            env_section = _render_environment_section(config.environment_info)
+            system_prompt = f"{env_section}\n\n{system_prompt}" if system_prompt else env_section
+        except Exception:
+            logger.warning(
+                "Environment injection failed for agent '%s' — skipping",
+                config.name,
+                exc_info=True,
+            )
+    elif config.environment_context_injection:
+        logger.warning(
+            "environment_context_injection=True but environment_info missing "
+            "— skipping injection for '%s'",
+            config.name,
+        )
 
     window_manager = None
     compact_kwargs: dict[str, Any] = {}

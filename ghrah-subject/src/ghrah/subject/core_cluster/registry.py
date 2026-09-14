@@ -338,6 +338,7 @@ def default_core_unit_factory(
             ),
             hitl_consecutive_timeout_limit=config.hitl_policy.hitl_consecutive_timeout_limit,
             hitl_degraded_timeout=config.hitl_policy.hitl_degraded_timeout,
+            environment_injection=config.hitl_policy.environment_injection,
             persistence_factory=persistence_factory,
             manifest_store=manifest_store,
             # 部署方显式声明（C2 fail-closed 兼容通道）：空配置 → None →
