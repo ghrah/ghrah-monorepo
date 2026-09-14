@@ -115,6 +115,24 @@ class FSPermissionChecker:
             return False
         return self._is_in_allowed_paths(resolved) or self._is_in_workspace(resolved)
 
+    def _describe_allowed_roots(self) -> str:
+        """渲染授权范围描述（越界拒绝报错附带给 agent，边界可查询）。
+
+        汇总 allowed_paths + workspace_root；根数超过 8 个截断（+N more）。
+        全空时返回 "(none configured)"。
+        """
+        roots: list[str] = []
+        if self._allowed_paths is not None:
+            roots.extend(str(p) for p in self._allowed_paths)
+        if self._workspace_root is not None:
+            roots.append(f"{self._workspace_root}/ (workspace)")
+        if not roots:
+            return "(none configured)"
+        if len(roots) > 8:
+            shown = ", ".join(roots[:8])
+            return f"{shown}, +{len(roots) - 8} more"
+        return ", ".join(roots)
+
     def check_access(self, path: str, operation: str = "read") -> tuple[bool, str | None]:
         """统一访问权限检查。
 
@@ -133,7 +151,10 @@ class FSPermissionChecker:
         if self._allowed_paths is None and self._workspace_root is None:
             if self._require_approval:
                 return True, "pending"
-            return False, "Permission denied: no allowed paths configured"
+            return False, (
+                "Permission denied: no allowed paths configured "
+                "(set allowed_paths or workspace_root, or enable require_approval for HITL)"
+            )
 
         if self._is_in_denied_paths(resolved):
             return False, f"Permission denied: {path} is in denied paths"
@@ -144,7 +165,10 @@ class FSPermissionChecker:
         if self._require_approval:
             return True, "pending"
 
-        return False, f"Permission denied: {path} not in allowed paths"
+        return False, (
+            f"Permission denied: {path} not in allowed paths; "
+            f"allowed roots: {self._describe_allowed_roots()}"
+        )
 
     def check_read_path(self, path: str) -> tuple[bool, str | None]:
         """检查读取路径权限。

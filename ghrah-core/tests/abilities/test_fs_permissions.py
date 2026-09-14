@@ -70,6 +70,29 @@ class TestFSPermissionChecker:
         assert allowed is False
         assert "not in allowed paths" in (status or "")
 
+    def test_denied_error_lists_allowed_roots(self) -> None:
+        """越界拒绝报错附允许根列表（fail-closed 不等于 fail-silent）。"""
+        checker = FSPermissionChecker(
+            allowed_paths=["/tmp/data", "/home/user/docs"],
+            workspace_root="/home/user/project",
+            require_approval=False,
+        )
+        allowed, status = checker.check_read_path("/etc/passwd")
+        assert allowed is False
+        assert "allowed roots:" in (status or "")
+        assert "/tmp/data" in (status or "")
+        assert "/home/user/docs" in (status or "")
+        assert "(workspace)" in (status or "")  # workspace_root 一并告知
+
+    def test_denied_error_truncates_many_roots(self) -> None:
+        """授权根超过 8 个时截断（+N more），报错不失控。"""
+        roots = [f"/tmp/root{i}" for i in range(10)]
+        checker = FSPermissionChecker(allowed_paths=roots, require_approval=False)
+        allowed, status = checker.check_read_path("/etc/passwd")
+        assert allowed is False
+        assert "+2 more" in (status or "")
+        assert "/tmp/root9" not in (status or "")
+
     def test_workspace_root_read_in_workspace(self) -> None:
         """路径在工作路径下允许读取。"""
         with tempfile.TemporaryDirectory() as tmpdir:
