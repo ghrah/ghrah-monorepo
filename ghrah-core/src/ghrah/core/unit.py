@@ -132,6 +132,11 @@ class CoreUnitConfig:
             make）。与内置 DEFAULT_SAFE_COMMANDS 并集合并，只增不减。
         safe_extra_sub_commands: 部署方追加的子命令 safe 白名单
             （{"pnpm": ("test", "lint")} 形状），与内置表并集合并。
+        hitl_consecutive_timeout_limit: HITL 连续超时熔断阈值——连续 N 次
+            审批超时后，后续 HITL 等待降级为 hitl_degraded_timeout 并在
+            错误中声明审批通道疑似离线（引导 agent 收敛/end_task）；任何
+            approve/reject 即复位。0 = 禁用（默认，零隐式）。
+        hitl_degraded_timeout: 熔断降级后的 HITL 等待秒数。
         command_runner: execute_command 能力的命令执行器注入（per-cluster
             构造期注入，duck-typed ``run_command``；None = standalone 直跑
             subprocess）。Subject 挂载模式下传 SandboxExecutor。
@@ -160,6 +165,8 @@ class CoreUnitConfig:
     require_approval_by_default: bool = True
     safe_extra_commands: tuple[str, ...] = ()
     safe_extra_sub_commands: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    hitl_consecutive_timeout_limit: int = 0
+    hitl_degraded_timeout: float = 30.0
     command_runner: Any = None
     persistence_factory: Callable[[Any], Any] | None = None
     # duck-typed ManifestStoreProtocol；None = standalone（manifest_ref spawn 报错）
@@ -950,6 +957,9 @@ class CoreUnit:
             executor = getattr(info.actor_handle, "_ability_executor", None)
             if executor is not None and hasattr(executor, "_hitl_timeout"):
                 executor._hitl_timeout = self._config.hitl_timeout
+            if executor is not None and hasattr(executor, "_hitl_timeout_limit"):
+                executor._hitl_timeout_limit = self._config.hitl_consecutive_timeout_limit
+                executor._hitl_degraded_timeout = self._config.hitl_degraded_timeout
             if executor is not None and hasattr(executor, "update_hitl_promise_registry"):
                 executor.update_hitl_promise_registry(self._hitl_promises)
         except Exception:

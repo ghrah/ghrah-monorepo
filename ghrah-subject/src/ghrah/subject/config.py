@@ -74,6 +74,9 @@ class HITLPolicyConfig:
     - safe_extra_commands：部署方追加的基础命令 safe 白名单（如 pnpm、make）
     - safe_extra_sub_commands：部署方追加的子命令 safe 白名单
       （{"pnpm": ("test", "type-check")} 形状；只增不减，保持 fail-closed）
+    - hitl_consecutive_timeout_limit：连续超时熔断阈值（连续 N 次审批超时后
+      后续等待降级为 hitl_degraded_timeout；0 = 禁用，默认零隐式）
+    - hitl_degraded_timeout：熔断降级后的等待秒数
 
     注意：能力的 require_hitl/fs_write/fs_read_only/shell_access 标记
     从 manifest PermissionFlags 中获取，不再在此配置中指定。
@@ -85,6 +88,8 @@ class HITLPolicyConfig:
     workspace_root: str | None = None
     safe_extra_commands: list[str] = field(default_factory=list)
     safe_extra_sub_commands: dict[str, list[str]] = field(default_factory=dict)
+    hitl_consecutive_timeout_limit: int = 0
+    hitl_degraded_timeout: float = 30.0
 
 
 @dataclass
@@ -370,6 +375,8 @@ class SubjectConfig:
         - GHRAH_SUBJECT_SAFE_EXTRA_COMMANDS（逗号/分号/空白分隔，追加基础命令 safe 白名单）
         - GHRAH_SUBJECT_SAFE_EXTRA_SUB_COMMANDS（base:sub1,sub2;base2:sub3 形状，
           追加子命令 safe 白名单；只增不减，保持 fail-closed）
+        - GHRAH_SUBJECT_HITL_CONSECUTIVE_TIMEOUT_LIMIT（连续超时熔断阈值，0=禁用）
+        - GHRAH_SUBJECT_HITL_DEGRADED_TIMEOUT（熔断降级后的等待秒数，默认 30）
         """
         hitl_policy = HITLPolicyConfig(
             auto_approve_abilities=os.environ.get(
@@ -390,6 +397,17 @@ class SubjectConfig:
             ),
             safe_extra_sub_commands=_parse_sub_commands(
                 os.environ.get("GHRAH_SUBJECT_SAFE_EXTRA_SUB_COMMANDS", "")
+            ),
+            hitl_consecutive_timeout_limit=_safe_int(
+                os.environ.get("GHRAH_SUBJECT_HITL_CONSECUTIVE_TIMEOUT_LIMIT", "0"),
+                0,
+                "GHRAH_SUBJECT_HITL_CONSECUTIVE_TIMEOUT_LIMIT",
+            )
+            or 0,
+            hitl_degraded_timeout=_safe_float(
+                os.environ.get("GHRAH_SUBJECT_HITL_DEGRADED_TIMEOUT", "30.0"),
+                30.0,
+                "GHRAH_SUBJECT_HITL_DEGRADED_TIMEOUT",
             ),
         )
 

@@ -61,12 +61,16 @@ class HITLWaitResult:
     agent 侧错误自足的最小信息面：outcome 之外附 promise_id / tool_call_id
     （并行工具调用各自超时时可归因到具体调用），rejected 时携带审批人
     拒绝理由（HITLResult.result 中 unit 组装的 {"reason": ...}）。
+    timeout 且熔断降级生效时 degraded=True（等待已缩短，错误信息引导
+    agent 收敛）。
     """
 
     outcome: HitlOutcome
     promise_id: str = ""
     tool_call_id: str = ""
     reason: Any = None
+    degraded: bool = False
+    degraded_timeout: float = 0.0
 
 
 class AbilityExecutor(ABC):
@@ -214,6 +218,8 @@ class LocalAbilityExecutor(AbilityExecutor):
         workspace_root: str | None = None,
         hitl_promise_registry: HITLPromiseRegistry | None = None,
         supervisor: Any = None,
+        hitl_consecutive_timeout_limit: int = 0,
+        hitl_degraded_timeout: float = 30.0,
     ) -> None:
         """初始化本地执行器。
 
@@ -228,6 +234,9 @@ class LocalAbilityExecutor(AbilityExecutor):
                 按 promise_id 翻译回三元组；None 时 standalone 模式跳过注册）
             supervisor: Supervisor 引用（tool-call 路径注入集群上下文用；
                 None 时集群类 ability 在 LLM 工具调用下按 standalone 报错指路）
+            hitl_consecutive_timeout_limit: 连续超时熔断阈值（连续 N 次超时后
+                后续等待降级为 hitl_degraded_timeout；0 = 禁用）
+            hitl_degraded_timeout: 熔断降级后的 HITL 等待秒数
         """
         self._agent_name = agent_name
         self._hook_store = HookStore()
@@ -245,6 +254,12 @@ class LocalAbilityExecutor(AbilityExecutor):
         self._workspace_root = Path(workspace_root).resolve() if workspace_root else None
         self._hitl_promise_registry = hitl_promise_registry
         self._supervisor = supervisor
+        # 连续超时熔断（per-agent，零隐式默认禁用）：审批人不在场时避免
+        # 每次 300s 空等；任何 approve/reject 即复位（不硬快速失败，
+        # 避免"离线误判 + 无法解除"的解除信号死锁）
+        self._hitl_timeout_limit = hitl_consecutive_timeout_limit
+        self._hitl_degraded_timeout = hitl_degraded_timeout
+        self._consecutive_hitl_timeouts = 0
 
     @property
     def hitl_store(self) -> HITLFutureStore:
@@ -318,14 +333,26 @@ class LocalAbilityExecutor(AbilityExecutor):
                         # 折算成"用户拒绝"信号进 LLM 上下文
                         attribution = self._hitl_attribution(hitl_wait, context)
                         if hitl_wait.outcome == "timeout":
+                            if hitl_wait.degraded:
+                                error_msg = (
+                                    f"HITL approval timed out after "
+                                    f"{hitl_wait.degraded_timeout}s (degraded wait; approval "
+                                    f"channel likely offline after {self._hitl_timeout_limit}+ "
+                                    f"consecutive timeouts); {attribution}; consider wrapping "
+                                    f"up and calling end_task instead of requesting more "
+                                    f"approvals"
+                                )
+                            else:
+                                error_msg = (
+                                    f"HITL approval timed out after {self._hitl_timeout}s "
+                                    f"with no response delivered; {attribution}"
+                                )
                             return ActionResult(
                                 outcome=ActionOutcome.FAILURE,
                                 data={
-                                    "error": (
-                                        f"HITL approval timed out after {self._hitl_timeout}s "
-                                        f"with no response delivered; {attribution}"
-                                    ),
+                                    "error": error_msg,
                                     "hitl_timeout": True,
+                                    "hitl_degraded": hitl_wait.degraded,
                                     "promise_id": hitl_wait.promise_id,
                                     "tool_call_id": hitl_wait.tool_call_id,
                                 },
@@ -617,10 +644,19 @@ class LocalAbilityExecutor(AbilityExecutor):
                 tool_call_id=tool_call_id,
             )
 
+        # 熔断降级：连续超时达阈值后改用短等待（审批通道疑似离线）
+        degraded = (
+            self._hitl_timeout_limit > 0
+            and self._consecutive_hitl_timeouts >= self._hitl_timeout_limit
+        )
+        wait_timeout = self._hitl_degraded_timeout if degraded else self._hitl_timeout
+
         # 等待 HITL 结果（带超时）
         try:
-            hitl_result: HITLResult = await asyncio.wait_for(future, timeout=self._hitl_timeout)
+            hitl_result: HITLResult = await asyncio.wait_for(future, timeout=wait_timeout)
             outcome: HitlOutcome = "approved" if hitl_result.approved else "rejected"
+            # 任何人工响应都证明审批通道在线——熔断计数全量复位
+            self._consecutive_hitl_timeouts = 0
             if self._hitl_promise_registry is not None:
                 self._hitl_promise_registry.remove(promise_id)
             logger.info(
@@ -643,9 +679,11 @@ class LocalAbilityExecutor(AbilityExecutor):
                 reason=hitl_result.result,
             )
         except TimeoutError:
+            self._consecutive_hitl_timeouts += 1
             logger.warning(
                 f"LocalAbilityExecutor[{self._agent_name}] HITL request timed out: "
-                f"ability={context.current_ability_name}, tool_call_id={tool_call_id}"
+                f"ability={context.current_ability_name}, tool_call_id={tool_call_id}, "
+                f"consecutive={self._consecutive_hitl_timeouts}"
             )
             if self._hitl_promise_registry is not None:
                 self._hitl_promise_registry.remove_triplet(
@@ -666,6 +704,8 @@ class LocalAbilityExecutor(AbilityExecutor):
                 outcome="timeout",
                 promise_id=promise_id,
                 tool_call_id=tool_call_id,
+                degraded=degraded,
+                degraded_timeout=self._hitl_degraded_timeout,
             )
 
     def receive_hitl_response(

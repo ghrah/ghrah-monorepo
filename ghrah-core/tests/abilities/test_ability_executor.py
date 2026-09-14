@@ -807,3 +807,121 @@ class TestAbilityExecutorInterface:
         """测试 LocalAbilityExecutor 是 AbilityExecutor 的子类。"""
         executor = LocalAbilityExecutor(agent_name="test-agent")
         assert isinstance(executor, AbilityExecutor)
+
+
+class TestHitlConsecutiveTimeoutCircuit:
+    """连续超时熔断：降级等待 + 人工响应复位（默认禁用零隐式）。"""
+
+    @pytest.mark.asyncio
+    async def test_disabled_by_default_full_wait(self):
+        """limit=0（默认）时永不降级——保持旧行为。"""
+        executor = LocalAbilityExecutor(
+            agent_name="test-agent", hitl_timeout=0.1, hitl_consecutive_timeout_limit=0
+        )
+        context = AbilityExecutionContext(
+            current_ability_name="execute_command",
+            tool_args={"command": "pnpm build"},
+            agent_state={},
+            accumulated_data={},
+        )
+        hook_result = HookResult.hitl(message="requires approval")
+
+        first = await executor.handle_hitl_hook_result(hook_result, context)
+        second = await executor.handle_hitl_hook_result(hook_result, context)
+        assert first.outcome == "timeout" and first.degraded is False
+        assert second.outcome == "timeout" and second.degraded is False
+
+    @pytest.mark.asyncio
+    async def test_degrades_after_consecutive_timeouts(self):
+        """连续 N 次超时后：后续等待降级为 degraded_timeout。"""
+        executor = LocalAbilityExecutor(
+            agent_name="test-agent",
+            hitl_timeout=0.1,
+            hitl_consecutive_timeout_limit=2,
+            hitl_degraded_timeout=0.02,
+        )
+        context = AbilityExecutionContext(
+            current_ability_name="execute_command",
+            tool_args={"command": "pnpm build"},
+            agent_state={},
+            accumulated_data={},
+        )
+        hook_result = HookResult.hitl(message="requires approval")
+
+        first = await executor.handle_hitl_hook_result(hook_result, context)
+        second = await executor.handle_hitl_hook_result(hook_result, context)
+        assert first.degraded is False and second.degraded is False
+
+        # 第三次起降级（等待更短）
+        third = await executor.handle_hitl_hook_result(hook_result, context)
+        assert third.outcome == "timeout"
+        assert third.degraded is True
+        assert third.degraded_timeout == 0.02
+
+    @pytest.mark.asyncio
+    async def test_human_response_resets_counter(self):
+        """任何 approve/reject 都复位计数——审批人回来批一张卡即解除。"""
+        executor = LocalAbilityExecutor(
+            agent_name="test-agent",
+            hitl_timeout=0.1,
+            hitl_consecutive_timeout_limit=1,
+            hitl_degraded_timeout=0.02,
+        )
+        context = AbilityExecutionContext(
+            current_ability_name="execute_command",
+            tool_args={"command": "pnpm build", "call_id": "call_c1"},
+            agent_state={},
+            accumulated_data={},
+        )
+        hook_result = HookResult.hitl(message="requires approval")
+
+        # 第一次超时 → 计数 1（已达阈值 1）
+        first = await executor.handle_hitl_hook_result(hook_result, context)
+        assert first.degraded is False
+
+        # 第二次本应降级（等待缩短为 0.02s），approve 立即 resolve 复位计数
+        async def approve_after_delay():
+            await asyncio.sleep(0)
+            executor.receive_hitl_response(
+                ability_name="execute_command",
+                tool_call_id="call_c1",
+                approved=True,
+            )
+
+        asyncio.create_task(approve_after_delay())
+        second = await executor.handle_hitl_hook_result(hook_result, context)
+        assert second.outcome == "approved"
+
+        # 计数已复位：再超时也不立即降级
+        third = await executor.handle_hitl_hook_result(hook_result, context)
+        assert third.degraded is False
+
+    @pytest.mark.asyncio
+    async def test_degraded_error_guides_end_task(self):
+        """降级超时的错误信息声明通道疑似离线并引导 end_task。"""
+        ability = MockAbility()
+        hook = HITLBlockingHook(
+            target_ability="execute_command", message="Command requires approval"
+        )
+        executor = LocalAbilityExecutor(
+            agent_name="test-agent",
+            hooks=[hook],
+            hitl_timeout=0.05,
+            hitl_consecutive_timeout_limit=1,
+            hitl_degraded_timeout=0.02,
+        )
+        context = AbilityExecutionContext(
+            current_ability_name="execute_command",
+            tool_args={"command": "pnpm build"},
+            agent_state={},
+            accumulated_data={},
+        )
+
+        await executor.execute_ability(ability, context)  # 第一次：未降级
+        result = await executor.execute_ability(ability, context)  # 第二次：降级
+
+        assert result.outcome == ActionOutcome.FAILURE
+        assert result.data.get("hitl_degraded") is True
+        error = result.data.get("error", "")
+        assert "likely offline" in error
+        assert "end_task" in error

@@ -324,3 +324,17 @@ class TestFromEnv:
         config = SubjectConfig.from_env()
         assert config.hitl_policy.safe_extra_commands == []
         assert config.hitl_policy.safe_extra_sub_commands == {}
+
+    def test_from_env_hitl_circuit_defaults(self) -> None:
+        """连续超时熔断 env：默认禁用（零隐式），显式设置生效。"""
+        config = SubjectConfig.from_env()
+        assert config.hitl_policy.hitl_consecutive_timeout_limit == 0
+        assert config.hitl_policy.hitl_degraded_timeout == 30.0
+
+    def test_from_env_hitl_circuit_configured(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_HITL_CONSECUTIVE_TIMEOUT_LIMIT", "3")
+        monkeypatch.setenv("GHRAH_SUBJECT_HITL_DEGRADED_TIMEOUT", "15.5")
+
+        config = SubjectConfig.from_env()
+        assert config.hitl_policy.hitl_consecutive_timeout_limit == 3
+        assert config.hitl_policy.hitl_degraded_timeout == 15.5
