@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 from ghrah.abilities import (
     FS_ABILITY_TYPES,
     AbilityRegistry,
+    AccessApprovalHook,
     CommandApprovalHook,
     CommandSafetyChecker,
     FSPermissionChecker,
@@ -192,7 +193,13 @@ def _instantiate_ability(
             auto_approved=auto_approved,
             require_approval_by_default=require_approval_by_default,
         )
-        return AbilityRegistry.create(handler, permission_checker=checker)
+        params: dict[str, Any] = {"permission_checker": checker}
+        # require_hitl 声明经 PRE_EXECUTE Hook 生效（对齐 unit._create_ability_from_def
+        # FS 分支）：内联检查只区分允许/拒绝，pending 须由 Hook 转 HITL 等待。
+        # require_approval=False 时不挂——白名单外维持直接拒绝。
+        if checker.require_approval:
+            params["hooks"] = [AccessApprovalHook(checker)]
+        return AbilityRegistry.create(handler, **params)
 
     if handler == "execute_command":
         command_checker, hooks = _make_command_approval(

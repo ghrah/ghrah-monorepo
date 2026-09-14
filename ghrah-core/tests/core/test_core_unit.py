@@ -939,6 +939,43 @@ class TestPerAgentInjection:
         ability = actor._abilities["execute_command"]
         assert ability._command_runner is None
 
+    async def test_fs_require_hitl_mounts_approval_hook(self, unit: CoreUnit) -> None:
+        """断链回归：require_hitl 的 FS ability 经 spawn 装配须带审批 Hook。
+
+        此前 _create_ability_from_def FS 分支只注入 permission_checker，
+        白名单外访问被内联检查当 (True,"pending")→放行，HITL 从未生效。
+        """
+        result = await unit.handle_command(
+            "spawn_agent",
+            _spawn_payload_with_abilities(
+                "fs-guarded",
+                [_ability_def("write_file", {"require_hitl": True})],
+            ),
+            None,
+        )
+        assert result["success"] is True
+
+        actor = _actor_of(unit, "fs-guarded")
+        ability = actor._abilities["write_file"]
+        hooks = ability.get_hooks()
+        assert len(hooks) == 1
+        assert type(hooks[0]).__name__ == "AccessApprovalHook"
+
+    async def test_fs_no_require_hitl_no_hook(self, unit: CoreUnit) -> None:
+        """require_hitl 未声明时 FS ability 不挂 hook（白名单外直接拒绝语义不变）。"""
+        result = await unit.handle_command(
+            "spawn_agent",
+            _spawn_payload_with_abilities(
+                "fs-open", [_ability_def("write_file", {"require_hitl": False})]
+            ),
+            None,
+        )
+        assert result["success"] is True
+
+        actor = _actor_of(unit, "fs-open")
+        ability = actor._abilities["write_file"]
+        assert ability.get_hooks() == []
+
     async def test_persistence_factory_reaches_agent_context_manager(self, ctx: FakeCtx) -> None:
         backend = FakePersistenceBackend(tag="custom")
         calls: list[str] = []

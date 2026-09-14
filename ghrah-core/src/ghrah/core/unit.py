@@ -433,6 +433,7 @@ def _create_ability_from_def(
     from ghrah.abilities import (
         FS_ABILITY_TYPES,
         AbilityRegistry,
+        AccessApprovalHook,
         CommandApprovalHook,
         CommandSafetyChecker,
         FSPermissionChecker,
@@ -463,6 +464,12 @@ def _create_ability_from_def(
             require_approval=require_approval,
         )
         params["permission_checker"] = checker
+        # require_hitl 声明必须经 PRE_EXECUTE Hook 生效：FS ability 内联检查
+        # 只区分允许/拒绝，(True, "pending") 需由此 Hook 转为 HITL 等待，
+        # 否则白名单外访问会被静默放行（审批断链）。require_approval=False
+        # 时不挂——白名单外维持直接拒绝，不产生审批卡。
+        if require_approval:
+            params["hooks"] = [AccessApprovalHook(checker)]
 
     if ability_type == "execute_command":
         # HITL 覆盖层：auto_approve > manifest require_approval > 兜底默认

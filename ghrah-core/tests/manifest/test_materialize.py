@@ -22,7 +22,7 @@ import pytest
 
 # 触发内置 Ability 注册（instantiate_resolved_abilities 依赖 AbilityRegistry）
 import ghrah.abilities  # noqa: F401
-from ghrah.abilities.builtin.fs_permissions import FSPermissionChecker
+from ghrah.abilities.builtin.fs_permissions import AccessApprovalHook, FSPermissionChecker
 from ghrah.manifest.agent import (
     AbilityRef,
     AgentManifest,
@@ -146,6 +146,40 @@ class TestInstantiateResolvedAbilities:
         )
         checker = result[0]._checker  # type: ignore[attr-defined]
         assert checker._require_approval is True  # type: ignore[attr-defined]
+
+    def test_fs_require_hitl_mounts_approval_hook(self) -> None:
+        """断链回归：require_hitl 的 FS ability 必须带 AccessApprovalHook。
+
+        此前装配只注入 permission_checker 不挂 hooks，FS 内联检查把
+        (True, "pending") 当放行——白名单外访问被静默放行，HITL 从未生效。
+        """
+        abilities = _resolved(
+            [
+                AbilityRef(
+                    ref="ghrah.fs.write_file",
+                    permissions=PermissionFlags(require_hitl=True),
+                )
+            ]
+        )
+        result = instantiate_resolved_abilities(
+            abilities, workspace_root=None, require_approval_by_default=False
+        )
+        hooks = result[0].get_hooks()
+        assert len(hooks) == 1
+        assert isinstance(hooks[0], AccessApprovalHook)
+
+    def test_fs_no_approval_keeps_hard_deny(self) -> None:
+        """不声明审批的 FS ability（builtin read_file 无 require_hitl）不挂 hook。
+
+        注：builtin ghrah.fs.write_file 自带 require_hitl: true（merge 为 or
+        语义，False 无法覆盖），其审批 Hook 挂载由上一个测试覆盖。
+        白名单外维持直接拒绝语义。
+        """
+        abilities = _resolved([AbilityRef(ref="ghrah.fs.read_file")])
+        result = instantiate_resolved_abilities(
+            abilities, workspace_root=None, require_approval_by_default=False
+        )
+        assert result[0].get_hooks() == []
 
     def test_mixed_abilities(self) -> None:
         abilities = _resolved(

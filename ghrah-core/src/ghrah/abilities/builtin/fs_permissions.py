@@ -201,6 +201,11 @@ class FSPermissionChecker:
             return None
         return [str(p) for p in self._denied_paths]
 
+    @property
+    def require_approval(self) -> bool:
+        """白名单外访问是否需要人工审批（False = 直接拒绝）。"""
+        return self._require_approval
+
 
 class AccessApprovalHook(Hook):
     """访问操作的人工批准 Hook。
@@ -229,7 +234,7 @@ class AccessApprovalHook(Hook):
     hook_point = HookPoint.PRE_EXECUTE
 
     WRITE_ABILITIES = {"write_file", "edit_file", "move_file", "delete_file"}
-    READ_ABILITIES = {"read_file", "list_directory"}
+    READ_ABILITIES = {"read_file", "list_directory", "search_files"}
 
     def __init__(self, checker: FSPermissionChecker) -> None:
         self._checker = checker
