@@ -65,6 +65,7 @@ pnpm install                # TS 全量安装（webui 目录或根均可，works
 ### 通用
 
 - **零隐式行为**：新功能必须显式声明（配置/Filter/白名单驱动），不做"顺便帮用户做了"的隐式默认。
+- 换行符统一 **LF**（根 `.gitattributes` 已置 `* text=auto eol=lf`）；不得提交 CRLF，避免跨平台 diff 噪声与脚本解析问题。
 - 不做顺手的无关重构/重命名/重排版；改动范围最小化。
 - 新增依赖须入对应 workspace 清单，禁止本地 path 依赖混入锁文件。
 

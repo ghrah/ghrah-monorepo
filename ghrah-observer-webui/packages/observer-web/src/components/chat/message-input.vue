@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { useRoomsStore } from "@ghrah/observer-core";
+import type { RoomMember } from "@ghrah/protocol";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 const { t } = useI18n();
 
-const props = defineProps<{ disabled?: boolean }>();
+const props = defineProps<{
+  disabled?: boolean;
+  /** 当前 room 的成员表（候选 target 上限）。 */
+  members: RoomMember[];
+}>();
 const emit = defineEmits<{ send: [targets: string[], content: string] }>();
-
-const rooms = useRoomsStore();
 
 const input = ref("");
 const inputEl = ref<HTMLTextAreaElement | null>(null);
@@ -40,7 +42,7 @@ function onKeydown(e: KeyboardEvent) {
 
 /** 候选 = 当前 room 的 agent 成员（定向范围不超出本 room）。 */
 const memberAgents = computed(() =>
-  (rooms.activeRoom?.members ?? [])
+  props.members
     .filter((member) => member.subject_type === "agent")
     .map((member) => ({ id: member.subject, name: member.subject_name || member.subject })),
 );

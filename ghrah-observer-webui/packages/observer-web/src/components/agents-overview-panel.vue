@@ -8,8 +8,9 @@ import {
   useRoomsStore,
   useSessionsStore,
 } from "@ghrah/observer-core";
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useTabScrollRestore } from "@/composables/useTabScrollRestore";
 
 const props = defineProps<{ projectId: string }>();
 const emit = defineEmits<{ openAgent: [target: ChainTarget] }>();
@@ -20,6 +21,9 @@ const branches = useBranchesStore();
 const rooms = useRoomsStore();
 const contextUsage = useContextUsageStore();
 const { t } = useI18n();
+
+const panelRoot = ref<HTMLElement | null>(null);
+const { onScroll: onPanelScroll } = useTabScrollRestore(panelRoot);
 
 const displayRuntimeStatuses = new Set(["active", "running", "stopped", "pending", "error"]);
 
@@ -79,7 +83,7 @@ function openAgent(row: (typeof rows.value)[number]) {
 </script>
 
 <template>
-  <div class="project-panel agents-overview-panel">
+  <div ref="panelRoot" class="project-panel agents-overview-panel" @scroll.passive="onPanelScroll">
     <header class="project-panel-header">
       <div>
         <span class="section-eyebrow">{{ t("agentsOverview.eyebrow") }}</span>

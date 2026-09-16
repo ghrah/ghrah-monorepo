@@ -12,6 +12,9 @@ build/
 # Node
 node_modules/
 
+# Sync tool conflict leftovers (Syncthing/Dropbox style duplicates)
+*.sync-conflict-*
+
 # Local-only: design docs & tool state (never push)
 plans/
 .kilo/

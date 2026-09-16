@@ -73,35 +73,28 @@ describe("ActionChainPanel", () => {
     }
   });
 
-  it("prompts to select an agent when none selected", () => {
-    const wrapper = mount(ActionChainPanel);
-    expect(wrapper.text()).toContain("Select an agent");
-  });
-
-  it("shows empty state when selected agent has no chain", async () => {
+  it("shows empty state when the target agent has no chain", async () => {
     const agents = useAgentsStore();
     agents.onAgentSpawned(spawn("alpha"));
-    agents.selectAgent(target("alpha"));
-    const wrapper = mount(ActionChainPanel);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain("No actions yet");
   });
 
-  it("renders only the selected agent's chain", async () => {
+  it("renders only the target agent's chain", async () => {
     const agents = useAgentsStore();
     agents.onAgentSpawned(spawn("alpha"));
     agents.onAgentSpawned(spawn("beta"));
     setActiveChain("alpha", [node({ id: "a1", parent_id: null, timestamp: "t1" })]);
     setActiveChain("beta", [node({ id: "b1", parent_id: null, timestamp: "t1" })]);
-    agents.selectAgent(target("alpha"));
-    const wrapper = mount(ActionChainPanel);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain("@alpha");
     expect(wrapper.text()).not.toContain("@beta");
     expect(wrapper.findAll(".tree-row")).toHaveLength(1);
   });
 
-  it("switches tree when global selectedAgentName changes", async () => {
+  it("switches tree when the agent prop changes", async () => {
     const agents = useAgentsStore();
     agents.onAgentSpawned(spawn("alpha"));
     agents.onAgentSpawned(spawn("beta"));
@@ -110,11 +103,10 @@ describe("ActionChainPanel", () => {
       node({ id: "b1", parent_id: null, timestamp: "t1" }),
       node({ id: "b2", parent_id: "b1", timestamp: "t2" }),
     ]);
-    agents.selectAgent(target("alpha"));
-    const wrapper = mount(ActionChainPanel);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
     await wrapper.vm.$nextTick();
     expect(wrapper.findAll(".tree-row")).toHaveLength(1);
-    agents.selectAgent(target("beta"));
+    await wrapper.setProps({ agent: target("beta") });
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain("@beta");
     expect(wrapper.text()).not.toContain("@alpha");
@@ -130,8 +122,7 @@ describe("ActionChainPanel", () => {
       node({ id: "c2", parent_id: "root", timestamp: "t2" }),
       node({ id: "c1a", parent_id: "c1", timestamp: "t1a" }),
     ]);
-    agents.selectAgent(target("alpha"));
-    const wrapper = mount(ActionChainPanel);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
     await wrapper.vm.$nextTick();
     expect(wrapper.findAll(".tree-row")).toHaveLength(4);
     const allText = wrapper.text();
@@ -161,8 +152,7 @@ describe("ActionChainPanel", () => {
         ],
       }),
     ]);
-    agents.selectAgent(target("alpha"));
-    const wrapper = mount(ActionChainPanel);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
     await wrapper.vm.$nextTick();
     const expandBtn = wrapper.find("button.text-gray-400, button.text-gray-600");
     expect(expandBtn.exists()).toBe(true);
@@ -179,7 +169,6 @@ describe("ActionChainPanel", () => {
     const sessions = useSessionsStore();
     const branches = useBranchesStore();
     agents.onAgentSpawned(spawn("alpha"));
-    agents.selectAgent(target("alpha"));
 
     const agent = target("alpha");
     const active: SessionTarget = { ...agent, sessionId: "alpha-session-2" };
@@ -207,7 +196,7 @@ describe("ActionChainPanel", () => {
       }),
     ]);
 
-    const wrapper = mount(ActionChainPanel);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
     await wrapper.vm.$nextTick();
     const sessionSelect = wrapper.get<HTMLSelectElement>(".chain-session-select");
     expect(sessionSelect.findAll("option").length).toBe(3);
@@ -229,12 +218,11 @@ describe("ActionChainPanel", () => {
   it("creates a session and activates it from the receipt", async () => {
     const agents = useAgentsStore();
     agents.onAgentSpawned(spawn("alpha"));
-    agents.selectAgent(target("alpha"));
     createSession.mockResolvedValue({
       success: true,
       data: { session_id: "alpha-session-2", agent_name: "alpha" },
     });
-    const wrapper = mount(ActionChainPanel);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
     await wrapper.vm.$nextTick();
     await wrapper.get("button.chain-new-session").trigger("click");
     expect(createSession).toHaveBeenCalledWith(target("alpha"));
@@ -249,7 +237,6 @@ describe("ActionChainPanel", () => {
     const sessions = useSessionsStore();
     const branches = useBranchesStore();
     agents.onAgentSpawned(spawn("alpha"));
-    agents.selectAgent(target("alpha"));
     const agent = target("alpha");
     const session: SessionTarget = { ...agent, sessionId: "alpha-session" };
     sessions.replaceAgentSessions(agent, [
@@ -271,7 +258,7 @@ describe("ActionChainPanel", () => {
     ]);
 
     createBranch.mockResolvedValue({ success: true, data: { branch_id: "alpha-branch-2" } });
-    const wrapper = mount(ActionChainPanel);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
     await wrapper.vm.$nextTick();
     await wrapper.get("button.chain-new-branch").trigger("click");
     expect(createBranch).toHaveBeenCalledWith(session, "Branch 2");

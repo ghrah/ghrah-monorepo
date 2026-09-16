@@ -63,20 +63,6 @@ const tabs = ref<WorkspaceTab[]>([]);
 const activeTabId = ref<string | null>(null);
 
 const activeTab = computed(() => tabs.value.find((tab) => tab.id === activeTabId.value) ?? null);
-const activePanel = computed(() => {
-  if (activeTab.value?.kind === "room") return ChatPanel;
-  if (activeTab.value?.kind === "agent") return ActionChainPanel;
-  if (activeTab.value?.kind === "changes") return ProjectChangesPanel;
-  if (activeTab.value?.kind === "project") return ProjectSettingsPanel;
-  if (activeTab.value?.kind === "agents") return AgentsOverviewPanel;
-  return null;
-});
-const activePanelProps = computed(() => {
-  const tab = activeTab.value;
-  return tab && tab.kind !== "room" && tab.kind !== "agent"
-    ? { projectId: tab.target.projectId }
-    : {};
-});
 
 function projectIdOf(tab: WorkspaceTab): string {
   return tab.kind === "agent" ? tab.target.agent.projectId : tab.target.projectId;
@@ -288,7 +274,33 @@ watch(
       </div>
       <div class="workspace-content">
         <KeepAlive>
-          <component :is="activePanel" v-if="activePanel" :key="activeTab?.id" v-bind="activePanelProps" @open-agent="openAgent" />
+          <ChatPanel
+            v-if="activeTab?.kind === 'room'"
+            :key="activeTab.id"
+            :project-id="activeTab.target.projectId"
+            :room-id="activeTab.target.roomId"
+          />
+          <ActionChainPanel
+            v-else-if="activeTab?.kind === 'agent'"
+            :key="activeTab.id"
+            :agent="activeTab.target.agent"
+          />
+          <ProjectChangesPanel
+            v-else-if="activeTab?.kind === 'changes'"
+            :key="activeTab.id"
+            :project-id="activeTab.target.projectId"
+          />
+          <ProjectSettingsPanel
+            v-else-if="activeTab?.kind === 'project'"
+            :key="activeTab.id"
+            :project-id="activeTab.target.projectId"
+          />
+          <AgentsOverviewPanel
+            v-else-if="activeTab?.kind === 'agents'"
+            :key="activeTab.id"
+            :project-id="activeTab.target.projectId"
+            @open-agent="openAgent"
+          />
         </KeepAlive>
         <div v-if="!activeTab" class="workspace-empty">
           <div class="empty-mark">⌘</div><h2>{{ t("dashboard.readyTitle") }}</h2><p>{{ t("dashboard.readyBody") }}</p>

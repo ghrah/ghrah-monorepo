@@ -60,34 +60,50 @@ function setup() {
   return { rooms, chat, connection };
 }
 
+function mountPanel(roomId = "r1") {
+  return mount(ChatPanel, { props: { projectId: "p1", roomId } });
+}
+
+// happy-dom 无真实布局（scrollHeight 恒 0），模拟贴底/上翻视口
+function mockViewport(el: HTMLElement, scrollHeight: number, clientHeight: number, top: number) {
+  let scrollTop = top;
+  Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => scrollHeight });
+  Object.defineProperty(el, "clientHeight", { configurable: true, get: () => clientHeight });
+  Object.defineProperty(el, "scrollTop", {
+    configurable: true,
+    get: () => scrollTop,
+    set: (v: number) => {
+      scrollTop = v;
+    },
+  });
+}
+
 describe("ChatPanel", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     roomSendMock.mockReset();
   });
 
-  it("shows empty state when no active room", () => {
+  it("shows empty state when room does not exist", () => {
     setup();
-    const wrapper = mount(ChatPanel);
+    const wrapper = mountPanel("missing");
     expect(wrapper.text()).toContain("Select a room to start chatting");
   });
 
-  it("shows active room name in header", async () => {
-    const { rooms } = setup();
-    rooms.setActiveRoom("r1");
-    const wrapper = mount(ChatPanel);
+  it("shows room name in header", async () => {
+    setup();
+    const wrapper = mountPanel("r1");
     await wrapper.vm.$nextTick();
     expect(wrapper.find("h3").text()).toContain("arch");
   });
 
-  it("projects room log entries (agent → conversation, human → human_input)", async () => {
+  it("renders entries of the target room only", async () => {
     const { rooms } = setup();
-    rooms.setActiveRoom("r1");
     rooms.setRoomLog("r1", [
       logEntry("r1", 1, "architect", "agent", "hello from agent"),
       logEntry("r1", 2, "user", "human", "hello from human"),
     ]);
-    const wrapper = mount(ChatPanel);
+    const wrapper = mountPanel("r1");
     await wrapper.vm.$nextTick();
     const entries = wrapper.findAll(".chat-entry");
     expect(entries).toHaveLength(2);
@@ -97,9 +113,8 @@ describe("ChatPanel", () => {
     expect(entries[1].text()).toContain("hello from human");
   });
 
-  it("merges pending entries of the active room only", async () => {
+  it("merges pending entries of the target room only", async () => {
     const { rooms, chat } = setup();
-    rooms.setActiveRoom("r1");
     rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "history")]);
     chat.addPendingEntry({
       projectId: "p1",
@@ -115,7 +130,7 @@ describe("ChatPanel", () => {
       agentName: "",
       roomId: "r2",
     });
-    const wrapper = mount(ChatPanel);
+    const wrapper = mountPanel("r1");
     await wrapper.vm.$nextTick();
     const entries = wrapper.findAll(".chat-entry");
     expect(entries).toHaveLength(2);
@@ -127,9 +142,9 @@ describe("ChatPanel", () => {
 
   it("handleSend calls roomSend and adds pending entry", async () => {
     const { rooms, chat } = setup();
-    rooms.setActiveRoom("r1");
+    rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "history")]);
     roomSendMock.mockResolvedValueOnce({ success: true });
-    const wrapper = mount(ChatPanel);
+    const wrapper = mountPanel("r1");
     await wrapper.vm.$nextTick();
     await wrapper.find("textarea").setValue("hello room");
     await wrapper.find("form").trigger("submit");
@@ -141,30 +156,30 @@ describe("ChatPanel", () => {
 
   it("pending entry is removed when echo arrives and history shows instead", async () => {
     const { rooms, chat } = setup();
-    rooms.setActiveRoom("r1");
+    rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "history")]);
     roomSendMock.mockResolvedValueOnce({ success: true });
-    const wrapper = mount(ChatPanel);
+    const wrapper = mountPanel("r1");
     await wrapper.vm.$nextTick();
     await wrapper.find("textarea").setValue("echo me");
     await wrapper.find("form").trigger("submit");
     expect(wrapper.text()).toContain("echo me");
     // 模拟 bind 的 ROOM_LOG_APPENDED 分发：rooms 追加 + chat echo 确认
-    const echo = logEntry("r1", 1, "user", "human", "echo me");
+    const echo = logEntry("r1", 2, "user", "human", "echo me");
     rooms.onRoomLogAppended({ entry: echo });
     chat.onRoomLogAppended(echo, "p1");
     await wrapper.vm.$nextTick();
     expect(chat.allEntries.find((e) => e.content === "echo me")).toBeUndefined();
     const entries = wrapper.findAll(".chat-entry");
-    expect(entries).toHaveLength(1);
-    expect(entries[0].classes()).toContain("entry-human");
-    expect(entries[0].classes()).not.toContain("entry-pending");
+    expect(entries).toHaveLength(2);
+    expect(entries[1].classes()).toContain("entry-human");
+    expect(entries[1].classes()).not.toContain("entry-pending");
   });
 
   it("marks pending error when roomSend returns null", async () => {
     const { rooms, chat } = setup();
-    rooms.setActiveRoom("r1");
+    rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "history")]);
     roomSendMock.mockResolvedValueOnce(null);
-    const wrapper = mount(ChatPanel);
+    const wrapper = mountPanel("r1");
     await wrapper.vm.$nextTick();
     await wrapper.find("textarea").setValue("boom");
     await wrapper.find("form").trigger("submit");
@@ -175,15 +190,15 @@ describe("ChatPanel", () => {
     expect(e?.error).toContain("Send failed");
     expect(e?.roomId).toBe("r1");
     await wrapper.vm.$nextTick();
-    expect(wrapper.find(".chat-entry").classes()).toContain("entry-error");
+    expect(wrapper.find(".entry-error").exists()).toBe(true);
   });
 
   it("targeted send: chip 选中后 roomSend 携带 targets", async () => {
     const { rooms } = setup();
     rooms.replaceProjectRooms("p1", [room("r1", "arch", ["frontend", "backend"])], "active");
-    rooms.setActiveRoom("r1");
+    rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "history")]);
     roomSendMock.mockResolvedValueOnce({ success: true });
-    const wrapper = mount(ChatPanel);
+    const wrapper = mountPanel("r1");
     await wrapper.vm.$nextTick();
     const chips = wrapper.findAll('button[type="button"]');
     await chips[0].trigger("click"); // @frontend
@@ -194,12 +209,11 @@ describe("ChatPanel", () => {
 
   it("entry 带 targets 时 header 显示定向标记", async () => {
     const { rooms } = setup();
-    rooms.setActiveRoom("r1");
     rooms.setRoomLog("r1", [
       logEntry("r1", 1, "architect", "agent", "targeted msg", { targets: ["frontend"] }),
       logEntry("r1", 2, "architect", "agent", "broadcast msg"),
     ]);
-    const wrapper = mount(ChatPanel);
+    const wrapper = mountPanel("r1");
     await wrapper.vm.$nextTick();
     const headers = wrapper.findAll(".entry-header");
     expect(headers[0].text()).toContain("→ @frontend");
@@ -208,8 +222,8 @@ describe("ChatPanel", () => {
 
   it("does not send when input is empty", async () => {
     const { rooms } = setup();
-    rooms.setActiveRoom("r1");
-    const wrapper = mount(ChatPanel);
+    rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "history")]);
+    const wrapper = mountPanel("r1");
     await wrapper.vm.$nextTick();
     await wrapper.find("form").trigger("submit");
     expect(roomSendMock).not.toHaveBeenCalled();
@@ -217,12 +231,38 @@ describe("ChatPanel", () => {
 
   it("无块回退分支走 Markdown 渲染", async () => {
     const { rooms } = setup();
-    rooms.setActiveRoom("r1");
     rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "**bold** log entry")]);
-    const wrapper = mount(ChatPanel);
+    const wrapper = mountPanel("r1");
     await wrapper.vm.$nextTick();
     const body = wrapper.find(".chat-entry .markdown-body");
     expect(body.exists()).toBe(true);
     expect(body.html()).toContain("<strong>bold</strong>");
+  });
+
+  it("贴底时新消息自动滚底，上翻时不打断", async () => {
+    const { rooms } = setup();
+    rooms.setRoomLog("r1", [logEntry("r1", 1, "architect", "agent", "first")]);
+    const wrapper = mountPanel("r1");
+    await wrapper.vm.$nextTick();
+    const container = wrapper.find(".flex-1.overflow-y-auto");
+    expect(container.exists()).toBe(true);
+    const el = container.element as HTMLElement;
+
+    // 贴底视口：追加消息 → sticky 生效，scrollToBottom 落到 scrollHeight
+    mockViewport(el, 1000, 200, 800);
+    await container.trigger("scroll");
+    rooms.onRoomLogAppended({ entry: logEntry("r1", 2, "architect", "agent", "second") });
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    expect(el.scrollTop).toBe(1000);
+
+    // 上翻浏览历史：追加消息 → 位置不被强制滚底
+    mockViewport(el, 2000, 200, 300);
+    await container.trigger("scroll");
+    rooms.onRoomLogAppended({ entry: logEntry("r1", 3, "architect", "agent", "third") });
+    await wrapper.vm.$nextTick();
+    await wrapper.vm.$nextTick();
+    expect(el.scrollTop).toBe(300);
+    wrapper.unmount();
   });
 });

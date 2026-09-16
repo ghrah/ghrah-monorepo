@@ -2,12 +2,15 @@
 import { useChangesStore, useProjectsStore } from "@ghrah/observer-core";
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { useTabScrollRestore } from "@/composables/useTabScrollRestore";
 
 const props = defineProps<{ projectId: string }>();
 const { t, locale } = useI18n();
 const changes = useChangesStore();
 const projects = useProjectsStore();
 const expandedKey = ref<string | null>(null);
+const panelRoot = ref<HTMLElement | null>(null);
+const { onScroll: onPanelScroll } = useTabScrollRestore(panelRoot);
 const project = computed(() => projects.projects.get(props.projectId) ?? null);
 const projectChanges = computed(() =>
   changes.changes.filter((change) => change.projectId === props.projectId),
@@ -37,7 +40,7 @@ function timeStr(timestamp: string): string {
 </script>
 
 <template>
-  <div class="project-panel project-changes-panel">
+  <div ref="panelRoot" class="project-panel project-changes-panel" @scroll.passive="onPanelScroll">
     <header class="project-panel-header">
       <div>
         <span class="section-eyebrow">{{ t("changes.eyebrow") }}</span>

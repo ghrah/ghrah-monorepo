@@ -11,11 +11,16 @@ import {
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useObserver } from "@/composables/useObserver";
+import { useTabScrollRestore } from "@/composables/useTabScrollRestore";
 import ActionNodeRow from "./action-node.vue";
 
 const { t } = useI18n();
 
 import { createTreeCache, type TreeRow } from "./build-tree.js";
+
+const props = defineProps<{
+  agent: AgentTarget;
+}>();
 
 const chains = useActionChainsStore();
 const agents = useAgentsStore();
@@ -23,8 +28,14 @@ const sessions = useSessionsStore();
 const branches = useBranchesStore();
 const { activateSession, activateBranch, createSession, createBranch } = useObserver();
 
-const selectedAgentName = computed(() => agents.selectedAgentName);
-const agentTarget = computed<AgentTarget | null>(() => agents.selectedAgentTarget);
+// store 中的 AgentInfo 含 clusterId/config 等额外字段，对外（RPC/store 键）只投影纯 AgentTarget
+const agentTarget = computed<AgentTarget>(() => {
+  const resolved = agents.getAgent(props.agent);
+  return resolved
+    ? { projectId: resolved.projectId, agentId: resolved.agentId, agentName: resolved.agentName }
+    : props.agent;
+});
+const selectedAgentName = computed(() => agentTarget.value.agentName);
 
 type SwitchKind = "session" | "branch" | "new-session" | "new-branch";
 const switching = ref<SwitchKind | null>(null);
@@ -146,6 +157,11 @@ const rows = computed<TreeRow[]>(() => {
   if (!target) return [];
   return treeCache.rowsFor(chainKey(target), chains.getChain(target));
 });
+
+const chainContainer = ref<HTMLElement | null>(null);
+const { onScroll: onChainScroll } = useTabScrollRestore(chainContainer, {
+  contentKey: computed(() => rows.value.length),
+});
 </script>
 
 <template>
@@ -214,7 +230,7 @@ const rows = computed<TreeRow[]>(() => {
       {{ t("actionChain.empty") }}
     </div>
 
-    <div v-else class="flex-1 overflow-y-auto">
+    <div v-else ref="chainContainer" class="flex-1 overflow-y-auto" @scroll.passive="onChainScroll">
       <div class="border border-gray-200 dark:border-gray-700 rounded">
         <div class="px-2 py-1 bg-gray-50 dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
           @{{ selectedAgentName }}

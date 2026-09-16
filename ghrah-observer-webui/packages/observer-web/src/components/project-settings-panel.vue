@@ -5,6 +5,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import ConfirmDialog from "@/components/ui/confirm-dialog.vue";
 import { useObserver } from "@/composables/useObserver";
+import { useTabScrollRestore } from "@/composables/useTabScrollRestore";
 
 type PendingAction =
   | { kind: "archive-project" }
@@ -46,6 +47,8 @@ const busy = ref<string | null>(null);
 const errorCode = ref<string | null>(null);
 const errorMessage = ref<string | null>(null);
 const pendingAction = ref<PendingAction | null>(null);
+const panelRoot = ref<HTMLElement | null>(null);
+const { onScroll: onPanelScroll } = useTabScrollRestore(panelRoot);
 
 const dirty = computed(
   () =>
@@ -229,7 +232,7 @@ async function refreshAfterConflict() {
 </script>
 
 <template>
-  <div class="project-panel project-settings-panel">
+  <div ref="panelRoot" class="project-panel project-settings-panel" @scroll.passive="onPanelScroll">
     <div v-if="!project" class="project-panel-empty">{{ t("projectSettings.unavailable") }}</div>
     <template v-else>
       <header class="project-panel-header">

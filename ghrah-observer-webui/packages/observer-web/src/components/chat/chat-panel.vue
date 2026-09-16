@@ -12,7 +12,13 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMarkdown } from "@/composables/useMarkdown";
 import { useObserver } from "@/composables/useObserver";
+import { useTabScrollRestore } from "@/composables/useTabScrollRestore";
 import MessageInput from "./message-input.vue";
+
+const props = defineProps<{
+  projectId: string;
+  roomId: string;
+}>();
 
 const chat = useChatStore();
 const agents = useAgentsStore();
@@ -24,21 +30,29 @@ const { t } = useI18n();
 
 const messageContainer = ref<HTMLElement | null>(null);
 
-/** active room 历史（room log 投影） + 本 room 的 pending/error 乐观层，按序合并。 */
+/** 视口距底部在该阈值内视为"贴底"，新消息到达时才自动跟随滚底。 */
+const NEAR_BOTTOM_PX = 40;
+const sticky = ref(true);
+
+const room = computed(() => rooms.rooms.get(props.roomId) ?? null);
+
+/** 该 room 历史（room log 投影） + 本 room 的 pending/error 乐观层，按序合并。 */
 const roomEntries = computed<ChatEntry[]>(() => {
-  const roomId = rooms.activeRoomId;
-  const projectId = rooms.activeRoom?.project_id;
-  if (!roomId || !projectId) return [];
+  const projectId = props.projectId;
+  const roomId = props.roomId;
+  if (!projectId || !roomId) return [];
   const projectAgents = agents.agentsForProject(projectId);
-  const history = rooms.activeRoomLog.map((entry) => {
-    const agentId =
-      entry.author_type === "agent"
-        ? projectAgents.find(
-            (agent) => agent.agentId === entry.author || agent.agentName === entry.author,
-          )?.agentId
-        : undefined;
-    return roomLogToChatEntries(entry, { projectId, agentId });
-  });
+  const history = [...(rooms.logs.get(roomId) ?? [])]
+    .sort((a, b) => a.seq - b.seq)
+    .map((entry) => {
+      const agentId =
+        entry.author_type === "agent"
+          ? projectAgents.find(
+              (agent) => agent.agentId === entry.author || agent.agentName === entry.author,
+            )?.agentId
+          : undefined;
+      return roomLogToChatEntries(entry, { projectId, agentId });
+    });
   const pending = chat.allEntries.filter(
     (e) =>
       (e.pending === true || e.error !== undefined) &&
@@ -48,12 +62,13 @@ const roomEntries = computed<ChatEntry[]>(() => {
   return [...history, ...pending];
 });
 
-const canChat = computed(() => rooms.activeRoomId !== null && connection.state === "connected");
+const canChat = computed(() => room.value !== null && connection.state === "connected");
 
 async function handleSend(targets: string[], content: string) {
-  const roomId = rooms.activeRoomId;
-  const projectId = rooms.activeRoom?.project_id;
-  if (!roomId || !projectId || !content) return;
+  const projectId = props.projectId;
+  const roomId = props.roomId;
+  const currentRoom = room.value;
+  if (!roomId || !projectId || !currentRoom || !content) return;
   const target = { projectId, roomId };
   chat.addPendingEntry({ projectId, to: roomId, content, agentName: "", roomId, targets });
   roomSend(roomId, content, targets)
@@ -63,6 +78,7 @@ async function handleSend(targets: string[], content: string) {
     .catch((e) =>
       chat.markPendingError(target, content, t("chat.sendFailed", { msg: String(e ?? "") })),
     );
+  sticky.value = true;
   await nextTick(() => scrollToBottom());
 }
 
@@ -72,8 +88,26 @@ function scrollToBottom() {
   }
 }
 
+function isNearBottom(): boolean {
+  const el = messageContainer.value;
+  if (!el) return true;
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+}
+
+// sticky 用户切回落新底；上翻用户切回回原位置，LRU 补拉瞬态靠 pending 重试
+const { onScroll } = useTabScrollRestore(messageContainer, {
+  contentKey: computed(() => roomEntries.value.length),
+  target: () => (sticky.value ? "bottom" : null),
+});
+
+function handleScroll(): void {
+  sticky.value = isNearBottom();
+  onScroll();
+}
+
+// 贴底时新消息才自动跟随滚底；上翻浏览历史不被打断
 watch(roomEntries, () => {
-  nextTick(() => scrollToBottom());
+  if (sticky.value) nextTick(() => scrollToBottom());
 });
 
 function entryClass(entry: ChatEntry): string {
@@ -145,11 +179,11 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
   <div class="flex flex-col h-full">
     <div class="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between">
       <h3 class="text-sm font-semibold truncate">
-        {{ rooms.activeRoom ? t("chat.title", { room: rooms.activeRoom.name }) : t("chat.name") }}
-      </h3>
+      {{ room ? t("chat.title", { room: room.name }) : t("chat.name") }}
+    </h3>
     </div>
 
-    <div v-if="!rooms.activeRoomId" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
+    <div v-if="!room" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
       {{ t("chat.selectRoom") }}
     </div>
 
@@ -161,6 +195,7 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
       v-else
       ref="messageContainer"
       class="flex-1 overflow-y-auto p-3 space-y-2"
+      @scroll.passive="handleScroll"
     >
       <div
         v-for="entry in roomEntries"
@@ -211,8 +246,9 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
     </div>
 
     <MessageInput
-      v-if="rooms.activeRoomId"
+      v-if="room"
       :disabled="!canChat"
+      :members="room.members"
       @send="handleSend"
     />
   </div>

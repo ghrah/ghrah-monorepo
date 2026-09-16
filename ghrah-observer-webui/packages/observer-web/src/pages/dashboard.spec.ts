@@ -24,13 +24,19 @@ vi.mock("@/composables/useObserver", () => ({
   }),
 }));
 vi.mock("@/components/action-chain/action-chain-panel.vue", () => ({
-  default: { template: "<div>chain panel</div>" },
+  default: {
+    props: ["agent"],
+    template: '<div class="chain-panel-stub">{{ agent.agentName }}</div>',
+  },
 }));
 vi.mock("@/components/agent-action-menu.vue", () => ({
   default: { template: "<div />" },
 }));
 vi.mock("@/components/chat/chat-panel.vue", () => ({
-  default: { template: "<div>chat panel</div>" },
+  default: {
+    props: ["projectId", "roomId"],
+    template: '<div class="chat-panel-stub">{{ projectId }}/{{ roomId }}</div>',
+  },
 }));
 vi.mock("@/components/hitl/hitl-inbox.vue", () => ({
   default: { template: "<div />" },
@@ -117,8 +123,14 @@ function mountDashboard() {
         HitlInbox: true,
         RoomAdminPanel: true,
         AgentList: AgentListStub,
-        ChatPanel: { template: "<div>chat panel</div>" },
-        ActionChainPanel: { template: "<div>chain panel</div>" },
+        ChatPanel: {
+          props: ["projectId", "roomId"],
+          template: '<div class="chat-panel-stub">{{ projectId }}/{{ roomId }}</div>',
+        },
+        ActionChainPanel: {
+          props: ["agent"],
+          template: '<div class="chain-panel-stub">{{ agent.agentName }}</div>',
+        },
         ProjectChangesPanel: { template: "<div>changes panel</div>" },
         ProjectSettingsPanel: { template: "<div>settings panel</div>" },
         AgentsOverviewPanel: { template: "<div>agents panel</div>" },
@@ -203,6 +215,18 @@ describe("Dashboard workspace tabs", () => {
     const labels = wrapper.findAll(".tab-label").map((node) => node.text());
     expect(labels).toContain("Renamed Room");
     expect(labels).toContain("Renamed Project · Changes");
+  });
+
+  it("passes tab-scoped props (projectId/roomId, agent) to the cached panels", async () => {
+    const wrapper = mountDashboard();
+
+    await wrapper.find("#open-p1-room").trigger("click");
+    await nextTick();
+    expect(wrapper.find(".chat-panel-stub").text()).toBe("p1/r1");
+
+    await wrapper.find("#open-chain").trigger("click");
+    await nextTick();
+    expect(wrapper.find(".chain-panel-stub").text()).toBe("Coder");
   });
 
   it("restores a complete chain target after switching projects", async () => {
