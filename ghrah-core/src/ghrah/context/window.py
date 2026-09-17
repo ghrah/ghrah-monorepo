@@ -14,19 +14,21 @@
 设计要点：
 - 策略按注册顺序依次应用，形成处理管道
 - 系统消息（role="system"）始终被保护，不参与截断/折叠
-- token 估算使用字符近似法（1 token ≈ 4 字符），零外部依赖
+- token 估算委托 ghrah.context.token_estimator 的默认加权估算器
+  （CJK 1 token/char + 非 CJK chars/4 + reasoning 计入 + image 固定值，
+  零外部依赖）
 - 所有消息类型通过 WindowableMessage / WindowableBlock Protocol 解耦，
   不依赖 ChatMessage 等具体类型
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from abc import ABC, abstractmethod
 from typing import Any
 
+from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR
 from ghrah.core.window_protocol import (
     MessageFactory,
     WindowableMessage,
@@ -43,16 +45,13 @@ __all__ = [
     "parse_vendor_window_tokens",
 ]
 
-# token 估算常量：1 token ≈ 4 个字符
-_CHARS_PER_TOKEN = 4
-
 
 def estimate_message_tokens(message: Any) -> int:
-    """估算单条消息的 token 数。
+    """估算单条消息的 token 数（委托默认加权估算器）。
 
-    使用字符近似法：len(content) // CHARS_PER_TOKEN。
-    对于 WindowableMessage，遍历 content_blocks 估算。
-    ToolCallBlock 额外按参数大小估算。
+    加权口径见 ghrah.context.token_estimator：CJK 1 token/char、
+    非 CJK chars/4、reasoning block 按正文长度计、image/file 固定值。
+    旧调用面（策略/compact/recall）经本函数自然继承新口径。
 
     Args:
         message: WindowableMessage 或兼容对象
@@ -60,40 +59,11 @@ def estimate_message_tokens(message: Any) -> int:
     Returns:
         估算的 token 数
     """
-    if hasattr(message, "content_blocks") and hasattr(message, "role"):
-        total = 0
-        for block in message.content_blocks:
-            match getattr(block, "type", None):
-                case "text":
-                    total += max(1, len(getattr(block, "text", "")) // _CHARS_PER_TOKEN)
-                case "tool_call":
-                    args = getattr(block, "arguments", None)
-                    args_str = json.dumps(args, ensure_ascii=False) if args else ""
-                    total += max(1, len(args_str) // _CHARS_PER_TOKEN)
-                    total += max(1, len(getattr(block, "name", "")) // _CHARS_PER_TOKEN)
-                case "tool_result":
-                    total += max(1, len(getattr(block, "content", "")) // _CHARS_PER_TOKEN)
-                case "image" | "file":
-                    b64 = getattr(block, "base64", None)
-                    url = getattr(block, "url", None)
-                    size = len(b64) if b64 else (len(url) if url else 0)
-                    total += max(1, size // _CHARS_PER_TOKEN)
-                case "audio":
-                    total += max(1, len(getattr(block, "data", "")) // _CHARS_PER_TOKEN)
-                case _:
-                    total += 1
-        return max(1, total)
-
-    # 降级处理：尝试获取 text 属性
-    content = getattr(message, "text", None)
-    if content is not None:
-        return max(1, len(str(content)) // _CHARS_PER_TOKEN)
-    content = getattr(message, "content", str(message))
-    return max(1, len(str(content)) // _CHARS_PER_TOKEN)
+    return DEFAULT_TOKEN_ESTIMATOR.estimate_message(message)
 
 
 def estimate_tokens(messages: list[Any]) -> int:
-    """估算消息列表的总 token 数。
+    """估算消息列表的总 token 数（委托默认加权估算器）。
 
     Args:
         messages: 消息列表
@@ -101,7 +71,7 @@ def estimate_tokens(messages: list[Any]) -> int:
     Returns:
         总 token 数估算值
     """
-    return sum(estimate_message_tokens(m) for m in messages)
+    return DEFAULT_TOKEN_ESTIMATOR.estimate_messages(messages)
 
 
 class WindowStrategy(ABC):

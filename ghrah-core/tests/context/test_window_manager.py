@@ -353,9 +353,11 @@ class TestWindowManager:
     """WindowManager 策略组合器测试。"""
 
     def test_init_default_max_tokens(self) -> None:
-        """默认 max_tokens 为 32768（DEFAULT_WINDOW_MAX_TOKENS）。"""
+        """默认 max_tokens 为 DEFAULT_WINDOW_MAX_TOKENS。"""
+        from ghrah.types.config_types import DEFAULT_WINDOW_MAX_TOKENS
+
         wm = WindowManager()
-        assert wm.max_tokens == 32768
+        assert wm.max_tokens == DEFAULT_WINDOW_MAX_TOKENS
 
     def test_init_custom_max_tokens(self) -> None:
         """自定义 max_tokens。"""
