@@ -19,6 +19,7 @@ from ghrah.chat.factory import ChatMessageFactory
 from ghrah.chat.message import ChatMessage
 from ghrah.context.manager import ContextManager
 from ghrah.context.node import ContextNode
+from ghrah.context.token_estimator import WeightedTokenEstimator
 from ghrah.core.config import AgentConfig
 from ghrah.core.message import AgentMessage as Message
 
@@ -771,6 +772,35 @@ class TestContextManagerIntegration:
 
 class TestWindowOccupancyAnchor:
     """占用锚点记录、失效合约与决策/触发辅助。"""
+
+    def test_token_estimator_prefers_window_manager_instance(self) -> None:
+        """token_estimator 出口：WindowManager 实例优先于 CM 级参数。"""
+        from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR
+
+        wm = _make_window_manager(max_tokens=1000)
+        cm = _make_cm(window_manager=wm)
+
+        # WM 未注入 estimator → 两侧同为默认实例
+        assert cm.token_estimator is wm.estimator
+        assert cm.token_estimator is DEFAULT_TOKEN_ESTIMATOR
+
+        # WM 注入专属实例 → 出口随 WM 实例
+        custom = WeightedTokenEstimator()
+        wm_custom = _make_window_manager(max_tokens=1000)
+        wm_custom._estimator = custom
+        cm_custom = _make_cm(window_manager=wm_custom)
+        assert cm_custom.token_estimator is custom
+
+    def test_token_estimator_falls_back_to_cm_param_without_wm(self) -> None:
+        """无 WindowManager 时 token_estimator 回落 CM 级参数/默认实例。"""
+        from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR
+
+        cm = _make_cm()
+        assert cm.token_estimator is DEFAULT_TOKEN_ESTIMATOR
+
+        custom = WeightedTokenEstimator()
+        cm_custom = _make_cm(estimator=custom)
+        assert cm_custom.token_estimator is custom
 
     def test_record_window_occupied_sets_anchor_and_last_real(self) -> None:
         """record 同时更新锚点与 last_real_input_tokens。"""

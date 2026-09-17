@@ -276,6 +276,71 @@ class TestAssembleAndPostCheck:
         assert status == "over_budget"
         assert [m.text for m in result[3:]] == [m.text for m in kept]
 
+    def test_post_check_uses_injected_estimator(self) -> None:
+        """注入估算器：estimate 与 chars 截断上界均走注入口径。"""
+
+        class CharCountEstimator:
+            """len(text) 即 token、chars=tokens 的测试口径。"""
+
+            def __init__(self) -> None:
+                self.chars_budget_calls = 0
+
+            def estimate_message(self, message: Any) -> int:
+                return max(1, len(getattr(message, "text", "") or ""))
+
+            def estimate_messages(self, messages: list[Any]) -> int:
+                return sum(self.estimate_message(m) for m in messages)
+
+            def chars_budget_for(self, tokens: int) -> int:
+                self.chars_budget_calls += 1
+                return max(tokens, 0)
+
+        from typing import Any
+
+        factory = ChatMessageFactory()
+        kept = [ChatMessage.user(text_or_blocks="kept-message")]  # 12 tokens
+        big_summary = "s" * 4000
+        snapshot = assemble_snapshot("sys", "preamble", big_summary, kept, factory)
+
+        estimator = CharCountEstimator()
+        result, status = post_check_snapshot(snapshot, 200, factory, estimator)
+
+        # 摘要被截到注入口径的预算余量内；chars_budget_for 真实被调用
+        assert status == "ok"
+        assert estimator.chars_budget_calls >= 1
+        assert len(result[2].text) < len(big_summary)
+        assert estimator.estimate_messages(result) <= 200
+
+    def test_truncate_summary_input_uses_injected_estimator(self) -> None:
+        """注入估算器：截断门按注入口径判定。"""
+
+        class ConstantEstimator:
+            """恒返回 5 的测试估算器。"""
+
+            def estimate_message(self, message: Any) -> int:
+                return 5
+
+            def estimate_messages(self, messages: list[Any]) -> int:
+                return 5 * len(messages)
+
+            def chars_budget_for(self, tokens: int) -> int:
+                return max(tokens, 0)
+
+        from typing import Any
+
+        msgs = [ChatMessage.user(text_or_blocks=f"m{i}") for i in range(10)]
+
+        # 注入口径 5×10=50 ≤ 200（budget=100，limit=200）→ 不截断
+        kept, truncated = truncate_summary_input(msgs, 100, ConstantEstimator())
+        assert kept == msgs
+        assert truncated is False
+
+        # 注入口径 5×10=50 > 8（budget=4，limit=8）→ 截到 1 条
+        kept2, truncated2 = truncate_summary_input(msgs, 4, ConstantEstimator())
+        assert truncated2 is True
+        assert len(kept2) == 1
+        assert kept2[0] is msgs[-1]
+
 
 class TestCommitCompactNode:
     """专用提交路径。"""

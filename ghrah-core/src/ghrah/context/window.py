@@ -28,7 +28,7 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR
+from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR, TokenEstimator
 from ghrah.core.window_protocol import (
     MessageFactory,
     WindowableMessage,
@@ -157,6 +157,8 @@ class WindowManager:
         strategies: 策略列表（按执行顺序）
         max_tokens: token 预算；None 表示未声明（待查表/回落默认）
         message_factory: 消息构造工厂（用于需要构造新消息的策略）
+        estimator: token 估算器（预算短路与 estimate_tokens 出口口径）；
+            None 时用模块级默认实例 DEFAULT_TOKEN_ESTIMATOR
     """
 
     def __init__(
@@ -164,15 +166,22 @@ class WindowManager:
         strategies: list[WindowStrategy] | None = None,
         max_tokens: int | None = None,
         message_factory: MessageFactory | None = None,
+        estimator: TokenEstimator | None = None,
     ) -> None:
         self._strategies: list[WindowStrategy] = list(strategies) if strategies else []
         self._message_factory = message_factory
+        self._estimator: TokenEstimator = estimator or DEFAULT_TOKEN_ESTIMATOR
         if max_tokens is not None:
             self._max_tokens = max_tokens
             self._max_tokens_source = "declared"
         else:
             self._max_tokens = DEFAULT_WINDOW_MAX_TOKENS
             self._max_tokens_source = "default"
+
+    @property
+    def estimator(self) -> TokenEstimator:
+        """token 估算器实例（预算短路与 estimate 出口的统一口径）。"""
+        return self._estimator
 
     @property
     def max_tokens(self) -> int:
@@ -278,7 +287,7 @@ class WindowManager:
         """
         budget = max_tokens if max_tokens is not None else self._max_tokens
 
-        if estimate_tokens(messages) <= budget:
+        if self._estimator.estimate_messages(messages) <= budget:
             strategies = [s for s in self._strategies if not s.skip_when_under_budget]
         else:
             strategies = self._strategies
@@ -309,7 +318,7 @@ class WindowManager:
         return records
 
     def estimate_tokens(self, messages: list[WindowableMessage]) -> int:
-        """估算消息列表的总 token 数。
+        """估算消息列表的总 token 数（经注入的估算器口径）。
 
         Args:
             messages: 消息列表
@@ -317,7 +326,7 @@ class WindowManager:
         Returns:
             估算的 token 数
         """
-        return estimate_tokens(messages)
+        return self._estimator.estimate_messages(messages)
 
 
 # 厂商超限报文中的窗口数字解析模式 — 只在 _is_context_limit_error 命中后

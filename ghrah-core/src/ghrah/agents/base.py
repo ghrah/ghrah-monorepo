@@ -784,11 +784,11 @@ class ActorAgent:
         )
         from ghrah.context.persistence.serialization import serialize_node
         from ghrah.context.strategies.llm_summary import format_messages_for_summary
-        from ghrah.context.window import estimate_tokens
 
         cm = self._context_manager
         status = cm.get_window_status()
         keep_recent = status["compact_keep_recent"]
+        estimator = cm.token_estimator
 
         # 手动标志在此消费（含连续请求合并语义）；窗外为空时同样视为
         # 已消费——否则标志残留会导致每轮进回合再退出，振荡
@@ -827,7 +827,9 @@ class ActorAgent:
             budget = status["budget_tokens"]
 
         # 摘要输入体积安全：折叠后估算超 budget×2 → 渐进丢最旧并标记
-        summary_messages, truncated_input = truncate_summary_input(summary_messages, budget)
+        summary_messages, truncated_input = truncate_summary_input(
+            summary_messages, budget, estimator
+        )
 
         # LLM 摘要：agent 自有 LLM；失败降级为确定性折叠视图
         summary_text: str | None = None
@@ -884,7 +886,7 @@ class ActorAgent:
                 message_factory,
             )
 
-        snapshot, post_check = post_check_snapshot(snapshot, budget, message_factory)
+        snapshot, post_check = post_check_snapshot(snapshot, budget, message_factory, estimator)
         if post_check == "over_budget":
             logger.warning(
                 "ActorAgent[%s]: compact snapshot still over budget after self-check "
@@ -899,7 +901,7 @@ class ActorAgent:
             "kept_node_ids": [node.id for node in kept_nodes],
             "kept_recent_nodes": keep_recent,
             "tokens_before": status["occupied_tokens"],
-            "tokens_after": estimate_tokens(snapshot),
+            "tokens_after": estimator.estimate_messages(snapshot),
             "post_check": post_check,
             "degraded": degraded,
             "truncated_summary_input": truncated_input,

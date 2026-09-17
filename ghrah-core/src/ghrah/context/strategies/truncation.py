@@ -12,7 +12,8 @@
 
 from __future__ import annotations
 
-from ghrah.context.window import WindowStrategy, _split_system_messages, estimate_tokens
+from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR, TokenEstimator
+from ghrah.context.window import WindowStrategy, _split_system_messages
 from ghrah.core.window_protocol import WindowableMessage
 
 __all__ = ["TruncationStrategy"]
@@ -27,9 +28,15 @@ class TruncationStrategy(WindowStrategy):
     - 直到总 token 数 <= token_budget 或只剩 system 消息
 
     适用场景：最终兜底策略，确保消息不超过预算。
+
+    Args:
+        estimator: token 估算器；None 时用模块级默认实例
     """
 
     skip_when_under_budget = True
+
+    def __init__(self, estimator: TokenEstimator | None = None) -> None:
+        self._estimator: TokenEstimator = estimator or DEFAULT_TOKEN_ESTIMATOR
 
     async def apply(
         self, messages: list[WindowableMessage], token_budget: int
@@ -46,13 +53,16 @@ class TruncationStrategy(WindowStrategy):
         system_msgs, other_msgs = _split_system_messages(messages)
 
         # 如果已在预算内，直接返回
-        current_tokens = estimate_tokens(messages)
+        current_tokens = self._estimator.estimate_messages(messages)
         if current_tokens <= token_budget:
             return list(messages)
 
         # 从头部（最旧的）开始移除非 system 消息
         result_other = list(other_msgs)
-        while result_other and estimate_tokens(system_msgs + result_other) > token_budget:
+        while (
+            result_other
+            and self._estimator.estimate_messages(system_msgs + result_other) > token_budget
+        ):
             result_other.pop(0)
 
         return system_msgs + result_other

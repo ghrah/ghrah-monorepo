@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from ghrah.abilities.base import Ability
-from ghrah.context.window import estimate_message_tokens
 from ghrah.types.results import ActionOutcome, ActionResult
 
 if TYPE_CHECKING:
@@ -235,7 +234,7 @@ class RecallContextAbility(Ability):
         if args.mode == "list":
             data = self._build_list(selected, args)
         else:
-            data = self._build_messages(selected, args)
+            data = self._build_messages(selected, args, cm)
         data["truncated"] = data.get("truncated", False) or truncated_by_limit
         return ActionResult(outcome=ActionOutcome.SUCCESS, data=data)
 
@@ -306,8 +305,17 @@ class RecallContextAbility(Ability):
             entries.append(entry)
         return {"nodes": entries, "count": len(entries)}
 
-    def _build_messages(self, nodes: list[Any], args: RecallContextInput) -> dict[str, Any]:
-        """messages 模式：按节点分组的消息原文，受 max_output_tokens 约束。"""
+    def _build_messages(
+        self, nodes: list[Any], args: RecallContextInput, cm: Any
+    ) -> dict[str, Any]:
+        """messages 模式：按节点分组的消息原文，受 max_output_tokens 约束。
+
+        token 扣减走 context_manager 的统一估算器口径（token_estimator
+        出口：WindowManager 侧实例优先，未配置 window 时回落默认实例）。
+        """
+        from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR
+
+        estimator = getattr(cm, "token_estimator", None) or DEFAULT_TOKEN_ESTIMATOR
         entries: list[dict[str, Any]] = []
         budget = args.max_output_tokens
         truncated = False
@@ -326,7 +334,7 @@ class RecallContextAbility(Ability):
                     "source": getattr(msg, "source", None),
                     "text": _message_text(msg),
                 }
-                cost = max(1, estimate_message_tokens(msg))
+                cost = max(1, estimator.estimate_message(msg))
                 if node_tokens + cost > budget:
                     truncated = True
                     exhausted = True

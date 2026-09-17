@@ -22,6 +22,7 @@ from typing import Any
 from ghrah.abilities.executor import AbilityExecutor, LocalAbilityExecutor
 from ghrah.context.manager import ContextManager
 from ghrah.context.persistence import create_persistence
+from ghrah.context.token_estimator import TokenEstimator
 from ghrah.context.window import WindowManager
 from ghrah.core.ability_protocol import AbilityProtocol
 from ghrah.core.event_publisher import EventPublisher, NullEventPublisher
@@ -35,17 +36,21 @@ logger = logging.getLogger(__name__)
 def _build_window_manager(
     config: WindowConfig,
     summary_llm_factory: Callable[[], LLMProtocol] | None = None,
+    estimator: TokenEstimator | None = None,
 ) -> WindowManager:
     """从 WindowConfig 构建 WindowManager 实例。
 
     根据配置中的策略名称列表，创建对应的策略实例并组合到 WindowManager 中。
     ``summary_llm_factory`` 传入时，llm_summary 策略以惰性工厂回调持有 LLM 创建入口
     （首次 apply 时解析，memoize 成功结果），解除策略装配先于 LLM 创建的时序耦合。
+    ``estimator`` 传入时作为 WindowManager 与各策略的统一估算口径（None 用
+    模块级默认实例）。
 
     Args:
         config: 窗口管理配置
         summary_llm_factory: 可选的零参 LLM 工厂回调（闭包在
             ``_build_context_manager`` 处捕获 AgentConfig）
+        estimator: 可选的 token 估算器实例
 
     Returns:
         配置好的 WindowManager 实例
@@ -59,7 +64,7 @@ def _build_window_manager(
     msg_factory = ChatMessageFactory()
 
     strategy_map = {
-        "truncation": lambda: TruncationStrategy(),
+        "truncation": lambda: TruncationStrategy(estimator=estimator),
         "sliding_window": lambda: SlidingWindowStrategy(window_size=config.sliding_window_size),
         "tool_call_fold": lambda: ToolCallFoldStrategy(
             max_content_length=config.tool_call_max_length,
@@ -69,6 +74,7 @@ def _build_window_manager(
             llm=None,
             llm_factory=summary_llm_factory,
             message_factory=msg_factory,
+            estimator=estimator,
         ),
     }
 
@@ -84,6 +90,7 @@ def _build_window_manager(
         strategies=strategies,
         max_tokens=config.max_tokens,
         message_factory=msg_factory,
+        estimator=estimator,
     )
 
 
@@ -162,6 +169,7 @@ def _build_context_manager(
     persistence_factory: Callable[[AgentConfig], Any] | None = None,
     llm_factory: Callable[[AgentConfig], LLMProtocol] | None = None,
     supervisor: Any = None,
+    estimator: TokenEstimator | None = None,
 ) -> ContextManager:
     """从 AgentConfig 构建 ContextManager（含 WindowManager + Persistence）。
 
@@ -170,6 +178,10 @@ def _build_context_manager(
 
     ``llm_factory`` 以零参闭包（捕获此处作用域的 AgentConfig）注入 WindowManager
     的 llm_summary 策略，供其惰性解析 LLM。
+
+    ``estimator`` 为统一 token 估算口径的注入点：WindowManager、策略、
+    compact 回合、recall 经 ContextManager.token_estimator 出口共用同一
+    实例；None 时全线回落模块级默认实例。
 
     集群身份注入（``config.cluster_context_injection=True`` 且 supervisor
     提供 ``get_cluster_context``）时，[Cluster Context] 段前置拼接
@@ -225,7 +237,7 @@ def _build_context_manager(
     compact_kwargs: dict[str, Any] = {}
     if config.window is not None:
         summary_llm_factory = (lambda: llm_factory(config)) if llm_factory is not None else None
-        window_manager = _build_window_manager(config.window, summary_llm_factory)
+        window_manager = _build_window_manager(config.window, summary_llm_factory, estimator)
         compact_kwargs = {
             "compact_threshold": config.window.compact_threshold,
             "compact_keep_recent": config.window.compact_keep_recent,
@@ -260,6 +272,7 @@ def _build_context_manager(
             else persistence_factory is not None
         ),
         message_factory=message_factory,
+        estimator=estimator,
         **compact_kwargs,
     )
 

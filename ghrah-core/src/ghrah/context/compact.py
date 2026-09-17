@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from ghrah.context.window import estimate_tokens
+from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR, TokenEstimator
 
 if TYPE_CHECKING:
     from ghrah.context.node import ContextNode
@@ -188,7 +188,9 @@ def fold_long_tool_outputs(
 
 
 def truncate_summary_input(
-    messages: list[WindowableMessage], budget: int
+    messages: list[WindowableMessage],
+    budget: int,
+    estimator: TokenEstimator | None = None,
 ) -> tuple[list[WindowableMessage], bool]:
     """摘要输入体积安全：超 budget×2 时渐进丢弃最旧消息并加标记。
 
@@ -197,15 +199,17 @@ def truncate_summary_input(
     Args:
         messages: 折叠后的摘要侧消息
         budget: 声明 token 预算
+        estimator: token 估算器；None 时用模块级默认实例
 
     Returns:
         (截断后消息, 是否发生过截断)
     """
+    est = estimator or DEFAULT_TOKEN_ESTIMATOR
     limit = budget * 2
-    if estimate_tokens(messages) <= limit:
+    if est.estimate_messages(messages) <= limit:
         return messages, False
     kept = list(messages)
-    while kept and estimate_tokens(kept) > limit:
+    while kept and est.estimate_messages(kept) > limit:
         kept.pop(0)
     return kept, True
 
@@ -253,22 +257,28 @@ def assemble_snapshot(
 
 
 def post_check_snapshot(
-    snapshot: list[WindowableMessage], budget: int, message_factory: MessageFactory
+    snapshot: list[WindowableMessage],
+    budget: int,
+    message_factory: MessageFactory,
+    estimator: TokenEstimator | None = None,
 ) -> tuple[list[WindowableMessage], str]:
     """提交前自检：估算快照体积超预算时截断摘要文本（保留窗为地板）。
 
     Args:
         snapshot: 待自检快照（布局：system/preamble/summary/kept…，
             摘要消息为可选第 3 条，识别特征 SUMMARY_MESSAGE_PREFIX 置首）
-        budget: token 预算（估算口径 chars/4，非承重）
+        budget: token 预算
         message_factory: 消息构造工厂
+        estimator: token 估算器（同时提供 tokens→chars 截断上界的逆运算）；
+            None 时用模块级默认实例
 
     Returns:
         (处理后的快照, 状态)，状态为 "ok" 或 "over_budget"。摘要文本截断
         至预算余量；保留窗不缩减（keep_recent≥2 为地板）。终态仍超预算
         （病理：system + 2 轮 > 预算）时原样返回并标 over_budget。
     """
-    if estimate_tokens(snapshot) <= budget:
+    est = estimator or DEFAULT_TOKEN_ESTIMATOR
+    if est.estimate_messages(snapshot) <= budget:
         return snapshot, "ok"
 
     summary_index = next(
@@ -284,30 +294,31 @@ def post_check_snapshot(
         # 降级快照无摘要消息可截——按 over_budget 提交（保留窗是地板）
         return snapshot, "over_budget"
 
-    overhead = estimate_tokens(snapshot) - estimate_tokens([snapshot[summary_index]])
+    overhead = est.estimate_messages(snapshot) - est.estimate_message(snapshot[summary_index])
     remaining = budget - overhead
     if remaining <= 0:
         return snapshot, "over_budget"
 
-    # 估算口径下 chars ≈ tokens×4；截到余量后重估，必要时再收紧一轮
+    # 逆运算取保守字符上界起步，estimate 复评收紧循环兜底（口径与估算器
+    # 解耦——ASCII 密集时一轮可能不够，CJK 密集时一轮即到位）
     summary_text = snapshot[summary_index].text
-    truncated = summary_text[: max(remaining * 4, 0)]
+    truncated = summary_text[: est.chars_budget_for(remaining)]
     new_snapshot = list(snapshot)
     new_snapshot[summary_index] = message_factory.create_message(
         role="system", text=truncated, source="system:runtime"
     )
-    if estimate_tokens(new_snapshot) <= budget:
+    if est.estimate_messages(new_snapshot) <= budget:
         return new_snapshot, "ok"
 
-    # 一次截断不够（块级计数有下限）：按字符贪心收紧至预算内或枯竭
+    # 一次截断不够：按 estimate 差值贪心收紧至预算内或枯竭
     while remaining > 0:
-        remaining -= max(1, estimate_tokens(new_snapshot) - budget)
-        truncated = truncated[: max(remaining * 4, 0)]
+        remaining -= max(1, est.estimate_messages(new_snapshot) - budget)
+        truncated = truncated[: est.chars_budget_for(remaining)]
         if not truncated:
             break
         new_snapshot[summary_index] = message_factory.create_message(
             role="system", text=truncated, source="system:runtime"
         )
-        if estimate_tokens(new_snapshot) <= budget:
+        if est.estimate_messages(new_snapshot) <= budget:
             return new_snapshot, "ok"
     return new_snapshot, "over_budget"

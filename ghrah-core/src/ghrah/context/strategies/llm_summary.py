@@ -24,7 +24,8 @@ from collections.abc import Callable
 from typing import Any
 
 from ghrah.context.compact import SUMMARY_MESSAGE_PREFIX
-from ghrah.context.window import WindowStrategy, _split_system_messages, estimate_tokens
+from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR, TokenEstimator
+from ghrah.context.window import WindowStrategy, _split_system_messages
 from ghrah.core.window_protocol import (
     MessageFactory,
     SummaryLLMProtocol,
@@ -112,6 +113,7 @@ class LLMSummaryStrategy(WindowStrategy):
         message_factory: 消息构造工厂，用于构造摘要消息和 LLM 输入消息
         llm_factory: 零参 LLM 工厂回调（可选；用于策略装配先于 LLM 创建的
             时序解耦，在首次需要时惰性解析）
+        estimator: token 估算器；None 时用模块级默认实例
     """
 
     skip_when_under_budget = True
@@ -122,6 +124,7 @@ class LLMSummaryStrategy(WindowStrategy):
         summary_prompt: str | None = None,
         message_factory: MessageFactory | None = None,
         llm_factory: Callable[[], SummaryLLMProtocol] | None = None,
+        estimator: TokenEstimator | None = None,
     ) -> None:
         self._llm = llm
         self._summary_prompt = summary_prompt or _DEFAULT_SUMMARY_PROMPT
@@ -129,6 +132,7 @@ class LLMSummaryStrategy(WindowStrategy):
         self._llm_factory = llm_factory
         self._factory_llm: SummaryLLMProtocol | None = None
         self._last_compaction: dict[str, Any] | None = None
+        self._estimator: TokenEstimator = estimator or DEFAULT_TOKEN_ESTIMATOR
 
     @property
     def summary_prompt(self) -> str:
@@ -148,7 +152,7 @@ class LLMSummaryStrategy(WindowStrategy):
             压缩后的消息列表
         """
         # 如果已在预算内，直接返回
-        current_tokens = estimate_tokens(messages)
+        current_tokens = self._estimator.estimate_messages(messages)
         if current_tokens <= token_budget:
             return list(messages)
 
@@ -158,7 +162,7 @@ class LLMSummaryStrategy(WindowStrategy):
             return list(messages)
 
         # 计算分割点：3/4 预算分给新消息
-        system_tokens = estimate_tokens(system_msgs)
+        system_tokens = self._estimator.estimate_messages(system_msgs)
         remaining_budget = token_budget - system_tokens
         new_budget = int(remaining_budget * 0.75)
 
@@ -181,7 +185,7 @@ class LLMSummaryStrategy(WindowStrategy):
                 "strategy": self.name,
                 "summarized_messages": len(old_msgs),
                 "tokens_before": current_tokens,
-                "tokens_after": estimate_tokens(result),
+                "tokens_after": self._estimator.estimate_messages(result),
                 "summary": summary_msg.text,
             }
             logger.info(
@@ -212,7 +216,7 @@ class LLMSummaryStrategy(WindowStrategy):
         split_index = len(messages)
 
         for i in range(len(messages) - 1, -1, -1):
-            msg_tokens = estimate_tokens([messages[i]])
+            msg_tokens = self._estimator.estimate_message(messages[i])
             cumulative += msg_tokens
             if cumulative > new_budget:
                 # 当前消息也属于旧消息

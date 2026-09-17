@@ -456,6 +456,45 @@ class TestWindowManager:
         msgs = [_human("a" * 100)]
         assert wm.estimate_tokens(msgs) == estimate_tokens(msgs)
 
+    def test_estimator_defaults_to_default_instance(self) -> None:
+        """未注入 estimator 时用模块级默认实例。"""
+        from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR
+
+        wm = WindowManager()
+        assert wm.estimator is DEFAULT_TOKEN_ESTIMATOR
+
+    @pytest.mark.asyncio
+    async def test_estimator_overrides_budget_short_circuit(self) -> None:
+        """注入估算器后预算短路按注入口径生效。"""
+
+        class ConstantEstimator:
+            """恒返回 10 的测试估算器。"""
+
+            def estimate_message(self, message: Any) -> int:
+                return 10
+
+            def estimate_messages(self, messages: list[Any]) -> int:
+                return 10 * len(messages)
+
+            def chars_budget_for(self, tokens: int) -> int:
+                return max(tokens, 0)
+
+        flagged = _FlaggedNoOp("flagged", skip_when_under_budget=True)
+        msg = _human("hi")
+        # 消息极少（注入口径 10 tokens < 预算 1000）→ 短路跳过 flagged
+        wm = WindowManager(strategies=[flagged], max_tokens=1000, estimator=ConstantEstimator())
+        await wm.apply([msg])
+        assert flagged.applied == 0
+
+        # 注入口径 10×500 > 预算 1000 → 不短路，flagged 执行
+        flagged2 = _FlaggedNoOp("flagged2", skip_when_under_budget=True)
+        wm2 = WindowManager(strategies=[flagged2], max_tokens=1000, estimator=ConstantEstimator())
+        await wm2.apply([msg] * 500)
+        assert flagged2.applied == 1
+
+        # estimate_tokens 出口也走注入口径
+        assert wm.estimate_tokens([msg] * 7) == 70
+
     def test_strategies_returns_copy(self) -> None:
         """strategies 属性返回副本，修改不影响内部。"""
         wm = WindowManager(strategies=[NoOpStrategy()])

@@ -34,6 +34,7 @@ from ghrah.context.node import ContextNode
 from ghrah.context.persistence import ContextChanges, PersistenceBackend
 from ghrah.context.session_runtime import SessionRuntime
 from ghrah.context.state import StateManager
+from ghrah.context.token_estimator import DEFAULT_TOKEN_ESTIMATOR, TokenEstimator
 from ghrah.context.window import WindowManager
 from ghrah.core.window_protocol import MessageFactory
 
@@ -79,6 +80,8 @@ class ContextManager:
         compact_threshold: 链上 compact 触发阈值（0~1 相对预算比率）；None 禁用
         compact_keep_recent: compact 保留窗节点数
         compact_method: compact 综合方法名（当前唯一合法值 "ghrah.builtin"）
+        estimator: token 估算器（WindowManager 侧无实例时的 CM 级口径）；
+            None 时用模块级默认实例 DEFAULT_TOKEN_ESTIMATOR
     """
 
     def __init__(
@@ -99,6 +102,7 @@ class ContextManager:
         compact_threshold: float | None = None,
         compact_keep_recent: int = 2,
         compact_method: str = "ghrah.builtin",
+        estimator: TokenEstimator | None = None,
     ) -> None:
         self._agent_name = agent_name
         self._state_manager = StateManager(initial_state)
@@ -108,6 +112,7 @@ class ContextManager:
         self._persistence = persistence
         self._auto_persist = auto_persist
         self._message_factory = message_factory
+        self._estimator: TokenEstimator = estimator or DEFAULT_TOKEN_ESTIMATOR
         self._pending_messages: list[Any] = []
         self._in_iteration: bool = False
         self._pending_compaction: list[dict[str, Any]] = []
@@ -207,6 +212,17 @@ class ContextManager:
     def window_manager(self) -> WindowManager | None:
         """窗口管理器（只读访问）。"""
         return self._window_manager
+
+    @property
+    def token_estimator(self) -> TokenEstimator:
+        """token 估算器 — WindowManager 实例优先，CM 级参数兜底。
+
+        compact 回合与 recall 等消费方经本出口取统一口径，避免各自
+        持有独立实例造成漂移。
+        """
+        if self._window_manager is not None:
+            return self._window_manager.estimator
+        return self._estimator
 
     @property
     def compact_threshold(self) -> float | None:
