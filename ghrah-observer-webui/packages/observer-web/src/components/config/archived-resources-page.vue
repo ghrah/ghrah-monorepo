@@ -136,14 +136,24 @@ onMounted(refreshArchivedProjects);
         <h2>{{ t("config.archived.title") }}</h2>
         <p>{{ t("config.archived.description") }}</p>
       </div>
-      <button type="button" class="btn-secondary" :disabled="busy !== null" @click="refreshArchivedProjects">
+      <button
+        type="button"
+        class="btn-secondary"
+        :disabled="busy !== null"
+        @click="refreshArchivedProjects"
+      >
         {{ busy === "refresh" ? t("common.loading") : t("config.archived.refresh") }}
       </button>
     </header>
 
     <div v-if="errorMessage" class="archived-resources-error" role="alert">
       <span>{{ errorMessage }}</span>
-      <button v-if="hasVersionConflict" type="button" :disabled="busy !== null" @click="refreshArchivedProjects">
+      <button
+        v-if="hasVersionConflict"
+        type="button"
+        :disabled="busy !== null"
+        @click="refreshArchivedProjects"
+      >
         {{ t("config.archived.refresh") }}
       </button>
     </div>
@@ -161,17 +171,31 @@ onMounted(refreshArchivedProjects);
         {{ t("config.archived.noProjects") }}
       </p>
       <ul v-else class="archived-resource-list">
-        <li v-for="project in archivedProjects" :key="project.project_id" class="archived-resource-card">
+        <li
+          v-for="project in archivedProjects"
+          :key="project.project_id"
+          class="archived-resource-card"
+        >
           <div class="archived-resource-summary">
-            <span class="archived-resource-icon" aria-hidden="true">{{ project.name.slice(0, 1).toUpperCase() }}</span>
+            <span class="archived-resource-icon" aria-hidden="true">{{
+              project.name.slice(0, 1).toUpperCase()
+            }}</span>
             <div class="archived-resource-copy">
               <strong>{{ project.name }}</strong>
               <code>{{ project.project_id }}</code>
-              <span>{{ t("config.archived.archivedAt", { date: formatArchivedAt(project.archived_at) }) }}</span>
+              <span>{{
+                t("config.archived.archivedAt", { date: formatArchivedAt(project.archived_at) })
+              }}</span>
             </div>
             <dl class="archived-resource-counts">
-              <div><dt>{{ t("config.archived.agents") }}</dt><dd>{{ project.agents?.length ?? 0 }}</dd></div>
-              <div><dt>{{ t("config.archived.status") }}</dt><dd>{{ project.status }}</dd></div>
+              <div>
+                <dt>{{ t("config.archived.agents") }}</dt>
+                <dd>{{ project.agents?.length ?? 0 }}</dd>
+              </div>
+              <div>
+                <dt>{{ t("config.archived.status") }}</dt>
+                <dd>{{ project.status }}</dd>
+              </div>
             </dl>
             <div class="archived-resource-actions">
               <button
@@ -182,7 +206,12 @@ onMounted(refreshArchivedProjects);
               >
                 {{ t("config.archived.restore") }}
               </button>
-              <button type="button" class="archived-danger-toggle" :disabled="busy !== null" @click="openDanger(project)">
+              <button
+                type="button"
+                class="archived-danger-toggle"
+                :disabled="busy !== null"
+                @click="openDanger(project)"
+              >
                 {{ t("config.archived.deletePermanently") }}
               </button>
             </div>
@@ -210,7 +239,9 @@ onMounted(refreshArchivedProjects);
             />
             <label v-if="requiresCascade(project.project_id)" class="project-cascade-check">
               <input v-model="cascadeRooms" type="checkbox" :disabled="busy !== null" />
-              <span>{{ t("config.archived.cascadeRooms", { count: knownRoomCount(project.project_id) }) }}</span>
+              <span>{{
+                t("config.archived.cascadeRooms", { count: knownRoomCount(project.project_id) })
+              }}</span>
             </label>
             <button
               type="button"
@@ -227,9 +258,21 @@ onMounted(refreshArchivedProjects);
 
     <ConfirmDialog
       v-if="pendingAction"
-      :title="pendingAction.kind === 'restore' ? t('config.archived.restoreTitle') : t('config.archived.deleteTitle')"
-      :message="pendingAction.kind === 'restore' ? t('config.archived.restoreConfirm') : t('config.archived.deleteConfirm')"
-      :confirm-label="pendingAction.kind === 'restore' ? t('config.archived.restore') : t('config.archived.deleteProject')"
+      :title="
+        pendingAction.kind === 'restore'
+          ? t('config.archived.restoreTitle')
+          : t('config.archived.deleteTitle')
+      "
+      :message="
+        pendingAction.kind === 'restore'
+          ? t('config.archived.restoreConfirm')
+          : t('config.archived.deleteConfirm')
+      "
+      :confirm-label="
+        pendingAction.kind === 'restore'
+          ? t('config.archived.restore')
+          : t('config.archived.deleteProject')
+      "
       :danger="pendingAction.kind === 'delete'"
       @cancel="pendingAction = null"
       @confirm="runPendingAction"

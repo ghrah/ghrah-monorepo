@@ -62,7 +62,12 @@ async function handleTerminate() {
 
 <template>
   <div v-if="agents.selectedAgentName" class="relative">
-    <button type="button" class="agent-menu-trigger" :title="t('agents.actions')" @click="showMenu = !showMenu">
+    <button
+      type="button"
+      class="agent-menu-trigger"
+      :title="t('agents.actions')"
+      @click="showMenu = !showMenu"
+    >
       &#8943;
     </button>
 
@@ -79,7 +84,12 @@ async function handleTerminate() {
         {{ t("agents.compactContext") }}
       </button>
       <div class="agent-menu-separator" />
-      <button type="button" class="agent-menu-item agent-menu-item--danger" :disabled="loading" @click="handleTerminate">
+      <button
+        type="button"
+        class="agent-menu-item agent-menu-item--danger"
+        :disabled="loading"
+        @click="handleTerminate"
+      >
         {{ t("agents.terminateAgent") }}
       </button>
     </div>

@@ -136,19 +136,40 @@ async function runLifecycle() {
 <template>
   <div class="room-selector sidebar-section">
     <div class="section-heading">
-      <div><span class="section-eyebrow">{{ t("nav.room.workspace") }}</span><h3>{{ t("nav.room.rooms") }}</h3></div>
+      <div>
+        <span class="section-eyebrow">{{ t("nav.room.workspace") }}</span>
+        <h3>{{ t("nav.room.rooms") }}</h3>
+      </div>
       <button
         v-if="!creating"
         type="button"
         class="btn-primary text-xs px-2 py-0.5"
         :disabled="!projects.activeProjectId"
         :title="t('nav.room.new')"
-        @click="creating = true; newName = ''"
-      >+ {{ t("common.create") }}</button>
+        @click="
+          creating = true;
+          newName = '';
+        "
+      >
+        + {{ t("common.create") }}
+      </button>
     </div>
     <form v-if="creating" class="mb-2 flex gap-1" @submit.prevent="submitCreate">
-      <input v-model="newName" data-autofocus type="text" :placeholder="t('nav.room.namePlaceholder')" class="flex-1 min-w-0 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500" @keydown.esc="cancelCreate" />
-      <button type="submit" class="btn-primary text-xs px-2 py-1" :disabled="busy || !newName.trim()">{{ busy ? "…" : t("common.create") }}</button>
+      <input
+        v-model="newName"
+        data-autofocus
+        type="text"
+        :placeholder="t('nav.room.namePlaceholder')"
+        class="flex-1 min-w-0 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        @keydown.esc="cancelCreate"
+      />
+      <button
+        type="submit"
+        class="btn-primary text-xs px-2 py-1"
+        :disabled="busy || !newName.trim()"
+      >
+        {{ busy ? "…" : t("common.create") }}
+      </button>
       <button type="button" class="btn-secondary text-xs px-2 py-1" @click="cancelCreate">✕</button>
     </form>
     <SidebarList v-if="visibleRooms.length > 0" :label="t('nav.room.rooms')">
@@ -161,15 +182,23 @@ async function runLifecycle() {
       >
         <template #leading><span class="room-list-icon">#</span></template>
         {{ room.name }}
-        <template #trailing><span class="room-member-count">{{ room.members.length }}</span></template>
+        <template #trailing
+          ><span class="room-member-count">{{ room.members.length }}</span></template
+        >
         <template v-if="room.members.length > 0" #secondary>
           <span class="room-member-stack">
             <span
               v-for="member in room.members"
               :key="member.subject"
               :title="memberLabel(member, room.project_id)"
-              :class="['room-member inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold', isMultiRoom(member.subject) ? 'bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 ring-1 ring-amber-500' : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300']"
-            >{{ memberLabel(member, room.project_id).slice(0, 1).toUpperCase() }}</span>
+              :class="[
+                'room-member inline-flex items-center justify-center w-5 h-5 rounded-full text-xs font-semibold',
+                isMultiRoom(member.subject)
+                  ? 'bg-amber-200 dark:bg-amber-800 text-amber-900 dark:text-amber-100 ring-1 ring-amber-500'
+                  : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300',
+              ]"
+              >{{ memberLabel(member, room.project_id).slice(0, 1).toUpperCase() }}</span
+            >
           </span>
         </template>
         <template #actions>
@@ -179,11 +208,25 @@ async function runLifecycle() {
             :aria-label="t('nav.room.actions', { name: room.name })"
             :aria-expanded="actionRoomId === room.room_id"
             @click.stop="actionRoomId = actionRoomId === room.room_id ? null : room.room_id"
-          >⋯</button>
+          >
+            ⋯
+          </button>
           <span v-if="actionRoomId === room.room_id" class="sidebar-row-menu">
-            <button type="button" @click.stop="selectRoom(room); actionRoomId = null">{{ t("nav.room.manage") }}</button>
-            <button type="button" @click.stop="requestLifecycle('archive', room)">{{ t("roomAdmin.archive") }}</button>
-            <button type="button" class="danger" @click.stop="requestLifecycle('delete', room)">{{ t("roomAdmin.delete") }}</button>
+            <button
+              type="button"
+              @click.stop="
+                selectRoom(room);
+                actionRoomId = null;
+              "
+            >
+              {{ t("nav.room.manage") }}
+            </button>
+            <button type="button" @click.stop="requestLifecycle('archive', room)">
+              {{ t("roomAdmin.archive") }}
+            </button>
+            <button type="button" class="danger" @click.stop="requestLifecycle('delete', room)">
+              {{ t("roomAdmin.delete") }}
+            </button>
           </span>
         </template>
       </SidebarRow>
@@ -193,9 +236,19 @@ async function runLifecycle() {
     </p>
     <ConfirmDialog
       v-if="pendingLifecycle"
-      :title="pendingLifecycle.action === 'archive' ? t('roomAdmin.archiveTitle') : t('roomAdmin.deleteTitle')"
-      :message="pendingLifecycle.action === 'archive' ? t('roomAdmin.archiveConfirm') : t('roomAdmin.deleteConfirm')"
-      :confirm-label="pendingLifecycle.action === 'archive' ? t('roomAdmin.archive') : t('roomAdmin.delete')"
+      :title="
+        pendingLifecycle.action === 'archive'
+          ? t('roomAdmin.archiveTitle')
+          : t('roomAdmin.deleteTitle')
+      "
+      :message="
+        pendingLifecycle.action === 'archive'
+          ? t('roomAdmin.archiveConfirm')
+          : t('roomAdmin.deleteConfirm')
+      "
+      :confirm-label="
+        pendingLifecycle.action === 'archive' ? t('roomAdmin.archive') : t('roomAdmin.delete')
+      "
       :danger="pendingLifecycle.action === 'delete'"
       @cancel="pendingLifecycle = null"
       @confirm="runLifecycle"

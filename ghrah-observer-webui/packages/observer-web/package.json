@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
     "test": "vitest run",
-    "lint": "biome check src/ && pnpm lint:i18n && pnpm lint:ui-tokens",
+    "lint": "oxlint src/ && eslint src/ && prettier --check src/ && pnpm lint:i18n && pnpm lint:ui-tokens",
     "lint:i18n": "node scripts/check-i18n.mjs",
     "lint:ui-tokens": "node scripts/check-ui-tokens.mjs"
   },

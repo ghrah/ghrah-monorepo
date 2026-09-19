@@ -171,11 +171,7 @@ const placeholder = computed(() =>
           @{{ agent.name }}
         </li>
       </ul>
-      <button
-        type="submit"
-        :disabled="props.disabled || !input.trim()"
-        class="btn-primary text-sm"
-      >
+      <button type="submit" :disabled="props.disabled || !input.trim()" class="btn-primary text-sm">
         {{ t("chat.input.send") }}
       </button>
     </div>

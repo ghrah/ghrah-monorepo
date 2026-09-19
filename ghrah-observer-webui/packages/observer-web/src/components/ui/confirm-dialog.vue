@@ -27,7 +27,9 @@ const { t } = useI18n();
         type="button"
         :class="danger ? 'btn-primary confirm-dialog-danger' : 'btn-primary'"
         @click="$emit('confirm')"
-      >{{ confirmLabel ?? t("common.confirm") }}</button>
+      >
+        {{ confirmLabel ?? t("common.confirm") }}
+      </button>
     </template>
   </BaseModal>
 </template>

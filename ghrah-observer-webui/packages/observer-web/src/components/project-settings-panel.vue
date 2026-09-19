@@ -236,13 +236,21 @@ async function refreshAfterConflict() {
     <div v-if="!project" class="project-panel-empty">{{ t("projectSettings.unavailable") }}</div>
     <template v-else>
       <header class="project-panel-header">
-        <div><span class="section-eyebrow">{{ t("projectSettings.eyebrow") }}</span><h2>{{ project.name }}</h2></div>
+        <div>
+          <span class="section-eyebrow">{{ t("projectSettings.eyebrow") }}</span>
+          <h2>{{ project.name }}</h2>
+        </div>
         <span class="project-status-chip">{{ project.status }} · v{{ project.version }}</span>
       </header>
 
       <div v-if="errorMessage" class="project-panel-error" role="alert">
         <span>{{ errorMessage }}</span>
-        <button v-if="versionConflict" type="button" :disabled="busy !== null" @click="refreshAfterConflict">
+        <button
+          v-if="versionConflict"
+          type="button"
+          :disabled="busy !== null"
+          @click="refreshAfterConflict"
+        >
           {{ t("projectSettings.refresh") }}
         </button>
       </div>
@@ -251,12 +259,31 @@ async function refreshAfterConflict() {
         <h3>{{ t("projectSettings.details") }}</h3>
         <form class="project-settings-form" @submit.prevent="saveProject">
           <label for="project-settings-name">{{ t("projectSettings.name") }}</label>
-          <input id="project-settings-name" v-model="nameDraft" type="text" :disabled="busy !== null" />
+          <input
+            id="project-settings-name"
+            v-model="nameDraft"
+            type="text"
+            :disabled="busy !== null"
+          />
           <label for="project-settings-description">{{ t("projectSettings.description") }}</label>
-          <textarea id="project-settings-description" v-model="descriptionDraft" rows="3" :disabled="busy !== null" />
+          <textarea
+            id="project-settings-description"
+            v-model="descriptionDraft"
+            rows="3"
+            :disabled="busy !== null"
+          />
           <label for="project-settings-manifest">{{ t("projectSettings.manifest") }}</label>
-          <input id="project-settings-manifest" v-model="manifestDraft" type="text" :disabled="busy !== null" />
-          <button type="submit" class="btn-primary" :disabled="!dirty || !nameDraft.trim() || busy !== null">
+          <input
+            id="project-settings-manifest"
+            v-model="manifestDraft"
+            type="text"
+            :disabled="busy !== null"
+          />
+          <button
+            type="submit"
+            class="btn-primary"
+            :disabled="!dirty || !nameDraft.trim() || busy !== null"
+          >
             {{ busy === "save" ? t("common.loading") : t("common.save") }}
           </button>
         </form>
@@ -265,37 +292,65 @@ async function refreshAfterConflict() {
       <section class="project-settings-section project-storage-summary">
         <h3>{{ t("projectSettings.storage") }}</h3>
         <dl>
-          <div><dt>{{ t("projectSettings.root") }}</dt><dd><code>{{ project.project_root_locator || t("nav.project.legacyRoot") }}</code></dd></div>
-          <div><dt>{{ t("projectSettings.workspaces") }}</dt><dd>{{ project.workspaces?.length ?? 0 }}</dd></div>
-          <div><dt>{{ t("projectSettings.agents") }}</dt><dd>{{ project.agents?.length ?? 0 }}</dd></div>
-          <div><dt>{{ t("projectSettings.rooms") }}</dt><dd>{{ roomCount }}</dd></div>
+          <div>
+            <dt>{{ t("projectSettings.root") }}</dt>
+            <dd>
+              <code>{{ project.project_root_locator || t("nav.project.legacyRoot") }}</code>
+            </dd>
+          </div>
+          <div>
+            <dt>{{ t("projectSettings.workspaces") }}</dt>
+            <dd>{{ project.workspaces?.length ?? 0 }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("projectSettings.agents") }}</dt>
+            <dd>{{ project.agents?.length ?? 0 }}</dd>
+          </div>
+          <div>
+            <dt>{{ t("projectSettings.rooms") }}</dt>
+            <dd>{{ roomCount }}</dd>
+          </div>
         </dl>
         <p>{{ t("projectSettings.workspaceBoundary") }}</p>
       </section>
 
       <section class="project-settings-section archived-room-section">
         <div class="project-settings-section-heading">
-          <div><h3>{{ t("projectSettings.archivedRooms") }}</h3><p>{{ t("projectSettings.archivedRoomsHint") }}</p></div>
+          <div>
+            <h3>{{ t("projectSettings.archivedRooms") }}</h3>
+            <p>{{ t("projectSettings.archivedRoomsHint") }}</p>
+          </div>
           <span>{{ archivedRooms.length }}</span>
         </div>
-        <p v-if="archivedRooms.length === 0" class="archived-resource-empty">{{ t("projectSettings.noArchivedRooms") }}</p>
+        <p v-if="archivedRooms.length === 0" class="archived-resource-empty">
+          {{ t("projectSettings.noArchivedRooms") }}
+        </p>
         <ul v-else class="archived-room-list">
           <li v-for="archivedRoom in archivedRooms" :key="archivedRoom.room_id">
             <span class="archived-room-mark" aria-hidden="true">#</span>
-            <div><strong>{{ archivedRoom.name }}</strong><small>{{ t("projectSettings.roomVersion", { version: archivedRoom.version }) }}</small></div>
+            <div>
+              <strong>{{ archivedRoom.name }}</strong
+              ><small>{{
+                t("projectSettings.roomVersion", { version: archivedRoom.version })
+              }}</small>
+            </div>
             <button
               type="button"
               class="btn-secondary"
               :disabled="busy !== null || parentArchived"
               :title="parentArchived ? t('projectSettings.restoreProjectFirst') : undefined"
               @click="pendingAction = { kind: 'restore-room', room: archivedRoom }"
-            >{{ t("projectSettings.restoreRoom") }}</button>
+            >
+              {{ t("projectSettings.restoreRoom") }}
+            </button>
             <button
               type="button"
               class="archived-danger-toggle"
               :disabled="busy !== null"
               @click="pendingAction = { kind: 'delete-room', room: archivedRoom }"
-            >{{ t("projectSettings.deleteRoom") }}</button>
+            >
+              {{ t("projectSettings.deleteRoom") }}
+            </button>
           </li>
         </ul>
       </section>
@@ -303,7 +358,12 @@ async function refreshAfterConflict() {
       <section class="project-settings-section project-lifecycle-section">
         <h3>{{ t("projectSettings.lifecycle") }}</h3>
         <p>{{ t("projectSettings.archiveHint") }}</p>
-        <button type="button" class="btn-secondary" :disabled="busy !== null" @click="pendingAction = { kind: 'archive-project' }">
+        <button
+          type="button"
+          class="btn-secondary"
+          :disabled="busy !== null"
+          @click="pendingAction = { kind: 'archive-project' }"
+        >
           {{ t("projectSettings.archive") }}
         </button>
       </section>
@@ -318,13 +378,26 @@ async function refreshAfterConflict() {
           <li>{{ t("projectSettings.deleteMemorySkills") }}</li>
         </ul>
         <p>{{ t("projectSettings.externalWorkspacesSafe") }}</p>
-        <label for="project-delete-name">{{ t("projectSettings.confirmName", { name: project.name }) }}</label>
-        <input id="project-delete-name" v-model="deleteName" type="text" autocomplete="off" :disabled="busy !== null" />
+        <label for="project-delete-name">{{
+          t("projectSettings.confirmName", { name: project.name })
+        }}</label>
+        <input
+          id="project-delete-name"
+          v-model="deleteName"
+          type="text"
+          autocomplete="off"
+          :disabled="busy !== null"
+        />
         <label v-if="cascadeRequired" class="project-cascade-check">
           <input v-model="cascadeRooms" type="checkbox" :disabled="busy !== null" />
           <span>{{ t("projectSettings.cascadeRooms", { count: roomCount }) }}</span>
         </label>
-        <button type="button" class="project-danger-button" :disabled="!deleteReady || busy !== null" @click="pendingAction = { kind: 'delete-project' }">
+        <button
+          type="button"
+          class="project-danger-button"
+          :disabled="!deleteReady || busy !== null"
+          @click="pendingAction = { kind: 'delete-project' }"
+        >
           {{ t("projectSettings.delete") }}
         </button>
       </section>

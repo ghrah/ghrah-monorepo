@@ -257,18 +257,39 @@ watch(
 
 <template>
   <div class="workspace-shell">
-    <aside class="project-rail workspace-column" :aria-label="t('dashboard.projects')"><ProjectSelector /></aside>
+    <aside class="project-rail workspace-column" :aria-label="t('dashboard.projects')">
+      <ProjectSelector />
+    </aside>
     <aside class="room-sidebar workspace-column" :aria-label="t('dashboard.rooms')">
-      <div class="room-sidebar-scroll"><RoomSelector @open-room="openRoom" @room-invalidated="invalidateRoom" /></div>
+      <div class="room-sidebar-scroll">
+        <RoomSelector @open-room="openRoom" @room-invalidated="invalidateRoom" />
+      </div>
       <ProjectFixedNav @open-project-view="openProjectView" />
       <InstanceProfileControl @open-settings="emit('openSettings', 'general')" />
     </aside>
     <section class="workspace-main" :aria-label="t('dashboard.workspaceTabs')">
       <div class="workspace-tabs" role="tablist" :aria-label="t('dashboard.openViews')">
         <div class="tabs-scroll">
-          <button v-for="tab in tabs" :key="tab.id" type="button" :class="['workspace-tab', { active: activeTabId === tab.id }]" role="tab" :aria-selected="activeTabId === tab.id" @click="activateTab(tab)">
-            <span :class="['tab-kind', tab.kind]">{{ tabIcon(tab.kind) }}</span><span class="tab-label">{{ tabLabel(tab) }}</span>
-            <span class="tab-close" role="button" tabindex="0" :aria-label="t('dashboard.closeTab', { label: tabLabel(tab) })" @click.stop="void closeTab(tab)" @keydown.enter.stop="void closeTab(tab)">×</span>
+          <button
+            v-for="tab in tabs"
+            :key="tab.id"
+            type="button"
+            :class="['workspace-tab', { active: activeTabId === tab.id }]"
+            role="tab"
+            :aria-selected="activeTabId === tab.id"
+            @click="activateTab(tab)"
+          >
+            <span :class="['tab-kind', tab.kind]">{{ tabIcon(tab.kind) }}</span
+            ><span class="tab-label">{{ tabLabel(tab) }}</span>
+            <span
+              class="tab-close"
+              role="button"
+              tabindex="0"
+              :aria-label="t('dashboard.closeTab', { label: tabLabel(tab) })"
+              @click.stop="void closeTab(tab)"
+              @keydown.enter.stop="void closeTab(tab)"
+              >×</span
+            >
           </button>
         </div>
         <span class="tab-count">{{ t("dashboard.openCount", { count: tabs.length }) }}</span>
@@ -304,15 +325,24 @@ watch(
           />
         </KeepAlive>
         <div v-if="!activeTab" class="workspace-empty">
-          <div class="empty-mark">⌘</div><h2>{{ t("dashboard.readyTitle") }}</h2><p>{{ t("dashboard.readyBody") }}</p>
-          <div class="empty-shortcuts"><span class="shortcut-pill"><kbd>#</kbd> {{ t("dashboard.roomConversation") }}</span><span class="shortcut-pill"><kbd>◎</kbd> {{ t("dashboard.agentActionChain") }}</span></div>
+          <div class="empty-mark">⌘</div>
+          <h2>{{ t("dashboard.readyTitle") }}</h2>
+          <p>{{ t("dashboard.readyBody") }}</p>
+          <div class="empty-shortcuts">
+            <span class="shortcut-pill"><kbd>#</kbd> {{ t("dashboard.roomConversation") }}</span
+            ><span class="shortcut-pill"><kbd>◎</kbd> {{ t("dashboard.agentActionChain") }}</span>
+          </div>
         </div>
       </div>
       <footer class="hitl-dock"><HitlInbox /></footer>
     </section>
     <aside class="right-sidebar workspace-column" :aria-label="t('dashboard.contextSidebar')">
-      <section class="room-admin-region" :aria-label="t('roomAdmin.title')"><RoomAdminPanel @room-invalidated="invalidateRoom" /></section>
-      <section class="agent-region" :aria-label="t('dashboard.agents')"><AgentList @open-agent="openAgent" @open-settings="emit('openSettings', $event)" /></section>
+      <section class="room-admin-region" :aria-label="t('roomAdmin.title')">
+        <RoomAdminPanel @room-invalidated="invalidateRoom" />
+      </section>
+      <section class="agent-region" :aria-label="t('dashboard.agents')">
+        <AgentList @open-agent="openAgent" @open-settings="emit('openSettings', $event)" />
+      </section>
     </aside>
   </div>
 </template>

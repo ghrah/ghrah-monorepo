@@ -62,7 +62,7 @@ function makeMsg(
       node: {
         session_id: "s1",
         created_on_branch_id: "b1",
-        ...((payload.node as Record<string, unknown> | undefined) ?? {}),
+        ...(payload.node as Record<string, unknown> | undefined),
       },
     };
   }

@@ -913,7 +913,7 @@ export class MockState {
       timestamp: isoNow(),
       iteration: 0,
       ability_names: ["init"],
-      agent_state: { ...(origin?.agent_state ?? {}) },
+      agent_state: { ...origin?.agent_state },
       messages_delta: [],
       messages_snapshot: originMessages,
       is_snapshot: true,

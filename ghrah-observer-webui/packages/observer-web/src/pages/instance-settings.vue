@@ -67,11 +67,19 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
 </script>
 
 <template>
-  <section class="instance-settings" role="dialog" aria-modal="true" :aria-label="t('config.title')">
+  <section
+    class="instance-settings"
+    role="dialog"
+    aria-modal="true"
+    :aria-label="t('config.title')"
+  >
     <aside class="instance-settings-sidebar">
       <div class="instance-settings-heading">
         <span class="brand-mark" aria-hidden="true">G</span>
-        <div><span>{{ t("app.title") }}</span><strong>{{ t("config.title") }}</strong></div>
+        <div>
+          <span>{{ t("app.title") }}</span
+          ><strong>{{ t("config.title") }}</strong>
+        </div>
       </div>
       <ConfigNav :active-section="activeSection" @select="selectSection" />
     </aside>
@@ -81,7 +89,13 @@ onUnmounted(() => window.removeEventListener("keydown", onKeydown));
           <span class="section-eyebrow">{{ t("config.instanceEyebrow") }}</span>
           <h1>{{ t(`config.nav.${activeSection}`) }}</h1>
         </div>
-        <button ref="closeButton" type="button" class="settings-close" :aria-label="t('config.close')" @click="requestClose">
+        <button
+          ref="closeButton"
+          type="button"
+          class="settings-close"
+          :aria-label="t('config.close')"
+          @click="requestClose"
+        >
           <span aria-hidden="true">×</span><small>{{ t("config.escapeHint") }}</small>
         </button>
       </header>

@@ -191,17 +191,25 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
 
 <template>
   <div class="flex flex-col h-full">
-    <div class="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between">
+    <div
+      class="px-3 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between"
+    >
       <h3 class="text-sm font-semibold truncate">
-      {{ room ? t("chat.title", { room: room.name }) : t("chat.name") }}
-    </h3>
+        {{ room ? t("chat.title", { room: room.name }) : t("chat.name") }}
+      </h3>
     </div>
 
-    <div v-if="!room" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
+    <div
+      v-if="!room"
+      class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm"
+    >
       {{ t("chat.selectRoom") }}
     </div>
 
-    <div v-else-if="roomEntries.length === 0" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm">
+    <div
+      v-else-if="roomEntries.length === 0"
+      class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm"
+    >
       {{ t("chat.empty") }}
     </div>
 
@@ -231,12 +239,29 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
           >
             <div v-if="isText(block)" class="markdown-body" v-html="renderMarkdown(block.text)" />
             <details v-else-if="block.type === 'reasoning'" class="block-reasoning">
-              <summary class="text-xs italic text-gray-500 dark:text-gray-400">{{ t("chat.reasoning") }}{{ block.incomplete ? "…" : "" }}</summary>
+              <summary class="text-xs italic text-gray-500 dark:text-gray-400">
+                {{ t("chat.reasoning") }}{{ block.incomplete ? "…" : "" }}
+              </summary>
               <pre class="text-xs whitespace-pre-wrap">{{ block.reasoning }}</pre>
             </details>
-            <img v-else-if="block.type === 'image'" :src="imgSrc(block)" alt="image" class="max-w-full rounded" />
-            <audio v-else-if="block.type === 'audio'" :src="audioSrc(block)" controls class="w-full" />
-            <a v-else-if="block.type === 'file'" :href="fileHref(block)" :download="fileLabel(block)" class="text-xs text-blue-600 dark:text-blue-400 underline">
+            <img
+              v-else-if="block.type === 'image'"
+              :src="imgSrc(block)"
+              alt="image"
+              class="max-w-full rounded"
+            />
+            <audio
+              v-else-if="block.type === 'audio'"
+              :src="audioSrc(block)"
+              controls
+              class="w-full"
+            />
+            <a
+              v-else-if="block.type === 'file'"
+              :href="fileHref(block)"
+              :download="fileLabel(block)"
+              class="text-xs text-blue-600 dark:text-blue-400 underline"
+            >
               📎 {{ fileLabel(block) }}
             </a>
             <details v-else-if="block.type === 'tool_call'" class="block-tool">
@@ -244,12 +269,18 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
               <pre class="text-xs whitespace-pre-wrap">{{ block.arguments }}</pre>
             </details>
             <details v-else-if="block.type === 'tool_result'" class="block-tool">
-              <summary :class="['text-xs', block.success ? 'text-green-600' : 'text-red-600']">↳ {{ block.name ?? block.tool_call_id }}{{ block.success ? "" : t("chat.failed") }}</summary>
+              <summary :class="['text-xs', block.success ? 'text-green-600' : 'text-red-600']">
+                ↳ {{ block.name ?? block.tool_call_id }}{{ block.success ? "" : t("chat.failed") }}
+              </summary>
               <pre class="text-xs whitespace-pre-wrap">{{ block.content }}</pre>
-              <pre v-if="block.error" class="text-xs text-red-500 whitespace-pre-wrap">{{ block.error }}</pre>
+              <pre v-if="block.error" class="text-xs text-red-500 whitespace-pre-wrap">{{
+                block.error
+              }}</pre>
             </details>
             <div v-else-if="block.type === 'error'" class="block-error">
-              <span class="text-xs text-red-600 dark:text-red-400">{{ block.error_type }}: {{ block.message }}</span>
+              <span class="text-xs text-red-600 dark:text-red-400"
+                >{{ block.error_type }}: {{ block.message }}</span
+              >
             </div>
           </div>
         </template>
@@ -259,12 +290,7 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
       </div>
     </div>
 
-    <MessageInput
-      v-if="room"
-      :disabled="!canChat"
-      :members="room.members"
-      @send="handleSend"
-    />
+    <MessageInput v-if="room" :disabled="!canChat" :members="room.members" @send="handleSend" />
   </div>
 </template>
 
@@ -336,8 +362,13 @@ function isText(block: ContentBlock): block is Extract<ContentBlock, { type: "te
   animation: pulse 1.5s ease-in-out infinite;
 }
 @keyframes pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 0.85; }
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.85;
+  }
 }
 
 .entry-error {

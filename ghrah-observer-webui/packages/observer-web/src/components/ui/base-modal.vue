@@ -91,7 +91,9 @@ onUnmounted(() => {
           class="base-modal-close"
           :aria-label="closeLabel ?? t('common.close')"
           @click="$emit('requestClose')"
-        ><span aria-hidden="true">×</span></button>
+        >
+          <span aria-hidden="true">×</span>
+        </button>
       </header>
       <div class="base-modal-body"><slot /></div>
       <footer v-if="$slots.footer" class="base-modal-footer"><slot name="footer" /></footer>

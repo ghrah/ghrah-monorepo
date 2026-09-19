@@ -99,7 +99,8 @@ function selectAgent(agent: AgentInfo) {
             :key="roomName"
             :title="roomName"
             class="agent-room-badge inline-flex items-center justify-center min-w-5 h-5 px-1 rounded text-xs font-semibold bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300"
-          >{{ roomName.slice(0, 1).toUpperCase() }}</span>
+            >{{ roomName.slice(0, 1).toUpperCase() }}</span
+          >
           <AgentUsageRing v-if="usageOf(agent)" :usage="usageOf(agent)!" />
           <AgentActionMenu v-if="sameAgent(agents.selectedAgentTarget, agent)" />
           <span class="w-2 h-2 rounded-full bg-green-500 flex-shrink-0" />

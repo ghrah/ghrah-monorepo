@@ -148,7 +148,9 @@ onUnmounted(() => window.removeEventListener("pointerdown", onWindowPointerDown)
         type="button"
         class="btn-secondary instance-connection-action"
         @click="disconnect"
-      >{{ t("app.disconnect") }}</button>
+      >
+        {{ t("app.disconnect") }}
+      </button>
       <button
         v-else
         ref="connectionAction"
@@ -156,7 +158,9 @@ onUnmounted(() => window.removeEventListener("pointerdown", onWindowPointerDown)
         class="btn-primary instance-connection-action"
         :disabled="connectionBusy"
         @click="autoConnect()"
-      >{{ t("app.connect") }}</button>
+      >
+        {{ t("app.connect") }}
+      </button>
     </div>
 
     <span class="instance-avatar" aria-hidden="true">{{ avatarLabel }}</span>
@@ -177,7 +181,9 @@ onUnmounted(() => window.removeEventListener("pointerdown", onWindowPointerDown)
         class="instance-display-name"
         :title="t('instanceProfile.editName')"
         @click="startEditing"
-      >{{ displayName }}</button>
+      >
+        {{ displayName }}
+      </button>
       <button
         ref="addressButton"
         type="button"
@@ -196,6 +202,8 @@ onUnmounted(() => window.removeEventListener("pointerdown", onWindowPointerDown)
       :title="t('instanceProfile.settings')"
       :aria-label="t('instanceProfile.settings')"
       @click="openSettings"
-    ><span aria-hidden="true">⚙</span></button>
+    >
+      <span aria-hidden="true">⚙</span>
+    </button>
   </div>
 </template>

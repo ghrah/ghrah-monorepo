@@ -57,7 +57,8 @@ pnpm install                # TS 全量安装（webui 目录或根均可，works
 
 ### TypeScript（ghrah-observer-webui）
 
-- lint：`pnpm lint`（biome + i18n 门禁 + ui-token 门禁）；format：`pnpm format`。
+- lint：`pnpm lint` = **oxlint（先跑高性能通用规则）→ eslint（Vue/TS 专属；经 `eslint-plugin-oxlint` 按 `.oxlintrc.json` 关闭重复规则）→ prettier --check → i18n/ui-token 门禁**。fix：`pnpm lint:fix`；format：`pnpm format`。
+- 工具链职责：oxlint 管通用 JS/TS 规则；ESLint 管 Vue SFC/template 与 typescript-eslint 规则；prettier 管格式。规则配置在 `ghrah-observer-webui/`（`eslint.config.js` / `.oxlintrc.json` / `.prettierrc.json`），依赖装在 monorepo 根。
 - i18n：用户可见文案 **en 源 + zh-CN 双侧同步**（`check-i18n` 防中文残留）；新增组件文案先加 en 再补 zh。
 - 样式：字号/间距/颜色走 token（`check-ui-tokens` 禁魔法数字）；不写内联裸色值。
 - 构建：`packages/protocol` 与 `packages/observer-core` 改动后须 `pnpm build`（exports 指向 `dist/`，type-check 解析 dist；**dist 陈旧会让 type-check 与测试结果分裂**）。

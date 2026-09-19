@@ -174,54 +174,125 @@ async function refreshRoom() {
 <template>
   <div class="room-admin-panel sidebar-section">
     <div class="section-heading room-admin-heading">
-      <div><span class="section-eyebrow">{{ t("roomAdmin.eyebrow") }}</span><h3>{{ room?.name ?? t("roomAdmin.title") }}</h3></div>
+      <div>
+        <span class="section-eyebrow">{{ t("roomAdmin.eyebrow") }}</span>
+        <h3>{{ room?.name ?? t("roomAdmin.title") }}</h3>
+      </div>
       <span v-if="room" class="room-version">v{{ room.version }}</span>
     </div>
-    <div v-if="!room" class="room-admin-empty"><span aria-hidden="true">#</span><p>{{ t("roomAdmin.selectRoom") }}</p></div>
+    <div v-if="!room" class="room-admin-empty">
+      <span aria-hidden="true">#</span>
+      <p>{{ t("roomAdmin.selectRoom") }}</p>
+    </div>
     <div v-else class="room-admin-content">
       <p v-if="localError" class="room-admin-error" role="alert">
         <span>{{ localError }}</span>
-        <button v-if="versionConflict" type="button" :disabled="busy !== null" @click="refreshRoom">{{ t("roomAdmin.refresh") }}</button>
+        <button v-if="versionConflict" type="button" :disabled="busy !== null" @click="refreshRoom">
+          {{ t("roomAdmin.refresh") }}
+        </button>
       </p>
       <section class="room-admin-section">
         <h4>{{ t("roomAdmin.details") }}</h4>
         <form class="room-rename-form" @submit.prevent="renameRoom">
           <label for="active-room-name">{{ t("roomAdmin.name") }}</label>
-          <div><input id="active-room-name" v-model="nameDraft" type="text" :disabled="busy !== null" /><button type="submit" class="btn-secondary" :disabled="!nameDirty || busy !== null">{{ busy === "rename" ? t("common.loading") : t("common.save") }}</button></div>
+          <div>
+            <input
+              id="active-room-name"
+              v-model="nameDraft"
+              type="text"
+              :disabled="busy !== null"
+            /><button type="submit" class="btn-secondary" :disabled="!nameDirty || busy !== null">
+              {{ busy === "rename" ? t("common.loading") : t("common.save") }}
+            </button>
+          </div>
         </form>
       </section>
       <section class="room-admin-section room-members-section">
-        <div class="room-admin-section-heading"><h4>{{ t("roomAdmin.members") }}</h4><span>{{ room.members.length }}</span></div>
+        <div class="room-admin-section-heading">
+          <h4>{{ t("roomAdmin.members") }}</h4>
+          <span>{{ room.members.length }}</span>
+        </div>
         <ul class="room-admin-members">
           <li v-for="member in room.members" :key="member.subject">
-            <span class="room-admin-member-avatar" aria-hidden="true">{{ member.subject_type === "human" ? "H" : "A" }}</span>
-            <span class="room-admin-member-name" :title="memberLabel(member, room.project_id)">{{ memberLabel(member, room.project_id) }}</span>
-            <button type="button" :aria-label="t('roomAdmin.removeMember', { name: memberLabel(member, room.project_id) })" :disabled="busy !== null" @click="removeMember(member.subject)">×</button>
+            <span class="room-admin-member-avatar" aria-hidden="true">{{
+              member.subject_type === "human" ? "H" : "A"
+            }}</span>
+            <span class="room-admin-member-name" :title="memberLabel(member, room.project_id)">{{
+              memberLabel(member, room.project_id)
+            }}</span>
+            <button
+              type="button"
+              :aria-label="
+                t('roomAdmin.removeMember', { name: memberLabel(member, room.project_id) })
+              "
+              :disabled="busy !== null"
+              @click="removeMember(member.subject)"
+            >
+              ×
+            </button>
           </li>
-          <li v-if="room.members.length === 0" class="room-admin-members-empty">{{ t("nav.room.noMembers") }}</li>
+          <li v-if="room.members.length === 0" class="room-admin-members-empty">
+            {{ t("nav.room.noMembers") }}
+          </li>
         </ul>
         <form class="room-member-add" @submit.prevent="addMember">
-          <select v-model="selectedAgentId" :aria-label="t('roomAdmin.addAgent')" :disabled="busy !== null || candidateAgents.length === 0">
-            <option value="">{{ candidateAgents.length ? t("roomAdmin.chooseAgent") : t("nav.room.allAgentsInRoom") }}</option>
-            <option v-for="agent in candidateAgents" :key="agent.agentId" :value="agent.agentId">{{ agent.agentName }}</option>
+          <select
+            v-model="selectedAgentId"
+            :aria-label="t('roomAdmin.addAgent')"
+            :disabled="busy !== null || candidateAgents.length === 0"
+          >
+            <option value="">
+              {{
+                candidateAgents.length ? t("roomAdmin.chooseAgent") : t("nav.room.allAgentsInRoom")
+              }}
+            </option>
+            <option v-for="agent in candidateAgents" :key="agent.agentId" :value="agent.agentId">
+              {{ agent.agentName }}
+            </option>
           </select>
-          <button type="submit" class="btn-secondary" :disabled="!selectedAgentId || busy !== null">{{ t("roomAdmin.add") }}</button>
+          <button type="submit" class="btn-secondary" :disabled="!selectedAgentId || busy !== null">
+            {{ t("roomAdmin.add") }}
+          </button>
         </form>
       </section>
       <section class="room-admin-section room-lifecycle-section">
-        <h4>{{ t("roomAdmin.lifecycle") }}</h4><p>{{ t("roomAdmin.archiveHint") }}</p>
-        <button type="button" class="btn-secondary" :disabled="busy !== null" @click="pendingLifecycle = 'archive'">{{ t("roomAdmin.archive") }}</button>
+        <h4>{{ t("roomAdmin.lifecycle") }}</h4>
+        <p>{{ t("roomAdmin.archiveHint") }}</p>
+        <button
+          type="button"
+          class="btn-secondary"
+          :disabled="busy !== null"
+          @click="pendingLifecycle = 'archive'"
+        >
+          {{ t("roomAdmin.archive") }}
+        </button>
       </section>
       <section class="room-danger-zone">
-        <strong>{{ t("roomAdmin.dangerZone") }}</strong><p>{{ t("roomAdmin.deleteHint") }}</p>
-        <button type="button" class="room-danger-button" :disabled="busy !== null" @click="pendingLifecycle = 'delete'">{{ t("roomAdmin.delete") }}</button>
+        <strong>{{ t("roomAdmin.dangerZone") }}</strong>
+        <p>{{ t("roomAdmin.deleteHint") }}</p>
+        <button
+          type="button"
+          class="room-danger-button"
+          :disabled="busy !== null"
+          @click="pendingLifecycle = 'delete'"
+        >
+          {{ t("roomAdmin.delete") }}
+        </button>
       </section>
     </div>
     <ConfirmDialog
       v-if="pendingLifecycle"
-      :title="pendingLifecycle === 'archive' ? t('roomAdmin.archiveTitle') : t('roomAdmin.deleteTitle')"
-      :message="pendingLifecycle === 'archive' ? t('roomAdmin.archiveConfirm') : t('roomAdmin.deleteConfirm')"
-      :confirm-label="pendingLifecycle === 'archive' ? t('roomAdmin.archive') : t('roomAdmin.delete')"
+      :title="
+        pendingLifecycle === 'archive' ? t('roomAdmin.archiveTitle') : t('roomAdmin.deleteTitle')
+      "
+      :message="
+        pendingLifecycle === 'archive'
+          ? t('roomAdmin.archiveConfirm')
+          : t('roomAdmin.deleteConfirm')
+      "
+      :confirm-label="
+        pendingLifecycle === 'archive' ? t('roomAdmin.archive') : t('roomAdmin.delete')
+      "
       :danger="pendingLifecycle === 'delete'"
       @cancel="pendingLifecycle = null"
       @confirm="runLifecycle"

@@ -3,7 +3,8 @@
     "Vue.volar",
     "vitest.explorer",
     "ms-playwright.playwright",
-    "biomejs.biome",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
     "EditorConfig.EditorConfig",
     "ms-vscode.extension-test-runner"
   ]

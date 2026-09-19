@@ -1,11 +1,7 @@
 import type { ActionNode, ContentBlock, RoomLogEntryPayload } from "@ghrah/protocol";
 
 export type ChatEntryKind =
-  | "human_input"
-  | "conversation"
-  | "send_message"
-  | "broadcast"
-  | "end_task";
+  "human_input" | "conversation" | "send_message" | "broadcast" | "end_task";
 
 export interface ChatEntry {
   projectId?: string;

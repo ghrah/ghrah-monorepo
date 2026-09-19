@@ -116,7 +116,9 @@ async function submitCreate() {
           <small v-if="project.project_root_locator">
             {{ t("nav.project.stores") }}
           </small>
-          <small>{{ t("nav.project.summaryWorkspaces", { count: project.workspaces?.length ?? 0 }) }}</small>
+          <small>{{
+            t("nav.project.summaryWorkspaces", { count: project.workspaces?.length ?? 0 })
+          }}</small>
         </div>
       </li>
     </ul>

@@ -15,7 +15,9 @@ defineEmits<{ select: [] }>();
       :aria-current="active ? 'page' : undefined"
       @click="$emit('select')"
     >
-      <span v-if="$slots.leading" class="sidebar-row-leading" aria-hidden="true"><slot name="leading" /></span>
+      <span v-if="$slots.leading" class="sidebar-row-leading" aria-hidden="true"
+        ><slot name="leading"
+      /></span>
       <span class="sidebar-row-body">
         <span class="sidebar-row-primary">
           <span class="sidebar-row-label"><slot /></span>

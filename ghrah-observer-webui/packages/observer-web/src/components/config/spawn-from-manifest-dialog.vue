@@ -73,28 +73,32 @@ async function handleSubmit() {
       </p>
     </template>
 
-      <form class="space-y-4" @submit.prevent="handleSubmit">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{ t("config.spawn.runtimeName") }}</label>
-          <input
-            v-model="runtimeName"
-            data-autofocus
-            type="text"
-            required
-            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            :placeholder="t('config.spawn.runtimeNamePlaceholder')"
-          />
-        </div>
+    <form class="space-y-4" @submit.prevent="handleSubmit">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{{
+          t("config.spawn.runtimeName")
+        }}</label>
+        <input
+          v-model="runtimeName"
+          data-autofocus
+          type="text"
+          required
+          class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          :placeholder="t('config.spawn.runtimeNamePlaceholder')"
+        />
+      </div>
 
-        <div v-if="errorMsg" class="text-red-600 dark:text-red-400 text-sm">{{ errorMsg }}</div>
+      <div v-if="errorMsg" class="text-red-600 dark:text-red-400 text-sm">{{ errorMsg }}</div>
 
-        <div class="flex justify-end gap-2">
-          <button type="button" class="btn-secondary" :disabled="loading" @click="requestClose">{{ t("common.cancel") }}</button>
-          <button type="submit" class="btn-primary" :disabled="loading || !runtimeName.trim()">
-            {{ loading ? t("config.spawn.spawning") : t("config.spawn.spawn") }}
-          </button>
-        </div>
-      </form>
+      <div class="flex justify-end gap-2">
+        <button type="button" class="btn-secondary" :disabled="loading" @click="requestClose">
+          {{ t("common.cancel") }}
+        </button>
+        <button type="submit" class="btn-primary" :disabled="loading || !runtimeName.trim()">
+          {{ loading ? t("config.spawn.spawning") : t("config.spawn.spawn") }}
+        </button>
+      </div>
+    </form>
   </BaseModal>
   <ConfirmDialog
     v-if="confirmDiscardOpen"

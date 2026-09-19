@@ -50,13 +50,30 @@ function onSelect(): void {
   >
     <rect class="ac-node-box" :width="NODE_WIDTH" :height="CARD_HEIGHT" rx="6" />
     <circle class="ac-node-dot" cx="10" cy="24" r="3.5" />
-    <rect class="ac-node-colorbar" :x="NODE_WIDTH - 6" y="6" width="3" :height="CARD_HEIGHT - 12" rx="1.5" />
+    <rect
+      class="ac-node-colorbar"
+      :x="NODE_WIDTH - 6"
+      y="6"
+      width="3"
+      :height="CARD_HEIGHT - 12"
+      rx="1.5"
+    />
     <text class="ac-node-meta" x="20" y="20">{{ metaLine }}</text>
     <text class="ac-node-abilities" x="20" y="36">{{ abilitySummary }}</text>
-    <text v-if="layoutNode.isHead" class="ac-node-badge ac-node-badge--head" :x="NODE_WIDTH - 16" y="20">
+    <text
+      v-if="layoutNode.isHead"
+      class="ac-node-badge ac-node-badge--head"
+      :x="NODE_WIDTH - 16"
+      y="20"
+    >
       {{ t("actionChain.headBadge") }}
     </text>
-    <text v-if="layoutNode.isBranchPoint" class="ac-node-badge ac-node-badge--fork" :x="NODE_WIDTH - 16" y="36">
+    <text
+      v-if="layoutNode.isBranchPoint"
+      class="ac-node-badge ac-node-badge--fork"
+      :x="NODE_WIDTH - 16"
+      y="36"
+    >
       {{ t("actionChain.forkBadge") }}
     </text>
   </g>

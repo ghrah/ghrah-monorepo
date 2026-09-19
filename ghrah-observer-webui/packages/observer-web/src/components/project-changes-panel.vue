@@ -48,7 +48,9 @@ function timeStr(timestamp: string): string {
       </div>
       <span class="project-panel-count">{{ projectChanges.length }}</span>
     </header>
-    <div v-if="projectChanges.length === 0" class="project-panel-empty">{{ t("changes.empty") }}</div>
+    <div v-if="projectChanges.length === 0" class="project-panel-empty">
+      {{ t("changes.empty") }}
+    </div>
     <div v-else class="project-changes-list">
       <article
         v-for="change in projectChanges"
@@ -56,14 +58,18 @@ function timeStr(timestamp: string): string {
         :class="['project-change-row', { failed: !change.success }]"
       >
         <button type="button" @click="toggle(changeKey(change))">
-          <span class="project-change-status" aria-hidden="true">{{ change.success ? "✓" : "×" }}</span>
+          <span class="project-change-status" aria-hidden="true">{{
+            change.success ? "✓" : "×"
+          }}</span>
           <span class="project-change-path">{{ change.filePath ?? t("changes.unknownPath") }}</span>
           <span class="project-change-agent">@{{ change.agentName }}</span>
           <span class="project-change-scope">{{ change.sessionId }} / {{ change.branchId }}</span>
           <span class="project-change-ability">{{ change.abilityName }}</span>
           <time>{{ timeStr(change.timestamp) }}</time>
         </button>
-        <pre v-if="expandedKey === changeKey(change)">{{ JSON.stringify(change.result ?? { error: change.error, outcome: change.outcome }, null, 2) }}</pre>
+        <pre v-if="expandedKey === changeKey(change)">{{
+          JSON.stringify(change.result ?? { error: change.error, outcome: change.outcome }, null, 2)
+        }}</pre>
       </article>
     </div>
   </div>

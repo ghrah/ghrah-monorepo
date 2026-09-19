@@ -76,14 +76,21 @@ async function confirmDelete() {
   <div class="flex flex-col h-full gap-4">
     <div class="flex items-center justify-between">
       <h2 class="text-lg font-semibold">{{ t("config.agent.title") }}</h2>
-      <button class="btn-primary text-xs" @click="showNewDialog = true">{{ t("config.agent.newManifest") }}</button>
+      <button class="btn-primary text-xs" @click="showNewDialog = true">
+        {{ t("config.agent.newManifest") }}
+      </button>
     </div>
 
     <div v-if="error" class="text-red-600 dark:text-red-400 text-sm">{{ error }}</div>
 
-    <div v-if="manifests.agentsLoading" class="text-gray-400 text-sm py-4 text-center">{{ t("common.loading") }}</div>
+    <div v-if="manifests.agentsLoading" class="text-gray-400 text-sm py-4 text-center">
+      {{ t("common.loading") }}
+    </div>
 
-    <div v-else-if="manifests.agentList.length === 0" class="text-gray-400 text-sm py-4 text-center italic">
+    <div
+      v-else-if="manifests.agentList.length === 0"
+      class="text-gray-400 text-sm py-4 text-center italic"
+    >
       {{ t("config.agent.empty") }}
     </div>
 
@@ -100,7 +107,12 @@ async function confirmDelete() {
       />
     </div>
 
-    <AgentManifestDetail :manifest="selected" @spawn="handleSpawn(selected!)" @edit="handleEdit(selected!)" @delete="deleteTarget = selected!.full_name" />
+    <AgentManifestDetail
+      :manifest="selected"
+      @spawn="handleSpawn(selected!)"
+      @edit="handleEdit(selected!)"
+      @delete="deleteTarget = selected!.full_name"
+    />
 
     <SpawnFromManifestDialog
       v-if="showSpawnDialog && selected"

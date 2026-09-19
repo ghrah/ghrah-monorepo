@@ -3,5 +3,7 @@ defineProps<{ label?: string }>();
 </script>
 
 <template>
-  <ul class="sidebar-list" :aria-label="label"><slot /></ul>
+  <ul class="sidebar-list" :aria-label="label">
+    <slot />
+  </ul>
 </template>

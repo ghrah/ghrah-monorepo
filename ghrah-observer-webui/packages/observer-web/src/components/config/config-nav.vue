@@ -26,7 +26,11 @@ const links = [
         :active="activeSection === link.id"
         @select="$emit('select', link.id)"
       >
-        <template #leading><span class="config-section-icon">{{ link.id.slice(0, 1).toUpperCase() }}</span></template>
+        <template #leading
+          ><span class="config-section-icon">{{
+            link.id.slice(0, 1).toUpperCase()
+          }}</span></template
+        >
         {{ t(link.labelKey) }}
       </SidebarRow>
     </SidebarList>

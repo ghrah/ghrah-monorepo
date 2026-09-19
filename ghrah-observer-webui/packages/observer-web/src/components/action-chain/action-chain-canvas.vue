@@ -38,13 +38,40 @@ function onBackground(): void {
 <template>
   <div class="ac-canvas">
     <div class="ac-legend">
-      <span class="ac-legend-item"><i class="ac-legend-swatch ac-legend-swatch--write" />{{ t("actionChain.legendWrite") }}</span>
-      <span class="ac-legend-item"><i class="ac-legend-swatch ac-legend-swatch--read" />{{ t("actionChain.legendRead") }}</span>
-      <span class="ac-legend-item"><i class="ac-legend-swatch ac-legend-swatch--converse" />{{ t("actionChain.legendConverse") }}</span>
-      <span class="ac-legend-item"><i class="ac-legend-swatch ac-legend-swatch--unknown" />{{ t("actionChain.legendUnknown") }}</span>
+      <span class="ac-legend-item"
+        ><i class="ac-legend-swatch ac-legend-swatch--write" />{{
+          t("actionChain.legendWrite")
+        }}</span
+      >
+      <span class="ac-legend-item"
+        ><i class="ac-legend-swatch ac-legend-swatch--read" />{{
+          t("actionChain.legendRead")
+        }}</span
+      >
+      <span class="ac-legend-item"
+        ><i class="ac-legend-swatch ac-legend-swatch--converse" />{{
+          t("actionChain.legendConverse")
+        }}</span
+      >
+      <span class="ac-legend-item"
+        ><i class="ac-legend-swatch ac-legend-swatch--unknown" />{{
+          t("actionChain.legendUnknown")
+        }}</span
+      >
     </div>
-    <div ref="viewport" class="ac-canvas-viewport" @click.self="onBackground" @scroll.passive="emit('scroll')">
-      <svg :width="graph.width" :height="graph.height" class="ac-canvas-svg" role="img" :aria-label="t('actionChain.canvasLabel')">
+    <div
+      ref="viewport"
+      class="ac-canvas-viewport"
+      @click.self="onBackground"
+      @scroll.passive="emit('scroll')"
+    >
+      <svg
+        :width="graph.width"
+        :height="graph.height"
+        class="ac-canvas-svg"
+        role="img"
+        :aria-label="t('actionChain.canvasLabel')"
+      >
         <!-- 泳道分隔虚线 -->
         <line
           v-for="(y, i) in laneGuideYs"

@@ -66,7 +66,12 @@ function dismissError() {
     />
     <div v-if="visibleError" class="app-error-toast" role="alert">
       <span class="app-error-message">{{ visibleError }}</span>
-      <button type="button" class="app-error-dismiss" :aria-label="$t('common.close')" @click="dismissError">
+      <button
+        type="button"
+        class="app-error-dismiss"
+        :aria-label="$t('common.close')"
+        @click="dismissError"
+      >
         <span aria-hidden="true">×</span>
       </button>
     </div>
