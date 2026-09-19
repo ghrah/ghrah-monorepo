@@ -867,4 +867,181 @@ describe("ActionChainPanel", () => {
       { explicitActiveBranchId: "alpha-branch" },
     );
   }
+
+  // ── S4：layout 增量缓存（append 引用复用 + 缓存键隔离） ──
+
+  it("appended nodes reuse the cached layout without full rebuild (store-driven append)", async () => {
+    const agents = useAgentsStore();
+    const chains = useActionChainsStore();
+    const branches = useBranchesStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    setActiveChain("alpha", [
+      { id: "a1", parent_id: null, timestamp: "t1" },
+      { id: "a2", parent_id: "a1", timestamp: "t2" },
+    ]);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".ac-node")).toHaveLength(2);
+
+    // store 端事件追加（mergeNodes 保引用 → append-only 前缀）+ head 前移（commit 语义）
+    const session: SessionTarget = { ...target("alpha"), sessionId: "alpha-session" };
+    chains.onActionChainUpdated({
+      type: "action_chain_updated",
+      project_id: "p1",
+      cluster_id: "cluster",
+      agent_id: "alpha-id",
+      agent_name: "alpha",
+      node: node({
+        id: "a3",
+        parent_id: "a2",
+        session_id: "alpha-session",
+        created_on_branch_id: "alpha-branch",
+        timestamp: "t3",
+      }),
+    } as Parameters<typeof chains.onActionChainUpdated>[0]);
+    branches.advanceHead(
+      { ...session, branchId: "alpha-branch" },
+      BranchInfoPayloadSchema.parse({
+        branch_id: "alpha-branch",
+        session_id: "alpha-session",
+        name: "main",
+        head_node_id: "a3",
+      }),
+      node({
+        id: "a3",
+        parent_id: "a2",
+        session_id: "alpha-session",
+        created_on_branch_id: "alpha-branch",
+        timestamp: "t3",
+      }),
+    );
+    await wrapper.vm.$nextTick();
+    const before = wrapper.findAll(".ac-node");
+    expect(before).toHaveLength(3);
+
+    // 再追加一个节点：增量命中（旧 LayoutNode 引用复用 → Vue keyed diff 旧 DOM 不动）
+    chains.onActionChainUpdated({
+      type: "action_chain_updated",
+      project_id: "p1",
+      cluster_id: "cluster",
+      agent_id: "alpha-id",
+      agent_name: "alpha",
+      node: node({
+        id: "a4",
+        parent_id: "a3",
+        session_id: "alpha-session",
+        created_on_branch_id: "alpha-branch",
+        timestamp: "t4",
+      }),
+    } as Parameters<typeof chains.onActionChainUpdated>[0]);
+    branches.advanceHead(
+      { ...session, branchId: "alpha-branch" },
+      BranchInfoPayloadSchema.parse({
+        branch_id: "alpha-branch",
+        session_id: "alpha-session",
+        name: "main",
+        head_node_id: "a4",
+      }),
+      node({
+        id: "a4",
+        parent_id: "a3",
+        session_id: "alpha-session",
+        created_on_branch_id: "alpha-branch",
+        timestamp: "t4",
+      }),
+    );
+    await wrapper.vm.$nextTick();
+    const after = wrapper.findAll(".ac-node");
+    expect(after).toHaveLength(4);
+    // 旧节点 DOM 元素引用保持（keyed diff 跳过 = 缓存命中的渲染层证据）
+    expect(after[0]!.element).toBe(before[0]!.element);
+    expect(after[1]!.element).toBe(before[1]!.element);
+    expect(after[2]!.element).toBe(before[2]!.element);
+  });
+
+  it("switching branch selection rebuilds via cache keys without cross-scope leaks", async () => {
+    const agents = useAgentsStore();
+    const chains = useActionChainsStore();
+    const branches = useBranchesStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    const agent = target("alpha");
+    const session: SessionTarget = { ...agent, sessionId: "alpha-session" };
+    sessions_setupTwoBranches();
+    // alpha-branch: a1→a2；alpha-branch-2: b1→b2
+    chains.setChain({ ...session, branchId: "alpha-branch" }, [
+      node({
+        id: "a1",
+        parent_id: null,
+        timestamp: "t1",
+        session_id: "alpha-session",
+        created_on_branch_id: "alpha-branch",
+      }),
+      node({
+        id: "a2",
+        parent_id: "a1",
+        timestamp: "t2",
+        session_id: "alpha-session",
+        created_on_branch_id: "alpha-branch",
+      }),
+    ]);
+    chains.setChain({ ...session, branchId: "alpha-branch-2" }, [
+      node({
+        id: "b1",
+        parent_id: null,
+        timestamp: "t1",
+        session_id: "alpha-session",
+        created_on_branch_id: "alpha-branch-2",
+      }),
+      node({
+        id: "b2",
+        parent_id: "b1",
+        timestamp: "t2",
+        session_id: "alpha-session",
+        created_on_branch_id: "alpha-branch-2",
+      }),
+      node({
+        id: "b3",
+        parent_id: "b2",
+        timestamp: "t3",
+        session_id: "alpha-session",
+        created_on_branch_id: "alpha-branch-2",
+      }),
+    ]);
+    // head 修正（setActiveChain 未用，手工对齐 branch head）
+    branches.replaceSessionBranches(
+      session,
+      [
+        BranchInfoPayloadSchema.parse({
+          branch_id: "alpha-branch",
+          session_id: "alpha-session",
+          name: "Branch 1",
+          head_node_id: "a2",
+        }),
+        BranchInfoPayloadSchema.parse({
+          branch_id: "alpha-branch-2",
+          session_id: "alpha-session",
+          name: "Branch 2",
+          head_node_id: "b3",
+        }),
+      ],
+      { explicitActiveBranchId: "alpha-branch" },
+    );
+
+    const wrapper = mount(ActionChainPanel, { props: { agent } });
+    await wrapper.vm.$nextTick();
+    // runtime 回退：默认展示 alpha-branch（a1→a2）；节点 transform 携带其布局坐标
+    const transformOf = () => wrapper.findAll(".ac-node").map((n) => n.attributes("transform"));
+    expect(wrapper.findAll(".ac-node")).toHaveLength(2);
+    const branch1Transforms = transformOf();
+
+    // 切到 alpha-branch-2（缓存键变化 → 独立建图）再切回：内容正确不串扰
+    await wrapper.get<HTMLSelectElement>(".chain-branch-select").setValue("alpha-branch-2");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".ac-node")).toHaveLength(3);
+    expect(transformOf()).not.toEqual(branch1Transforms);
+
+    await wrapper.get<HTMLSelectElement>(".chain-branch-select").setValue("alpha-branch");
+    await wrapper.vm.$nextTick();
+    expect(transformOf()).toEqual(branch1Transforms);
+  });
 });

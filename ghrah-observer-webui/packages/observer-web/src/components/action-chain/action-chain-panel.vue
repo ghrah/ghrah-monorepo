@@ -16,6 +16,7 @@ import ActionChainBranchBar from "./action-chain-branch-bar.vue";
 import ActionChainCanvas from "./action-chain-canvas.vue";
 import ActionChainDetail from "./action-chain-detail.vue";
 import ActionChainSessionPicker from "./action-chain-session-picker.vue";
+import { createLayoutCache } from "./layout-cache.js";
 import { layoutGraph } from "./layout-graph.js";
 
 const { t } = useI18n();
@@ -313,8 +314,21 @@ const visibleBranches = computed(() => {
     .map((item) => item.info);
 });
 
-// 画布布局（D-L3：computed 级缓存，输入不变不重算）
-const graph = computed(() => layoutGraph(visibleNodes.value, visibleBranches.value));
+// 画布布局（性能红线 2：append-only 增量缓存；键 = agent + session + branch 选择，
+// 失配自动回退全量 layoutGraph。模块级 LRU，切换 agent/session 不清缓存）
+const layoutCache = createLayoutCache();
+const layoutScopeKey = computed(() => {
+  const session = viewedSessionTarget.value;
+  if (!session) return null;
+  const selection = viewedBranchSelection.value;
+  const branchPart = selection === undefined ? "runtime" : selection === null ? "all" : selection;
+  return `${session.projectId}/${session.agentId}/${session.sessionId}/${branchPart}`;
+});
+const graph = computed(() => {
+  const key = layoutScopeKey.value;
+  if (!key) return layoutGraph(visibleNodes.value, []);
+  return layoutCache.compute(key, visibleNodes.value, visibleBranches.value);
+});
 
 // 画布选中节点（阶段 3 详情区输入；面板本地持有）
 const selectedNodeId = ref<string | null>(null);

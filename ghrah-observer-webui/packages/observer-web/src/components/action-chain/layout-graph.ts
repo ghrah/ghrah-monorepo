@@ -38,10 +38,10 @@ export interface LayoutGraphOptions {
 }
 
 export const DEFAULT_NODE_WIDTH = 200;
-const DEFAULT_LANE_HEIGHT = 96;
-const DEFAULT_LAYER_GAP = 240;
+export const DEFAULT_LANE_HEIGHT = 96;
+export const DEFAULT_LAYER_GAP = 240;
 
-function nodeKey(a: ActionNode, b: ActionNode): number {
+export function nodeKey(a: ActionNode, b: ActionNode): number {
   return (
     (a.timestamp ?? "").localeCompare(b.timestamp ?? "") || (a.id ?? "").localeCompare(b.id ?? "")
   );
@@ -54,7 +54,7 @@ function branchKey(a: BranchInfoPayload, b: BranchInfoPayload): number {
 }
 
 /** branch 泳道序：按 fork 依赖拓扑排序（父先于子），同级按创建先后；拓扑序号即泳道号。 */
-function branchLaneIndices(branches: BranchInfoPayload[]): Map<string, number> {
+export function branchLaneIndices(branches: BranchInfoPayload[]): Map<string, number> {
   const byId = new Map<string, BranchInfoPayload>();
   for (const branch of branches) {
     if (branch.branch_id && !byId.has(branch.branch_id)) byId.set(branch.branch_id, branch);
