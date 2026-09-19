@@ -1,4 +1,5 @@
 import type {
+  ActionNode,
   BranchEventPayload,
   BranchInfoPayload,
   BranchLifecyclePayload,
@@ -29,6 +30,15 @@ export interface BranchSyncBaseline {
   active: number;
 }
 
+/** Head 单调基准：commit node 的 (iteration, timestamp, id) 稳定序。 */
+function headAdvances(next: ActionNode, current: ActionNode): boolean {
+  if (next.iteration !== current.iteration) return next.iteration > current.iteration;
+  const nextTime = next.timestamp ?? "";
+  const currentTime = current.timestamp ?? "";
+  if (nextTime !== currentTime) return nextTime > currentTime;
+  return next.id > current.id;
+}
+
 function targetFromEvent(payload: BranchEventPayload): ChainTarget | null {
   if (
     !payload.project_id ||
@@ -57,6 +67,8 @@ export const useBranchesStore = defineStore("ghrah-branches", () => {
   const activeRevisions = ref<Map<string, number>>(new Map());
   /** 纯前端展示态：null = 查看该 Session 的全部 Branch。 */
   const viewedBranches = ref<Map<string, string | null>>(new Map());
+  /** 各 Branch 已落地 Head 的 commit node 单调基准（防旧快照回退，U3）。 */
+  const headCommitCursor = new Map<string, ActionNode>();
 
   function bumpEntity(key: string) {
     entityRevisions.value.set(key, (entityRevisions.value.get(key) ?? 0) + 1);
@@ -137,16 +149,26 @@ export const useBranchesStore = defineStore("ghrah-branches", () => {
     bumpActive(target);
   }
 
-  /** commit 事件携带的权威 Branch 快照：只前移 Head，不回退。 */
-  function advanceHead(target: ChainTarget, info: BranchInfoPayload) {
+  /**
+   * commit 事件携带的权威 Branch 快照：只前移 Head，不回退。
+   * 单调基准 = 本次 commit node 的 (iteration, timestamp, id)——乱序/replay
+   * 到达的旧 branch 快照（其 head 早于已落地 Head）被拒绝（U3）。
+   */
+  function advanceHead(target: ChainTarget, info: BranchInfoPayload, commitNode?: ActionNode) {
     const key = branchKey(target);
     const existing = branches.value.get(key);
     if (!existing) {
       upsert(target, info);
       bumpEntity(key);
+      if (commitNode) headCommitCursor.set(key, commitNode);
       return;
     }
     if (existing.info.head_node_id === info.head_node_id) return;
+    if (commitNode) {
+      const headNode = headCommitCursor.get(key);
+      if (headNode && !headAdvances(commitNode, headNode)) return;
+      headCommitCursor.set(key, commitNode);
+    }
     branches.value.set(key, {
       target,
       info: { ...existing.info, head_node_id: info.head_node_id, name: info.name },
@@ -173,6 +195,7 @@ export const useBranchesStore = defineStore("ghrah-branches", () => {
     };
     const key = branchKey(target);
     branches.value.delete(key);
+    headCommitCursor.delete(key);
     bumpEntity(key);
     if (activeBranchId(target) === target.branchId) setActiveBranch(target, null);
     if (viewedBranches.value.get(sessionKey(target)) === target.branchId) {
@@ -230,7 +253,54 @@ export const useBranchesStore = defineStore("ghrah-branches", () => {
       setActiveBranch(target, null);
   }
 
+  /**
+   * 推送路径合并（BRANCH_LIST_RESULT 事件）：快照即服务器最新权威，但
+   * 离散事件（created/activated/commit branch 快照）已落地的状态视为
+   * 不早于推送——事件已写入的实体、Head 与 active 指针保留，推送只补
+   * 缺失实体与未覆盖指针。
+   */
+  function mergePushedSessionBranches(
+    target: SessionTarget,
+    list: BranchInfoPayload[],
+    explicitActiveBranchId?: string | null,
+  ) {
+    for (const info of list) {
+      if (!info.branch_id || info.session_id !== target.sessionId) continue;
+      const branchTarget = { ...target, branchId: info.branch_id };
+      const key = branchKey(branchTarget);
+      if (branches.value.has(key)) continue;
+      branches.value.set(key, { target: branchTarget, info });
+    }
+    if (explicitActiveBranchId !== undefined) {
+      const current = activeBranchId(target);
+      if (current === null || !branches.value.has(branchKey({ ...target, branchId: current }))) {
+        setActiveBranch(target, explicitActiveBranchId);
+      }
+    }
+    const active = activeBranchId(target);
+    if (active && !branches.value.has(branchKey({ ...target, branchId: active })))
+      setActiveBranch(target, null);
+  }
+
+  /** 按 scope 分量清理 Head 单调基准（与 branches 主表同步淘汰）。 */
+  function pruneHeadCursors(matches: (parsed: [string, string, string, string]) => boolean) {
+    for (const key of headCommitCursor.keys()) {
+      try {
+        const parsed = JSON.parse(key) as [string, string, string, string];
+        if (matches(parsed)) headCommitCursor.delete(key);
+      } catch {
+        headCommitCursor.delete(key);
+      }
+    }
+  }
+
   function clearSession(target: SessionTarget) {
+    pruneHeadCursors(
+      (parsed) =>
+        parsed[0] === target.projectId &&
+        parsed[1] === target.agentId &&
+        parsed[2] === target.sessionId,
+    );
     branches.value = new Map(
       [...branches.value.entries()].filter(
         ([, branch]) =>
@@ -246,6 +316,7 @@ export const useBranchesStore = defineStore("ghrah-branches", () => {
   }
 
   function clearAgent(target: AgentTarget) {
+    pruneHeadCursors((parsed) => parsed[0] === target.projectId && parsed[1] === target.agentId);
     branches.value = new Map(
       [...branches.value.entries()].filter(
         ([, branch]) =>
@@ -272,6 +343,7 @@ export const useBranchesStore = defineStore("ghrah-branches", () => {
   }
 
   function clearProject(projectId: string) {
+    pruneHeadCursors((parsed) => parsed[0] === projectId);
     branches.value = new Map(
       [...branches.value.entries()].filter(([, branch]) => branch.target.projectId !== projectId),
     );
@@ -296,6 +368,7 @@ export const useBranchesStore = defineStore("ghrah-branches", () => {
     branches.value = new Map();
     activeBranches.value = new Map();
     viewedBranches.value = new Map();
+    headCommitCursor.clear();
   }
 
   return {
@@ -313,6 +386,7 @@ export const useBranchesStore = defineStore("ghrah-branches", () => {
     advanceHead,
     removeBranch,
     replaceSessionBranches,
+    mergePushedSessionBranches,
     clearSession,
     clearAgent,
     clearProject,

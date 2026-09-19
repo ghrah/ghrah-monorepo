@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -111,6 +112,23 @@ async def test_legacy_layout_fails_fast(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="Legacy context checkpoint"):
         await backend.load_checkpoint("agent")
+
+
+@pytest.mark.asyncio
+async def test_list_agents_warns_on_invisible_pre_v3_data(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """旧 v2 数据目录不进入列表，但打点告警而非静默消失。"""
+    backend = JsonFileBackend(root_dir=tmp_path, run_id="run")
+    legacy_dir = backend._agent_dir("legacy-agent")
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "nodes.json").write_text("{}", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING, logger="ghrah.context.persistence.json_file"):
+        agents = await backend.list_agents()
+
+    assert agents == []
+    assert any("pre-v3 context data" in record.message for record in caplog.records)
 
 
 @pytest.mark.asyncio

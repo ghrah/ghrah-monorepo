@@ -160,7 +160,7 @@ describe("Dashboard workspace tabs", () => {
     );
     useSessionsStore().replaceAgentSessions(
       agent,
-      [{ session_id: "s2", agent_name: "Coder", state: "active" } as never],
+      [{ session_id: "s2", agent_name: "Coder", lifecycle: "open" } as never],
       { explicitActiveSessionId: "s2" },
     );
     useBranchesStore().replaceSessionBranches(
@@ -268,7 +268,7 @@ describe("Dashboard workspace tabs", () => {
 
     useSessionsStore().replaceAgentSessions(
       agent,
-      [{ session_id: "s2", agent_name: "Coder", state: "active" } as never],
+      [{ session_id: "s2", agent_name: "Coder", lifecycle: "open" } as never],
       { explicitActiveSessionId: "s2" },
     );
     useBranchesStore().replaceSessionBranches(

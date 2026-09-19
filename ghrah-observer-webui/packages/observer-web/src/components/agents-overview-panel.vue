@@ -76,8 +76,9 @@ function openAgent(row: (typeof rows.value)[number]) {
     agentName: target.agentName,
   };
   agents.selectAgent(agent);
-  sessions.setActiveSession(agent, target.sessionId);
-  branches.setActiveBranch(target, target.branchId);
+  // 总览打开链路是查看选择（viewed），不得写运行态 active 指针（U1）。
+  sessions.viewSession(agent, target.sessionId);
+  branches.viewBranch(target, target.branchId);
   emit("openAgent", target);
 }
 </script>

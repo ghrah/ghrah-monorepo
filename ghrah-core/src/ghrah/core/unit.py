@@ -643,6 +643,7 @@ class CoreUnit:
             ),
             max_cluster_members=self._config.max_cluster_members,
             manifest_store=self._config.manifest_store,
+            llm_factory=self._config.llm_factory,
         )
         self._supervisor = supervisor
 

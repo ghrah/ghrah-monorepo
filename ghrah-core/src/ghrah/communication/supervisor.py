@@ -81,6 +81,7 @@ class SupervisorActor:
         default_abilities: list[str] | None = None,
         max_cluster_members: int = 20,
         manifest_store: Any | None = None,
+        llm_factory: Callable[[AgentConfig], Any] | None = None,
     ) -> None:
         """初始化 Supervisor。
 
@@ -89,7 +90,7 @@ class SupervisorActor:
             cluster_id: 集群标识
             event_publisher: 事件发布器
             room_bridge: Room 桥（duck-typed）
-            default_abilities: spawn 未显式传 abilities（None）时注入的
+            default_abilities: spawn 未显式 abilities（None）时注入的
                 能力名列表——部署方的显式声明（可审计），非隐式兜底；
                 unknown 名在 spawn 期 fail-closed 抛 RegistryError。
             max_cluster_members: 集群成员上限（spawn 时超限 raise，
@@ -98,6 +99,11 @@ class SupervisorActor:
                 spawn/query_manifests 等 manifest 类工具经
                 AbilityExecutionContext.services 显式接线；
                 None = 未接线（对应工具显式 FAILURE 指路）。
+            llm_factory: 集群级 LLM 工厂默认（``(AgentConfig) ->
+                LLMProtocol``；None = AgentBuilder 内建 agentconf 默认）。
+                spawn_agent 的 per-spawn kwarg 可覆盖；集群类工具
+                （spawn_agent ability）继承此默认——否则经工具创建的
+                agent 将回落 agentconf，破坏部署方注入的 LLM 出口。
         """
         self._event_publisher = event_publisher
         self._cluster_id = cluster_id
@@ -105,6 +111,8 @@ class SupervisorActor:
         self.room_bridge = room_bridge
         # duck-typed ManifestStoreProtocol | None（装配期显式注入）
         self.manifest_store = manifest_store
+        # 集群级 LLM 工厂默认（spawn per-spawn kwarg 覆盖；工具路径继承）
+        self._llm_factory = llm_factory
         self._registry = AgentRegistry()
         self._router = MessageRouter(self._registry, default_timeout=default_timeout)
         self._default_ability_names = (
@@ -146,8 +154,9 @@ class SupervisorActor:
             persistence_factory: 可选的 per-agent 持久化后端工厂
                 （透传 AgentBuilder.from_config；None 走 Core 内建默认）。
             llm_factory: 可选的 per-agent LLM 工厂
-                （透传 AgentBuilder.from_config；None 走 Core 内建默认，
-                即 agentconf 解析）。注入即全责。
+                （透传 AgentBuilder.from_config；None = 集群级默认
+                llm_factory，仍未配置则走 Core 内建 agentconf 默认）。
+                注入即全责。
             tags: 可选的 manifest AgentDef 标签透传（注册进 AgentInfo，
                 供集群身份注入段展示；无 manifest 路径不传）。
 
@@ -213,14 +222,15 @@ class SupervisorActor:
                 [a.name for a in abilities],
             )
 
-        # 通过 AgentBuilder 创建 ActorAgent
+        # 通过 AgentBuilder 创建 ActorAgent（llm_factory per-spawn 覆盖
+        # 集群级默认；两者皆 None 走 AgentBuilder 内建 agentconf）
         actor_handle = AgentBuilder.from_config(
             config=config,
             abilities=abilities,
             supervisor=supervisor_handle,
             event_publisher=self._event_publisher,
             persistence_factory=persistence_factory,
-            llm_factory=llm_factory,
+            llm_factory=llm_factory if llm_factory is not None else self._llm_factory,
         )
 
         # 恢复必须发生在 registry 可见之前。旧实现先注册再无条件 persist，

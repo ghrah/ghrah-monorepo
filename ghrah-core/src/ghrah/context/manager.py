@@ -361,8 +361,16 @@ class ContextManager:
         return runtime.session
 
     def _next_session_name(self) -> str:
-        """为 Agent 内新 Session 分配确定性展示名 ``Session N``。"""
-        return f"Session {len(self._session_runtimes) + 1}"
+        """为 Agent 内新 Session 分配确定性的 ``Session N`` 展示名。
+
+        N 从 1 递增取首个未被占用的编号（显式命名的 ``Session N`` 会
+        跳过该编号），保证自动名在 Agent 内不与既有名撞车。
+        """
+        taken = {runtime.session.name for runtime in self._session_runtimes.values()}
+        index = 1
+        while f"Session {index}" in taken:
+            index += 1
+        return f"Session {index}"
 
     def list_sessions(self, *, include_deleted: bool = False) -> list[ActionSession]:
         """列出独立 Root Session；默认隐藏删除墓碑。"""

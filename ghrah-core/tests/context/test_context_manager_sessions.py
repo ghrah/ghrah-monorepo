@@ -139,12 +139,13 @@ def test_auto_session_names_are_deterministic() -> None:
     assert third.name == "Session 3"
 
 
-def test_explicit_session_name_may_collide_with_auto_name() -> None:
-    """显式 name 不与自动名查重（当前行为锁定；是否拒绝见 P2-U2 裁决）。"""
+def test_auto_session_name_skips_explicitly_taken_numbers() -> None:
+    """显式占用 Session 2 后，自动命名跳过该编号不撞车（U2）。"""
     cm = _manager()
-    duplicate = cm.create_session(name="Session 1", initial_state={})
-    assert duplicate.name == "Session 1"
-    assert cm.get_active_session().name == "Session 1"
+    cm.create_session(name="Session 2", initial_state={})
+    # Session 1（初始）、Session 2（显式）已占用 → 下一个自动名是 Session 3
+    following = cm.create_session(initial_state={})
+    assert following.name == "Session 3"
 
 
 def test_blank_session_name_is_rejected() -> None:

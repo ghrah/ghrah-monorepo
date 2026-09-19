@@ -175,8 +175,9 @@ async function activateTab(tab: WorkspaceTab) {
     };
     if (!sameAgent(agents.selectedAgentTarget, currentAgent)) selectAgent(currentAgent);
     if (tab.target.chain) {
-      sessions.setActiveSession(currentAgent, tab.target.chain.sessionId);
-      branches.setActiveBranch(tab.target.chain, tab.target.chain.branchId);
+      // 标签页定位是查看选择（viewed），不得写运行态 active 指针（U1）。
+      sessions.viewSession(currentAgent, tab.target.chain.sessionId);
+      branches.viewBranch(tab.target.chain, tab.target.chain.branchId);
     }
   }
 }

@@ -203,6 +203,34 @@ export const useSessionsStore = defineStore("ghrah-sessions", () => {
       setActiveSession(target, null);
   }
 
+  /**
+   * 推送路径合并（SESSION_LIST_RESULT 事件）：快照即服务器最新权威，但
+   * 离散事件（created/activated/...）已落地的状态视为不早于推送——事件
+   * 已写入的实体与 active 指针保留，推送只补缺失实体与未覆盖指针。
+   */
+  function mergePushedAgentSessions(
+    target: AgentTarget,
+    list: SessionInfoPayload[],
+    explicitActiveSessionId?: string | null,
+  ) {
+    for (const info of list) {
+      if (!info.session_id) continue;
+      const sessionTarget = { ...target, sessionId: info.session_id };
+      const key = sessionKey(sessionTarget);
+      if (sessions.value.has(key)) continue;
+      upsert(sessionTarget, info);
+    }
+    if (explicitActiveSessionId !== undefined) {
+      const current = activeSessionId(target);
+      if (current === null || !sessions.value.has(sessionKey({ ...target, sessionId: current }))) {
+        setActiveSession(target, explicitActiveSessionId);
+      }
+    }
+    const active = activeSessionId(target);
+    if (active && !sessions.value.has(sessionKey({ ...target, sessionId: active })))
+      setActiveSession(target, null);
+  }
+
   function clearAgent(target: AgentTarget) {
     sessions.value = new Map(
       [...sessions.value.entries()].filter(
@@ -258,6 +286,7 @@ export const useSessionsStore = defineStore("ghrah-sessions", () => {
     onSessionActivated,
     removeSession,
     replaceAgentSessions,
+    mergePushedAgentSessions,
     clearAgent,
     clearProject,
     clearAll,

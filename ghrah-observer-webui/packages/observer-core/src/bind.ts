@@ -92,7 +92,19 @@ export function connectStores(
   client.onConnected(() => connection.setConnected());
   client.onDisconnected(() => connection.setDisconnected());
   client.onReconnecting(() => connection.setReconnecting());
-  client.onReconnected(() => connection.setConnected());
+  client.onReconnected(() => {
+    connection.setConnected();
+    // 重连即触发重同步（S3.1/M3b）：断线窗口内的事件已丢失，须从权威读通量
+    // 重建投影。对全部已知 operable 项目重放 listAgents → syncAgentActionState
+    // 链（后者 nextGeneration 使旧轮次结果全部逻辑过期）。
+    for (const [projectId] of projects.projects) {
+      if (!projects.isProjectOperable(projectId)) continue;
+      void client
+        .listAgents(projectId)
+        .then(() => undefined)
+        .catch(() => undefined);
+    }
+  });
 
   client.on(EventType.AGENT_SPAWNED, (msg: ServerMessage) => {
     const payload = msg.payload as AgentSpawnedPayload;
@@ -110,6 +122,10 @@ export function connectStores(
     const node = payload.node;
     if (!node) return;
     batcher.add(() => {
+      // U3b：branch 快照必须与 node 归桶一致——异常事件拒绝推进 Head，
+      // 防止把 Head 写到 node 实际不归属的桶。
+      const branchSnapshotConsistent =
+        payload.branch == null || payload.branch.branch_id === node.created_on_branch_id;
       if (!chains.onActionChainUpdated(payload)) return;
       const target: ChainTarget = {
         projectId: payload.project_id,
@@ -119,9 +135,9 @@ export function connectStores(
         branchId: node.created_on_branch_id,
       };
       changes.onActionChainNode(target, node);
-      // commit 事件携带的权威 Branch 快照：只前移 Head（不回退）。
-      if (payload.branch?.branch_id) {
-        branches.advanceHead(target, payload.branch);
+      // commit 事件携带的权威 Branch 快照：只前移 Head（单调校验 + 不回退）。
+      if (branchSnapshotConsistent && payload.branch?.branch_id) {
+        branches.advanceHead(target, payload.branch, node);
       }
     });
   });
@@ -342,15 +358,14 @@ export function connectStores(
   client.on(EventType.SESSION_LIST_RESULT, (msg: ServerMessage) => {
     const payload = msg.payload as SessionListResultPayload;
     if (!payload.project_id || !payload.agent_id || !payload.agent_name) return;
-    sessions.replaceAgentSessions(
-      {
-        projectId: payload.project_id,
-        agentId: payload.agent_id,
-        agentName: payload.agent_name,
-      },
-      payload.sessions,
-      { explicitActiveSessionId: payload.active_session_id || null },
-    );
+    const target: AgentTarget = {
+      projectId: payload.project_id,
+      agentId: payload.agent_id,
+      agentName: payload.agent_name,
+    };
+    // 推送路径（无请求发起时刻）：事件已落地状态优先，推送只补缺失实体
+    // 与未覆盖指针——防离散事件先到、推送旧快照晚到时回退（M3）。
+    sessions.mergePushedAgentSessions(target, payload.sessions, payload.active_session_id || null);
   });
 
   client.on(EventType.BRANCH_CREATED, (msg: ServerMessage) =>
@@ -370,16 +385,14 @@ export function connectStores(
     if (!payload.project_id || !payload.agent_id || !payload.agent_name || !payload.session_id) {
       return;
     }
-    branches.replaceSessionBranches(
-      {
-        projectId: payload.project_id,
-        agentId: payload.agent_id,
-        agentName: payload.agent_name,
-        sessionId: payload.session_id,
-      },
-      payload.branches,
-      { explicitActiveBranchId: payload.active_branch_id || null },
-    );
+    const target: SessionTarget = {
+      projectId: payload.project_id,
+      agentId: payload.agent_id,
+      agentName: payload.agent_name,
+      sessionId: payload.session_id,
+    };
+    // 同 SESSION_LIST_RESULT：事件已落地状态优先，推送只补缺失（M3）。
+    branches.mergePushedSessionBranches(target, payload.branches, payload.active_branch_id || null);
   });
 
   const taskEventTypes = [

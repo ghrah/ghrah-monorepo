@@ -205,13 +205,25 @@ class JsonFileBackend(PersistenceBackend):
             shutil.rmtree(agent_dir)
 
     async def list_agents(self) -> list[str]:
-        """列出至少包含一条 v3 变更记录的 Agent。"""
+        """列出至少包含一条 v3 变更记录的 Agent。
+
+        同目录下存在旧布局（nodes.json 等无 changes-v3 的 Agent 目录）
+        时打点告警：这类数据对 v3 不可见但仍在磁盘上，调用方可据此
+        提示显式重建，避免"数据还在却静默消失"。
+        """
         if not self._run_dir.exists():
             return []
-        return sorted(
-            directory.name
-            for directory in self._run_dir.iterdir()
-            if directory.is_dir()
-            and (directory / "changes-v3").is_dir()
-            and any((directory / "changes-v3").iterdir())
-        )
+        agents: list[str] = []
+        for directory in self._run_dir.iterdir():
+            if not directory.is_dir():
+                continue
+            changes_dir = directory / "changes-v3"
+            if changes_dir.is_dir() and any(changes_dir.iterdir()):
+                agents.append(directory.name)
+            elif any(directory.iterdir()):
+                logger.warning(
+                    "Agent '%s' has pre-v3 context data invisible to changes-v3; "
+                    "delete it and rebuild explicitly",
+                    directory.name,
+                )
+        return sorted(agents)

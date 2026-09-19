@@ -29,6 +29,7 @@ interface MockWebSocket extends WebSocketLike {
 interface ClientInternals {
   _dispatch: (msgType: string, message: ServerMessage) => void;
   _notifyReconnecting: () => void;
+  _notifyReconnected: () => void;
   _notifyDisconnected: () => void;
 }
 
@@ -2141,6 +2142,190 @@ describe("connectStores", () => {
       await Promise.resolve();
       // history 回执不得直写 active 指针；初始同步后 active 仍为 list 回执的 s1
       expect(sessionsStore.activeSessionId(agent)).toBe("s1");
+    });
+
+    it("session_list_result event does not revert event-advanced state (M3)", async () => {
+      await connectClient();
+      const sessionsStore = useSessionsStore();
+      const agent = agentTarget();
+
+      // 事件先落地：s2 激活（active 指针 + revision 前进）
+      internals(client)._dispatch(
+        EventType.SESSION_ACTIVATED,
+        makeMsg(EventType.SESSION_ACTIVATED, {
+          project_id: "p1",
+          agent_id: "id-agent-1",
+          agent_name: "agent-1",
+          session: {
+            session_id: "s2",
+            agent_name: "agent-1",
+            root_node_id: "root-2",
+            active_branch_id: "b2",
+          },
+        }),
+      );
+      expect(sessionsStore.activeSessionId(agent)).toBe("s2");
+
+      // 推送携带旧快照（仅 s1、active=s1）：revision 门须拒绝回退
+      internals(client)._dispatch(
+        EventType.SESSION_LIST_RESULT,
+        makeMsg(EventType.SESSION_LIST_RESULT, {
+          project_id: "p1",
+          agent_id: "id-agent-1",
+          agent_name: "agent-1",
+          active_session_id: "s1",
+          sessions: [
+            {
+              session_id: "s1",
+              agent_name: "agent-1",
+              root_node_id: "root-1",
+              active_branch_id: "b1",
+            },
+          ],
+        }),
+      );
+      await Promise.resolve();
+      expect(sessionsStore.activeSessionId(agent)).toBe("s2");
+    });
+
+    it("branch_list_result event does not revert event-advanced head (M3)", async () => {
+      await connectClient();
+      const branchesStore = useBranchesStore();
+      const agent = agentTarget();
+      const session = { ...agent, sessionId: "s1" };
+
+      // 事件先落地：commit 事件把 b1 Head 权威推进到 n2
+      internals(client)._dispatch(
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, {
+          project_id: "p1",
+          agent_id: "id-agent-1",
+          agent_name: "agent-1",
+          node: { id: "n2", parent_id: "n1", session_id: "s1", created_on_branch_id: "b1" },
+          branch: { branch_id: "b1", session_id: "s1", name: "main", head_node_id: "n2" },
+        }),
+      );
+      expect(branchesStore.getBranch({ ...session, branchId: "b1" })?.info.head_node_id).toBe("n2");
+
+      // 推送携带旧快照（head=n1）：revision 门须拒绝回退
+      internals(client)._dispatch(
+        EventType.BRANCH_LIST_RESULT,
+        makeMsg(EventType.BRANCH_LIST_RESULT, {
+          project_id: "p1",
+          agent_id: "id-agent-1",
+          agent_name: "agent-1",
+          session_id: "s1",
+          active_branch_id: "b1",
+          branches: [{ branch_id: "b1", session_id: "s1", name: "main", head_node_id: "n1" }],
+        }),
+      );
+      await Promise.resolve();
+      expect(branchesStore.getBranch({ ...session, branchId: "b1" })?.info.head_node_id).toBe("n2");
+    });
+
+    it("reconnect replays agent action sync with a fresh generation (M3b)", async () => {
+      await connectClient();
+      useProjectsStore().setProjectsFromList([
+        { project_id: "p1", name: "p1", status: "active", archived_at: null } as never,
+      ]);
+      const listAgents = vi.spyOn(client, "listAgents").mockImplementation(() => {
+        // 模拟真实回执路径：COMMAND_RESULT dispatch 由服务器消息驱动
+        internals(client)._dispatch(
+          SystemType.COMMAND_RESULT,
+          makeMsg(SystemType.COMMAND_RESULT, {
+            request_id: "reconnect-agents",
+            success: true,
+            original_command: CommandType.LIST_AGENTS,
+            data: { agents: [{ project_id: "p1", agent_id: "id-agent-1", name: "agent-1" }] },
+          }),
+        );
+        return Promise.resolve({ success: true, data: {} } as never);
+      });
+      vi.spyOn(client, "listSessions").mockResolvedValue({
+        request_id: "s",
+        success: true,
+        data: { sessions: [{ session_id: "s1", active_branch_id: "b1" }], active_session_id: "s1" },
+      } as never);
+      vi.spyOn(client, "listBranches").mockResolvedValue({
+        request_id: "b",
+        success: true,
+        data: { branches: [] },
+      } as never);
+      vi.spyOn(client, "getChainHistory").mockResolvedValue({
+        request_id: "h",
+        success: true,
+        data: { nodes: [] },
+      } as never);
+
+      internals(client)._notifyReconnected();
+      // 重连须对 operable 项目重放 listAgents（→ syncAgentActionState 全链重同步）
+      await vi.waitFor(() => expect(listAgents).toHaveBeenCalledWith("p1"));
+      await vi.waitFor(() => expect(client.listSessions).toHaveBeenCalled());
+    });
+
+    it("stale branch snapshot does not revert event-advanced head (U3)", async () => {
+      await connectClient();
+      const branchesStore = useBranchesStore();
+      const agent = agentTarget();
+      const session = { ...agent, sessionId: "s1" };
+
+      const commit = (id: string, iteration: number, headNodeId: string) =>
+        internals(client)._dispatch(
+          EventType.ACTION_CHAIN_UPDATED,
+          makeMsg(EventType.ACTION_CHAIN_UPDATED, {
+            project_id: "p1",
+            agent_id: "id-agent-1",
+            agent_name: "agent-1",
+            node: {
+              id,
+              parent_id: "n0",
+              session_id: "s1",
+              created_on_branch_id: "b1",
+              iteration,
+              timestamp: "2026-09-19T00:00:00+00:00",
+            },
+            branch: { branch_id: "b1", session_id: "s1", name: "main", head_node_id: headNodeId },
+          }),
+        );
+
+      // 新 commit（iteration 5）推进 Head 到 n5
+      commit("n5", 5, "n5");
+      expect(branchesStore.getBranch({ ...session, branchId: "b1" })?.info.head_node_id).toBe("n5");
+
+      // 乱序/replay 旧快照（iteration 2、head=n2）不得回退 Head
+      commit("n2", 2, "n2");
+      expect(branchesStore.getBranch({ ...session, branchId: "b1" })?.info.head_node_id).toBe("n5");
+
+      // 更新 commit（iteration 7）正常前移
+      commit("n7", 7, "n7");
+      expect(branchesStore.getBranch({ ...session, branchId: "b1" })?.info.head_node_id).toBe("n7");
+    });
+
+    it("branch snapshot mismatching node bucket does not advance head (U3b)", async () => {
+      await connectClient();
+      const branchesStore = useBranchesStore();
+      const agent = agentTarget();
+      const session = { ...agent, sessionId: "s1" };
+
+      internals(client)._dispatch(
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, {
+          project_id: "p1",
+          agent_id: "id-agent-1",
+          agent_name: "agent-1",
+          node: {
+            id: "n1",
+            parent_id: null,
+            session_id: "s1",
+            created_on_branch_id: "b1",
+          },
+          // 异常事件：branch 快照指向别的 branch，与 node 归桶不一致
+          branch: { branch_id: "b-other", session_id: "s1", name: "x", head_node_id: "n1" },
+        }),
+      );
+
+      // n1 仍按 node 归桶合并进 b1，但 b-other 不得被异常快照创建/推进
+      expect(branchesStore.getBranch({ ...session, branchId: "b-other" })).toBeUndefined();
     });
   });
 });
