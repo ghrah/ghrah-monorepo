@@ -141,6 +141,17 @@ function openAgent(row: (typeof rows.value)[number]) {
               <span class="agents-overview-usage-text">{{
                 t("agentsOverview.usageCumulative", { tokens: row.usage.cumulativeInputTokens })
               }}</span>
+              <span
+                v-if="row.usage.realInputTokens != null || row.usage.realOutputTokens != null"
+                class="agents-overview-usage-breakdown"
+                >{{
+                  t("agentsOverview.usageBreakdownShort", {
+                    input: row.usage.realInputTokens ?? 0,
+                    output: row.usage.realOutputTokens ?? 0,
+                    cacheRead: row.usage.realCacheReadTokens ?? 0,
+                  })
+                }}</span
+              >
               <span class="agents-overview-usage-tag">{{ t("agentsOverview.usageNoWindow") }}</span>
             </template>
           </span>

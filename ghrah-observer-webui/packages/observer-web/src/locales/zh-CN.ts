@@ -249,6 +249,7 @@ export default {
     usageTitle: "上下文：{occupied} / {budget} tokens（{percent}%）",
     usageBreakdown: "输入 {input}（缓存命中 {cacheRead}）· 输出 {output}",
     usageBreakdownShort: "入 {input} · 出 {output} · 缓存 {cacheRead}",
+    usageBreakdownLastCall: "最近一次：入 {input} · 出 {output} · 缓存 {cacheRead}",
     usageSource: "预算来源：{source}",
     usageCumulative: "已消耗 {tokens} tokens",
     usageNoWindow: "未配置窗口",

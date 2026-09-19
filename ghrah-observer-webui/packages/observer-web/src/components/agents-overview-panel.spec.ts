@@ -178,6 +178,10 @@ describe("AgentsOverviewPanel", () => {
     expect(cumulativeRow.find(".agents-overview-usage-bar").exists()).toBe(false);
     expect(cumulativeRow.text()).toContain("1234 tokens used");
     expect(cumulativeRow.text()).toContain("No window configured");
+    expect(cumulativeRow.find(".agents-overview-usage-breakdown").exists()).toBe(true);
+    expect(cumulativeRow.text()).toContain("in 1234");
+    expect(cumulativeRow.text()).toContain("out 100");
+    expect(cumulativeRow.text()).toContain("cached 0");
   });
 
   it("renders cache breakdown and budget source tag for budgeted agents", () => {

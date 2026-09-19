@@ -257,6 +257,7 @@ export default {
     usageTitle: "Context: {occupied} / {budget} tokens ({percent}%)",
     usageBreakdown: "Input {input} (cache hit {cacheRead}) · Output {output}",
     usageBreakdownShort: "in {input} · out {output} · cached {cacheRead}",
+    usageBreakdownLastCall: "Last call: in {input} · out {output} · cached {cacheRead}",
     usageSource: "Budget source: {source}",
     usageCumulative: "{tokens} tokens used",
     usageNoWindow: "No window configured",

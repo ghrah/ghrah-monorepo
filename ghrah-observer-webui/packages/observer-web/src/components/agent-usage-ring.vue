@@ -35,9 +35,21 @@ const title = computed(() => {
     }
     return lines.join("\n");
   }
-  return t("agentsOverview.usageCumulative", {
-    tokens: usage.cumulativeInputTokens,
-  });
+  const lines = [
+    t("agentsOverview.usageCumulative", {
+      tokens: usage.cumulativeInputTokens,
+    }),
+  ];
+  if (usage.realInputTokens != null || usage.realOutputTokens != null) {
+    lines.push(
+      t("agentsOverview.usageBreakdownLastCall", {
+        input: usage.realInputTokens ?? 0,
+        output: usage.realOutputTokens ?? 0,
+        cacheRead: usage.realCacheReadTokens ?? 0,
+      }),
+    );
+  }
+  return lines.join("\n");
 });
 </script>
 

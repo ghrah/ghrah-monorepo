@@ -197,4 +197,19 @@ describe("AgentList", () => {
     const circumference = 2 * Math.PI * 5;
     expect(offset).toBeCloseTo(circumference * 0.5, 1);
   });
+
+  it("cumulative ring title includes last-call breakdown without window", async () => {
+    const agents = useAgentsStore();
+    agents.onAgentSpawned(spawn("architect"));
+    const usage = useContextUsageStore();
+    usage.onContextUsageUpdated(
+      usagePayload({ budget_tokens: 0, budget_source: null, occupied_tokens: null }),
+      111,
+    );
+    const wrapper = mountAgentList();
+    await wrapper.vm.$nextTick();
+    const title = agentItem(wrapper, "architect")!.find(".inline-flex").attributes("title");
+    expect(title).toContain("4096 tokens used");
+    expect(title).toContain("Last call: in 4096 · out 200 · cached 3200");
+  });
 });
