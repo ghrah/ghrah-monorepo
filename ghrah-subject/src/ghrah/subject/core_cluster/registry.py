@@ -296,6 +296,7 @@ class CoreClusterRegistry:
 def default_core_unit_factory(
     config: SubjectConfig,
     manifest_store: Any = None,
+    llm_factory: Callable[[Any], Any] | None = None,
 ) -> Callable[[str, str, str], Any]:
     """生产工厂：(cluster_id, project_id, root_locator) → CoreUnit。
 
@@ -307,6 +308,12 @@ def default_core_unit_factory(
     解析 manifest_ref spawn（对齐 Core 独立库 runner 范式）。由
     ``CoreClusterRegistryUnit.init`` 从 ctx 取 ``MANIFEST_STORE`` 后传入
     （挂载顺序保证 store 先于 CoreUnit，见 mount_builtin_units）。
+
+    ``llm_factory`` 为可选的 per-cluster LLM 工厂注入（透传
+    CoreUnitConfig.llm_factory；None = Core 内建默认 agentconf 解析）。
+    部署方显式声明 LLM 出口的程序化接缝——SubjectConfig 暂不暴露用户级
+    字段（零隐式；测试/嵌入方经 CoreClusterRegistryUnit(unit_factory=...)
+    或本参数注入）。
     """
     from ghrah.context.persistence.sqlite_backend import (  # type: ignore[import-untyped]
         SqliteBackend,
@@ -341,6 +348,7 @@ def default_core_unit_factory(
             environment_injection=config.hitl_policy.environment_injection,
             persistence_factory=persistence_factory,
             manifest_store=manifest_store,
+            llm_factory=llm_factory,
             # 部署方显式声明（C2 fail-closed 兼容通道）：空配置 → None →
             # 无 abilities 快速 spawn 在 core 侧 raise 指路 manifest_ref。
             default_abilities=tuple(config.default_spawn_abilities) or None,

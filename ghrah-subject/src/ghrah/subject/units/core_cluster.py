@@ -124,11 +124,15 @@ class CoreClusterRegistryUnit(SubjectUnit):
         config: SubjectConfig,
         *,
         unit_factory: Callable[[str, str, str], Any] | None = None,
+        llm_factory: Callable[[Any], Any] | None = None,
     ) -> None:
         self._config = config
         # 测试可注入假工厂；生产默认工厂在 init 时构造（需 ctx 取 MANIFEST_STORE
         # 注入 CoreUnitConfig.manifest_store，对齐 Core 独立库 runner 范式）。
         self._unit_factory = unit_factory
+        # 可选 per-cluster LLM 工厂透传（None = Core 内建默认 agentconf 解析）；
+        # 显式 unit_factory 优先，本参数被忽略（工厂自持全部 CoreUnitConfig）。
+        self._llm_factory = llm_factory
         self._registry: CoreClusterRegistry | None = None
         self._ctx: Any | None = None
         self._meta = UnitMeta(
@@ -154,7 +158,9 @@ class CoreClusterRegistryUnit(SubjectUnit):
         if self._unit_factory is None:
             # 生产默认工厂：注入 manifest_store（从 ctx 取），
             # 供 CoreUnit 内部解析 manifest_ref spawn。
-            self._unit_factory = default_core_unit_factory(self._config, manifest_store=store)
+            self._unit_factory = default_core_unit_factory(
+                self._config, manifest_store=store, llm_factory=self._llm_factory
+            )
         registry = CoreClusterRegistry(
             unit_factory=self._unit_factory,
         )

@@ -124,6 +124,7 @@ class SupervisorActor:
         abilities: list[AbilityProtocol] | None = None,
         *,
         persistence_factory: Callable[[AgentConfig], Any] | None = None,
+        llm_factory: Callable[[AgentConfig], Any] | None = None,
         tags: list[str] | None = None,
     ) -> str:
         """创建并注册一个 Agent，返回 agent name。
@@ -144,6 +145,9 @@ class SupervisorActor:
                 （未配置则 raise）；空列表视为装配错误 raise。
             persistence_factory: 可选的 per-agent 持久化后端工厂
                 （透传 AgentBuilder.from_config；None 走 Core 内建默认）。
+            llm_factory: 可选的 per-agent LLM 工厂
+                （透传 AgentBuilder.from_config；None 走 Core 内建默认，
+                即 agentconf 解析）。注入即全责。
             tags: 可选的 manifest AgentDef 标签透传（注册进 AgentInfo，
                 供集群身份注入段展示；无 manifest 路径不传）。
 
@@ -216,6 +220,7 @@ class SupervisorActor:
             supervisor=supervisor_handle,
             event_publisher=self._event_publisher,
             persistence_factory=persistence_factory,
+            llm_factory=llm_factory,
         )
 
         # 恢复必须发生在 registry 可见之前。旧实现先注册再无条件 persist，

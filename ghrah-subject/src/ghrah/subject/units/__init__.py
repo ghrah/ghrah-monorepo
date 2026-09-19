@@ -22,6 +22,7 @@ async def mount_builtin_units(
     config: SubjectConfig,
     *,
     profile: str = "coexistence",
+    core_cluster_unit: SubjectUnit | None = None,
 ) -> dict[str, Fiber]:
     """Mount built-in units as Ouroboros plugins.
 
@@ -32,8 +33,13 @@ async def mount_builtin_units(
     同时打开同一 SQLite 文件触发 ``database is locked``）。
 
     RoomUnit 在 ProjectUnit 之后（requires PROJECT_MANAGER）、CoreUnit 经
-    registry 懒挂载必然在后——满足「RoomUnit 先于 CoreUnit
-    挂载」的装配顺序要求（send 回路唯一跨 unit 耦合点）。
+    registry 懒挂载必然在后——满足「RoomUnit 先于 CoreUnit 挂载」的
+    装配顺序要求（send 回路唯一跨 unit 耦合点）。
+
+    ``core_cluster_unit`` 为可选替换 registry unit（仅 full profile 生效；
+    None = 默认 CoreClusterRegistryUnit(config)）。程序化注入接缝——
+    典型用途为携带 ``llm_factory`` 的等价配置实例（测试/嵌入方），不影响
+    生产默认路径。
     """
 
     if profile not in {"coexistence", "full"}:
@@ -69,7 +75,9 @@ async def mount_builtin_units(
         units.extend(
             [
                 WebSocketObserverEndpointUnit(config),
-                CoreClusterRegistryUnit(config),
+                core_cluster_unit
+                if core_cluster_unit is not None
+                else CoreClusterRegistryUnit(config),
                 ProjectUnit(config),
                 RoomUnit(config),
                 RecoveryUnit(config),

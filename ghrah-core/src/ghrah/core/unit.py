@@ -146,6 +146,12 @@ class CoreUnitConfig:
         persistence_factory: per-agent 持久化后端工厂
             （``(AgentConfig) -> PersistenceBackend | None``；None = Core
             内建 sqlite）。新 spawn 生效，存量 agent 不受影响。
+        llm_factory: per-cluster LLM 工厂注入
+            （``(AgentConfig) -> LLMProtocol``；None = Core 内建默认，即
+            agentconf 解析 + model_overrides 应用）。部署方显式声明 LLM
+            出口（网关路由/凭据轮换/成本计量包装）的唯一接缝；注入即全责，
+            model_overrides 等默认逻辑由注入方自理。仅进程内部署形态可用
+            （Callable 不可序列化，与 command_runner 同边界）。
         manifest_store: ManifestStoreProtocol 实现（duck-typed），
             供 manifest_ref spawn 解析 agent manifest。None = standalone
             模式（manifest_ref spawn 明确报错，对齐 ROOM_BRIDGE_UNAVAILABLE
@@ -173,6 +179,11 @@ class CoreUnitConfig:
     environment_injection: bool = False
     command_runner: Any = None
     persistence_factory: Callable[[Any], Any] | None = None
+    # per-cluster LLM 工厂注入（(AgentConfig) -> LLMProtocol；None = Core 内建
+    # 默认，即 agentconf 解析）。与 persistence_factory 同范式：部署方显式
+    # 声明 LLM 出口（网关/凭据/计量包装），注入即全责（不再套用
+    # _default_llm_factory 的 model_overrides 逻辑，由注入方自理）。
+    llm_factory: Callable[[Any], Any] | None = None
     # duck-typed ManifestStoreProtocol；None = standalone（manifest_ref spawn 报错）
     manifest_store: Any = None
     default_abilities: tuple[str, ...] | None = None
@@ -914,6 +925,7 @@ class CoreUnit:
                     resolved_config,
                     abilities=ability_instances,
                     persistence_factory=self._config.persistence_factory,
+                    llm_factory=self._config.llm_factory,
                     tags=list(manifest.metadata.tags),
                 )
             except RegistryError as e:
@@ -1003,6 +1015,7 @@ class CoreUnit:
                 core_config,
                 abilities=ability_instances,
                 persistence_factory=self._config.persistence_factory,
+                llm_factory=self._config.llm_factory,
             )
         except RegistryError as e:
             return self._err(str(e))

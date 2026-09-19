@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from ouroboros import Context, Fiber
 
     from ghrah.subject.config import SubjectConfig
+    from ghrah.subject.unit.base import SubjectUnit
 
 __all__ = ["assemble_subject"]
 
@@ -41,10 +42,17 @@ async def assemble_subject(
     config: SubjectConfig,
     *,
     profile: str = "full",
+    core_cluster_unit: SubjectUnit | None = None,
 ) -> dict[str, Fiber]:
-    """装配 Subject 运行时并触发启动期 reconcile（若启用且 recovery unit 在场）。"""
+    """装配 Subject 运行时并触发启动期 reconcile（若启用且 recovery unit 在场）。
 
-    fibers = await mount_builtin_units(ctx, config, profile=profile)
+    ``core_cluster_unit`` 透传 ``mount_builtin_units`` 同名参数（可选替换
+    registry unit；程序化注入接缝，如携带 llm_factory 的测试/嵌入装配）。
+    """
+
+    fibers = await mount_builtin_units(
+        ctx, config, profile=profile, core_cluster_unit=core_cluster_unit
+    )
     fibers.update(await mount_third_party_units(ctx, config))
 
     if config.recovery.enabled and config.recovery.reconcile_on_start:
