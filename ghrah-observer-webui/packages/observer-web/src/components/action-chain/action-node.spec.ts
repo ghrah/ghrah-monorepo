@@ -3,58 +3,65 @@
 import { type ActionNode, ActionNodeSchema } from "@ghrah/protocol";
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
-import ActionNodeRow from "./action-node.vue";
+import ActionNodeCard from "./action-node.vue";
+import { type LayoutNode, layoutGraph } from "./layout-graph.js";
 
 function node(overrides: Partial<ActionNode> = {}): ActionNode {
   return ActionNodeSchema.parse(overrides);
 }
 
-const compactNode = node({
-  id: "n1",
-  ability_names: ["compact"],
-  metadata: {
-    trigger_source: "manual",
-    summarized_range: "n-001..n-004",
-    kept_recent_nodes: 2,
-    tokens_before: 6800,
-    tokens_after: 2400,
-    post_check: "ok",
-  },
-});
+function layoutNodeOf(n: ActionNode, extra: Partial<LayoutNode> = {}): LayoutNode {
+  const graph = layoutGraph([n], []);
+  const layoutNode = graph.nodes[0];
+  return { ...layoutNode, ...extra };
+}
 
-const plainNode = node({ id: "n2", ability_names: ["think"] });
-
-function mountRow(n: ActionNode) {
-  return mount(ActionNodeRow, {
-    props: { node: n, depth: 0, isLastChild: true, ancestorPipes: [] },
+function mountCard(ln: LayoutNode, selected = false) {
+  return mount(ActionNodeCard, {
+    props: { layoutNode: ln, selected },
   });
 }
 
-describe("ActionNodeRow compact badge", () => {
-  it("renders compact badge with trigger source for compact nodes", () => {
-    const wrapper = mountRow(compactNode);
-    const badge = wrapper.find(".bg-indigo-100");
-    expect(badge.exists()).toBe(true);
-    expect(badge.text()).toContain("compact");
-    expect(badge.text()).toContain("manual");
-    const title = badge.attributes("title") ?? "";
-    expect(title).toContain("n-001..n-004");
-    expect(title).toContain("2");
-    expect(title).toContain("6800");
-    expect(title).toContain("2400");
-    expect(title).toContain("ok");
+describe("ActionNodeCard", () => {
+  it("applies ability class from ability_names", () => {
+    const write = mountCard(layoutNodeOf(node({ id: "w1", ability_names: ["write_file"] })));
+    expect(write.find(".ac-node--write").exists()).toBe(true);
+    const read = mountCard(layoutNodeOf(node({ id: "r1", ability_names: ["read_file"] })));
+    expect(read.find(".ac-node--read").exists()).toBe(true);
+    const converse = mountCard(layoutNodeOf(node({ id: "c1", ability_names: ["conversation"] })));
+    expect(converse.find(".ac-node--converse").exists()).toBe(true);
+    const unknown = mountCard(layoutNodeOf(node({ id: "u1", ability_names: ["think"] })));
+    expect(unknown.find(".ac-node--unknown").exists()).toBe(true);
   });
 
-  it("renders no badge for plain nodes", () => {
-    const wrapper = mountRow(plainNode);
-    expect(wrapper.find(".bg-indigo-100").exists()).toBe(false);
+  it("renders HEAD and FORK badges from layout flags", () => {
+    const ln = layoutNodeOf(node({ id: "n1" }), { isHead: true, isBranchPoint: true });
+    const wrapper = mountCard(ln);
+    expect(wrapper.find(".ac-node-badge--head").exists()).toBe(true);
+    expect(wrapper.find(".ac-node-badge--fork").exists()).toBe(true);
   });
 
-  it("falls back to placeholder when metadata keys are missing", () => {
-    const sparse = node({ id: "n3", ability_names: ["compact"], metadata: {} });
-    const wrapper = mountRow(sparse);
-    const badge = wrapper.find(".bg-indigo-100");
-    expect(badge.exists()).toBe(true);
-    expect(badge.text()).toContain("—");
+  it("renders no badges for plain nodes", () => {
+    const wrapper = mountCard(layoutNodeOf(node({ id: "n2" })));
+    expect(wrapper.find(".ac-node-badge--head").exists()).toBe(false);
+    expect(wrapper.find(".ac-node-badge--fork").exists()).toBe(false);
+  });
+
+  it("shows selected state via class", () => {
+    const wrapper = mountCard(layoutNodeOf(node({ id: "n3" })), true);
+    expect(wrapper.find(".ac-node.selected").exists()).toBe(true);
+  });
+
+  it("emits select with node id on click", async () => {
+    const wrapper = mountCard(layoutNodeOf(node({ id: "n4" })));
+    await wrapper.find(".ac-node").trigger("click");
+    expect(wrapper.emitted("select")?.[0]).toEqual(["n4"]);
+  });
+
+  it("renders meta line with time and iteration", () => {
+    const wrapper = mountCard(
+      layoutNodeOf(node({ id: "n5", timestamp: "2026-09-19T01:02:03Z", iteration: 7 })),
+    );
+    expect(wrapper.find(".ac-node-meta").text()).toContain("iter=7");
   });
 });

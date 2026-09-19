@@ -31,6 +31,14 @@ vi.mock("@/composables/useObserver", () => ({
 
 import ActionChainPanel from "./action-chain-panel.vue";
 
+/** 从画布节点 DOM 提取 meta 行文本（节点去重断言用）。 */
+function textOfMeta(
+  nodeWrapper: ReturnType<import("@vue/test-utils").VueWrapper["findAll"]>[number],
+): string {
+  const meta = nodeWrapper.find(".ac-node-meta");
+  return meta.exists() ? meta.text() : nodeWrapper.text();
+}
+
 function node(overrides: Partial<ActionNode> = {}): ActionNode {
   return ActionNodeSchema.parse(overrides);
 }
@@ -122,10 +130,10 @@ describe("ActionChainPanel", () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain("@alpha");
     expect(wrapper.text()).not.toContain("@beta");
-    expect(wrapper.findAll(".tree-row")).toHaveLength(1);
+    expect(wrapper.findAll(".ac-node")).toHaveLength(1);
   });
 
-  it("switches tree when the agent prop changes", async () => {
+  it("switches canvas when the agent prop changes", async () => {
     const agents = useAgentsStore();
     agents.onAgentSpawned(spawn("alpha"));
     agents.onAgentSpawned(spawn("beta"));
@@ -136,12 +144,12 @@ describe("ActionChainPanel", () => {
     ]);
     const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
     await wrapper.vm.$nextTick();
-    expect(wrapper.findAll(".tree-row")).toHaveLength(1);
+    expect(wrapper.findAll(".ac-node")).toHaveLength(1);
     await wrapper.setProps({ agent: target("beta") });
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain("@beta");
     expect(wrapper.text()).not.toContain("@alpha");
-    expect(wrapper.findAll(".tree-row")).toHaveLength(2);
+    expect(wrapper.findAll(".ac-node")).toHaveLength(2);
   });
 
   it("renders parent_id tree with indent guides", async () => {
@@ -217,13 +225,12 @@ describe("ActionChainPanel", () => {
     const branchSelect = wrapper.get<HTMLSelectElement>(".chain-branch-select");
     await branchSelect.setValue("__all__");
     await wrapper.vm.$nextTick();
-    expect(wrapper.findAll(".tree-row")).toHaveLength(4);
-    const allText = wrapper.text();
-    expect(allText).toContain("└");
-    expect(allText).toContain("├");
+    expect(wrapper.findAll(".ac-node")).toHaveLength(4);
+    // 单 Session 泳道布局：main(3 节点) 泳道 0 + retry(1 节点) 泳道 1 → 1 条泳道分隔线
+    expect(wrapper.findAll(".ac-lane-guide")).toHaveLength(1);
   });
 
-  it("suppresses conversation text and send_message tool_call blocks", async () => {
+  it("classifies conversation nodes as converse on the canvas", async () => {
     const agents = useAgentsStore();
     agents.onAgentSpawned(spawn("alpha"));
     setActiveChain("alpha", [
@@ -247,14 +254,9 @@ describe("ActionChainPanel", () => {
     ]);
     const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
     await wrapper.vm.$nextTick();
-    const expandBtn = wrapper.find("button.text-gray-400, button.text-gray-600");
-    expect(expandBtn.exists()).toBe(true);
-    await expandBtn.trigger("click");
-    await wrapper.vm.$nextTick();
-    const expandedText = wrapper.text();
-    expect(expandedText).toContain("think");
-    expect(expandedText).not.toContain("hello reply");
-    expect(expandedText).not.toContain("send_message");
+    expect(wrapper.findAll(".ac-node--converse")).toHaveLength(1);
+    // 详情区（尽力渲染）后置阶段 3：卡片摘要不含消息内容
+    expect(wrapper.text()).not.toContain("hello reply");
   });
 
   it("plain select only views; explicit buttons activate runtime", async () => {
@@ -507,6 +509,37 @@ describe("ActionChainPanel", () => {
     await branchSelect.setValue("__all__");
     await wrapper.vm.$nextTick();
     // 全部 Branch 模式：main(n2)+retry(r2) 两 Head 回溯合并去重（root/n1 共享）= 5
-    expect(wrapper.findAll(".tree-row")).toHaveLength(5);
+    expect(wrapper.findAll(".ac-node")).toHaveLength(5);
+    // 合并布局去重：共享祖先 root 只渲染一次
+    const summaryTexts = wrapper.findAll(".ac-node").map((n) => textOfMeta(n));
+    const unique = new Set(summaryTexts);
+    expect(unique.size).toBe(summaryTexts.length);
+  });
+
+  it("selects and clears a node via canvas interactions", async () => {
+    const agents = useAgentsStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    setActiveChain("alpha", [
+      { id: "a1", parent_id: null, timestamp: "t1" },
+      { id: "a2", parent_id: "a1", timestamp: "t2" },
+    ]);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
+    await wrapper.vm.$nextTick();
+    // 横向滚动出口条件：画布视口为唯一滚动容器，AgentName 头与图例在滚动区之外
+    const viewport = wrapper.find(".ac-canvas-viewport");
+    expect(viewport.exists()).toBe(true);
+    const header = wrapper.find(".chain-header, .chain-canvas-scroll");
+    expect(header.exists()).toBe(false);
+    // AgentName 头部不得在滚动视口内
+    const headerText = wrapper.findAll("div").filter((d) => d.text() === "@alpha");
+    expect(headerText.length).toBeGreaterThan(0);
+    expect(headerText[0].element.parentElement?.closest(".ac-canvas-viewport")).toBeNull();
+    const nodes = wrapper.findAll(".ac-node");
+    await nodes[1].trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".ac-node.selected")).toHaveLength(1);
+    await wrapper.find(".ac-canvas-viewport").trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.findAll(".ac-node.selected")).toHaveLength(0);
   });
 });

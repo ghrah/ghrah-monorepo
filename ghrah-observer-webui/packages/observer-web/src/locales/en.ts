@@ -198,6 +198,13 @@ export default {
     activateSessionConfirm: "Activate this session as the agent's runtime context?",
     activateBranchConfirm: "Set this branch as the runtime branch?",
     allBranches: "All branches",
+    headBadge: "HEAD",
+    forkBadge: "FORK",
+    canvasLabel: "Action chain canvas",
+    legendWrite: "Write",
+    legendRead: "Read",
+    legendConverse: "Converse",
+    legendUnknown: "Other",
     compactBadge: "⇕ compact · {source}",
     compactDetail:
       "Summarized {range} · kept {kept} nodes · tokens {before} → {after} · post-check {check}",

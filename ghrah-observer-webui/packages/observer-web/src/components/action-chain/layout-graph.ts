@@ -37,7 +37,7 @@ export interface LayoutGraphOptions {
   layerGap?: number;
 }
 
-const DEFAULT_NODE_WIDTH = 200;
+export const DEFAULT_NODE_WIDTH = 200;
 const DEFAULT_LANE_HEIGHT = 96;
 const DEFAULT_LAYER_GAP = 240;
 

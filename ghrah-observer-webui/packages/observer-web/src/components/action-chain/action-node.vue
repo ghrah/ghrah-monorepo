@@ -1,125 +1,63 @@
 <script setup lang="ts">
-import type { ActionNode, ContentBlock } from "@ghrah/protocol";
-import { computed, ref } from "vue";
+import type { ActionNode } from "@ghrah/protocol";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
+import { abilityClass } from "./ability-class.js";
+import type { LayoutNode } from "./layout-graph.js";
+import { DEFAULT_NODE_WIDTH } from "./layout-graph.js";
 
-const { t, locale } = useI18n();
+const { locale, t } = useI18n();
 
 const props = defineProps<{
-  node: ActionNode;
-  depth: number;
-  isLastChild: boolean;
-  ancestorPipes: boolean[];
+  layoutNode: LayoutNode;
+  selected: boolean;
 }>();
 
-const expanded = ref(false);
+const emit = defineEmits<{ select: [nodeId: string] }>();
 
-const SUPPRESSED_TOOL_NAMES = new Set(["send_message", "broadcast_message"]);
+const CARD_HEIGHT = 48;
+const NODE_WIDTH = DEFAULT_NODE_WIDTH;
 
-function isTextBlock(block: ContentBlock): boolean {
-  return block.type === "text";
-}
-function shouldSuppress(block: ContentBlock): boolean {
-  // conversation TextBlock + send_message/broadcast tool_call 抑制（已在 chat 视图显示），保留其余
-  if (isTextBlock(block) && (props.node.ability_names ?? []).includes("conversation")) return true;
-  if (block.type === "tool_call" && SUPPRESSED_TOOL_NAMES.has(block.name ?? "")) return true;
-  return false;
-}
-
-const visibleBlocks = computed<ContentBlock[]>(() => {
-  const blocks: ContentBlock[] = [];
-  for (const m of props.node.messages_delta ?? []) {
-    for (const b of m.content_blocks ?? []) {
-      if (shouldSuppress(b)) continue;
-      blocks.push(b);
-    }
-  }
-  return blocks;
-});
-
-const abilitySummary = computed(() => (props.node.ability_names ?? []).join(",") || "—");
-const stateKeys = computed(() => Object.keys(props.node.agent_state ?? {}));
-const actionResults = computed(() => props.node.action_results ?? []);
-const isCompact = computed(() => (props.node.ability_names ?? []).includes("compact"));
-
-function metaString(key: string): string {
-  const value = (props.node.metadata ?? {})[key];
-  return value == null ? "—" : String(value);
-}
-
-const compactBadge = computed(() =>
-  isCompact.value ? t("actionChain.compactBadge", { source: metaString("trigger_source") }) : "",
-);
-const compactDetail = computed(() => {
-  if (!isCompact.value) return "";
-  return t("actionChain.compactDetail", {
-    range: metaString("summarized_range"),
-    kept: metaString("kept_recent_nodes"),
-    before: metaString("tokens_before"),
-    after: metaString("tokens_after"),
-    check: metaString("post_check"),
-  });
-});
+const node = computed<ActionNode>(() => props.layoutNode.node);
+const cls = computed(() => abilityClass(node.value.ability_names ?? []));
+const abilitySummary = computed(() => (node.value.ability_names ?? []).join(",") || "—");
 const timeStr = computed(() => {
-  const ts = props.node.timestamp;
+  const ts = node.value.timestamp;
   if (!ts) return "";
   const d = new Date(ts);
   return Number.isNaN(d.getTime()) ? ts : d.toLocaleTimeString(locale.value);
 });
-const summary = computed(() => {
-  const iter = props.node.iteration ?? 0;
-  return `${timeStr.value} iter=${iter} | abilities=[${abilitySummary.value}] | state_keys=[${stateKeys.value.join(",")}]`;
-});
+const metaLine = computed(() => `${timeStr.value} iter=${node.value.iteration ?? 0}`);
+const topY = computed(() => props.layoutNode.y - CARD_HEIGHT / 2);
 
-const hasDetails = computed(() => visibleBlocks.value.length > 0 || actionResults.value.length > 0);
+function onSelect(): void {
+  const id = node.value.id;
+  if (id) emit("select", id);
+}
 </script>
 
 <template>
-  <div class="tree-row">
-    <div class="flex items-start gap-1 py-0.5">
-      <!-- 缩进引导线 -->
-      <span
-        v-for="(pipe, idx) in ancestorPipes"
-        :key="idx"
-        class="inline-block w-4 text-center text-gray-300 dark:text-gray-700 select-none flex-shrink-0"
-      >{{ pipe ? "│" : " " }}</span>
-      <span class="inline-block w-4 text-center text-gray-400 dark:text-gray-600 select-none flex-shrink-0">{{ isLastChild ? "└" : "├" }}</span>
-      <button
-        v-if="hasDetails"
-        type="button"
-        class="text-xs text-gray-400 dark:text-gray-600 flex-shrink-0 w-4"
-        @click="expanded = !expanded"
-      >{{ expanded ? "▾" : "▸" }}</button>
-      <span v-else class="inline-block w-4 flex-shrink-0" />
-      <span
-        v-if="isCompact"
-        :title="compactDetail"
-        class="flex-shrink-0 text-xs px-1.5 rounded bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300"
-      >{{ compactBadge }}</span>
-      <span class="flex-1 font-mono text-xs text-gray-700 dark:text-gray-300 truncate">{{ summary }}</span>
-    </div>
-    <div v-if="expanded && hasDetails" class="pl-10 py-1 space-y-1">
-      <div
-        v-for="(block, j) in visibleBlocks"
-        :key="`b${j}`"
-        class="text-xs"
-      >
-        <pre v-if="block.type === 'reasoning'" class="italic text-gray-500 dark:text-gray-400 whitespace-pre-wrap">{{ block.reasoning }}</pre>
-        <pre v-else-if="block.type === 'error'" class="text-red-600 dark:text-red-400 whitespace-pre-wrap">{{ block.error_type }}: {{ block.message }}</pre>
-        <details v-else-if="block.type === 'tool_call'" class="text-gray-600 dark:text-gray-400">
-          <summary>🔧 {{ block.name }}</summary>
-          <pre class="whitespace-pre-wrap">{{ block.arguments }}</pre>
-        </details>
-        <details v-else-if="block.type === 'tool_result'" :class="block.success ? 'text-green-600' : 'text-red-600'">
-          <summary>↳ {{ block.name ?? block.tool_call_id }}</summary>
-          <pre class="whitespace-pre-wrap">{{ block.content }}</pre>
-        </details>
-        <pre v-else class="whitespace-pre-wrap">{{ JSON.stringify(block, null, 2) }}</pre>
-      </div>
-      <details v-if="actionResults.length > 0" class="text-xs text-gray-600 dark:text-gray-400">
-        <summary>{{ t("actionChain.results", { count: actionResults.length }) }}</summary>
-        <pre class="whitespace-pre-wrap">{{ JSON.stringify(actionResults, null, 2) }}</pre>
-      </details>
-    </div>
-  </div>
+  <g
+    class="ac-node"
+    :class="[`ac-node--${cls}`, { selected: props.selected }]"
+    :transform="`translate(${layoutNode.x}, ${topY})`"
+    tabindex="0"
+    role="button"
+    :aria-label="`${metaLine} | ${abilitySummary}`"
+    @click.stop="onSelect"
+    @keydown.enter.prevent="onSelect"
+    @keydown.space.prevent="onSelect"
+  >
+    <rect class="ac-node-box" :width="NODE_WIDTH" :height="CARD_HEIGHT" rx="6" />
+    <circle class="ac-node-dot" cx="10" cy="24" r="3.5" />
+    <rect class="ac-node-colorbar" :x="NODE_WIDTH - 6" y="6" width="3" :height="CARD_HEIGHT - 12" rx="1.5" />
+    <text class="ac-node-meta" x="20" y="20">{{ metaLine }}</text>
+    <text class="ac-node-abilities" x="20" y="36">{{ abilitySummary }}</text>
+    <text v-if="layoutNode.isHead" class="ac-node-badge ac-node-badge--head" :x="NODE_WIDTH - 16" y="20">
+      {{ t("actionChain.headBadge") }}
+    </text>
+    <text v-if="layoutNode.isBranchPoint" class="ac-node-badge ac-node-badge--fork" :x="NODE_WIDTH - 16" y="36">
+      {{ t("actionChain.forkBadge") }}
+    </text>
+  </g>
 </template>

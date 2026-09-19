@@ -2,7 +2,6 @@
 import {
   type AgentTarget,
   type ChainTarget,
-  chainKey,
   getVisibleNodes,
   useActionChainsStore,
   useAgentsStore,
@@ -13,11 +12,10 @@ import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useObserver } from "@/composables/useObserver";
 import { useTabScrollRestore } from "@/composables/useTabScrollRestore";
-import ActionNodeRow from "./action-node.vue";
+import ActionChainCanvas from "./action-chain-canvas.vue";
+import { layoutGraph } from "./layout-graph.js";
 
 const { t } = useI18n();
-
-import { createTreeCache, type TreeRow } from "./build-tree.js";
 
 const props = defineProps<{
   agent: AgentTarget;
@@ -183,21 +181,44 @@ const visibleNodes = computed(() => {
   return getVisibleNodes(sessions, branches, chains, agent);
 });
 
-// per-chain 树缓存（性能红线 2）：append-only 增长走增量补建，切换作用域不清缓存
-const treeCache = createTreeCache();
-
-const viewCacheKey = computed(() => {
+/** 布局输入 branch：viewed Session 的非 deleted Branch（与 getVisibleNodes 选择口径一致）。 */
+const visibleBranches = computed(() => {
   const session = viewedSessionTarget.value;
-  if (!session) return "none";
-  const branch = viewedBranchSelection.value;
-  return chainKey({ ...session, branchId: branch ?? "__all__" });
+  if (!session) return [];
+  if (viewedBranchSelection.value === null) {
+    return branches
+      .branchesForSession(session)
+      .filter((item) => item.info.lifecycle !== "deleted")
+      .map((item) => item.info);
+  }
+  if (viewedBranchSelection.value === undefined) {
+    const branchId = runtimeBranchId.value;
+    if (!branchId) return [];
+    return branches
+      .branchesForSession(session)
+      .filter((item) => item.target.branchId === branchId && item.info.lifecycle !== "deleted")
+      .map((item) => item.info);
+  }
+  return branches
+    .branchesForSession(session)
+    .filter(
+      (item) =>
+        item.target.branchId === viewedBranchSelection.value && item.info.lifecycle !== "deleted",
+    )
+    .map((item) => item.info);
 });
 
-const rows = computed<TreeRow[]>(() => treeCache.rowsFor(viewCacheKey.value, visibleNodes.value));
+// 画布布局（D-L3：computed 级缓存，输入不变不重算）
+const graph = computed(() => layoutGraph(visibleNodes.value, visibleBranches.value));
 
-const chainContainer = ref<HTMLElement | null>(null);
-const { onScroll: onChainScroll } = useTabScrollRestore(chainContainer, {
-  contentKey: computed(() => rows.value.length),
+// 画布选中节点（阶段 3 详情区输入；面板本地持有）
+const selectedNodeId = ref<string | null>(null);
+
+// 滚动恢复挂接画布内部视口（canvas 组件经 defineExpose 暴露；面板不重复包滚动层）
+const canvasRef = ref<InstanceType<typeof ActionChainCanvas> | null>(null);
+const chainViewport = computed<HTMLElement | null>(() => canvasRef.value?.viewport ?? null);
+const { onScroll: onChainScroll } = useTabScrollRestore(chainViewport, {
+  contentKey: computed(() => graph.value.nodes.length),
 });
 
 const selectBranchValue = computed(() => {
@@ -290,26 +311,21 @@ const selectBranchValue = computed(() => {
       {{ t("actionChain.selectAgent") }}
     </div>
 
-    <div v-else-if="rows.length === 0" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm italic">
+    <div v-else-if="graph.nodes.length === 0" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm italic">
       {{ t("actionChain.empty") }}
     </div>
 
-    <div v-else ref="chainContainer" class="flex-1 overflow-y-auto" @scroll.passive="onChainScroll">
-      <div class="border border-gray-200 dark:border-gray-700 rounded">
-        <div class="px-2 py-1 bg-gray-50 dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
-          @{{ selectedAgentName }}
-        </div>
-        <div class="px-1 py-1">
-          <ActionNodeRow
-            v-for="(row, i) in rows"
-            :key="`${selectedAgentName}-${row.node.id}-${i}`"
-            :node="row.node"
-            :depth="row.depth"
-            :is-last-child="row.isLastChild"
-            :ancestor-pipes="row.ancestorPipes"
-          />
-        </div>
+    <div v-else class="flex-1 flex flex-col border border-gray-200 dark:border-gray-700 rounded min-h-0">
+      <div class="px-2 py-1 bg-gray-50 dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
+        @{{ selectedAgentName }}
       </div>
+      <ActionChainCanvas
+        ref="canvasRef"
+        :graph="graph"
+        :selected-node-id="selectedNodeId"
+        @select="selectedNodeId = $event"
+        @scroll="onChainScroll"
+      />
     </div>
   </div>
 </template>

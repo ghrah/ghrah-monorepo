@@ -9,6 +9,35 @@ html {
   --font-ui-note: 0.8125rem;
   --font-ui-code: 0.8125rem;
   --font-ui-body: 0.875rem;
+
+  /* ActionChain 画布（--ac-*）：能力语义色（写 > 读 > 通信 > 未知）与画布结构色 */
+  --ac-write: #b45309;
+  --ac-read: #2563eb;
+  --ac-converse: #0891b2;
+  --ac-unknown: #64748b;
+  --ac-node-bg: #ffffff;
+  --ac-node-border: #dfe3ea;
+  --ac-lane-guide: #e2e5eb;
+  --ac-edge: #aeb6c6;
+  --ac-node-text: #4b5362;
+  --ac-node-subtext: #767e8e;
+  --ac-badge-head: #147653;
+  --ac-badge-fork: #4f5fc7;
+}
+
+:root.dark {
+  --ac-write: #f59e0b;
+  --ac-read: #60a5fa;
+  --ac-converse: #22d3ee;
+  --ac-unknown: #94a3b8;
+  --ac-node-bg: #1d222b;
+  --ac-node-border: #343a47;
+  --ac-lane-guide: #303541;
+  --ac-edge: #4b5568;
+  --ac-node-text: #c7cdd8;
+  --ac-node-subtext: #8f97a6;
+  --ac-badge-head: #34d399;
+  --ac-badge-fork: #93a5ff;
 }
 
 body {
@@ -2402,4 +2431,142 @@ button:focus-visible,
 }
 :root.dark .agent-menu-item--danger:hover {
   background: #2a1d1d;
+}
+
+/* ── ActionChain 画布（--ac-* token 驱动，零裸色值） ── */
+.ac-canvas {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+
+.ac-legend {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.375rem 0.75rem;
+  border-bottom: 1px solid var(--ac-node-border);
+}
+
+.ac-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--ac-node-subtext);
+  font-size: var(--font-ui-eyebrow);
+}
+
+.ac-legend-swatch {
+  display: inline-block;
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 999px;
+  background: var(--ac-unknown);
+}
+
+.ac-legend-swatch--write {
+  background: var(--ac-write);
+}
+
+.ac-legend-swatch--read {
+  background: var(--ac-read);
+}
+
+.ac-legend-swatch--converse {
+  background: var(--ac-converse);
+}
+
+.ac-legend-swatch--unknown {
+  background: var(--ac-unknown);
+}
+
+/* 画布唯一滚动视口：双向 overflow auto（AgentName 头与图例在此层之外，不随滚动） */
+.ac-canvas-viewport {
+  overflow: auto;
+  padding: 0.75rem 0.5rem;
+}
+
+.ac-canvas-svg {
+  display: block;
+  user-select: none;
+}
+
+.ac-lane-guide {
+  stroke: var(--ac-lane-guide);
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+}
+
+.ac-edge {
+  fill: none;
+  stroke: var(--ac-edge);
+  stroke-width: 1.5;
+}
+
+.ac-edge--lane-change {
+  stroke-dasharray: 6 3;
+}
+
+.ac-node {
+  cursor: pointer;
+  outline: none;
+}
+
+.ac-node:focus-visible {
+  outline: 0.125rem solid #5b6ee1;
+  outline-offset: 0.125rem;
+}
+
+.ac-node-box {
+  fill: var(--ac-node-bg);
+  stroke: var(--ac-node-border);
+  stroke-width: 1;
+}
+
+.ac-node.selected .ac-node-box {
+  stroke: var(--ac-write);
+  stroke-width: 2;
+}
+
+.ac-node-dot,
+.ac-node-colorbar {
+  fill: var(--ac-unknown);
+}
+
+.ac-node--write .ac-node-dot,
+.ac-node--write .ac-node-colorbar {
+  fill: var(--ac-write);
+}
+
+.ac-node--read .ac-node-dot,
+.ac-node--read .ac-node-colorbar {
+  fill: var(--ac-read);
+}
+
+.ac-node--converse .ac-node-dot,
+.ac-node--converse .ac-node-colorbar {
+  fill: var(--ac-converse);
+}
+
+.ac-node-meta {
+  fill: var(--ac-node-text);
+  font-size: var(--font-ui-code);
+}
+
+.ac-node-abilities {
+  fill: var(--ac-node-subtext);
+  font-size: var(--font-ui-eyebrow);
+}
+
+.ac-node-badge {
+  font-size: var(--font-ui-eyebrow);
+  font-weight: 700;
+  text-anchor: end;
+}
+
+.ac-node-badge--head {
+  fill: var(--ac-badge-head);
+}
+
+.ac-node-badge--fork {
+  fill: var(--ac-badge-fork);
 }
