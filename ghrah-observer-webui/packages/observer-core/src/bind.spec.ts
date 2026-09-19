@@ -616,7 +616,13 @@ describe("connectStores", () => {
         } as never,
       ]);
       branchesStore.replaceSessionBranches(p1, [
-        { branch_id: "b1", session_id: "s1", name: "main", head_node_id: "root" } as never,
+        {
+          branch_id: "b1",
+          session_id: "s1",
+          name: "main",
+          head_node_id: "root",
+          lifecycle: "open",
+        } as never,
       ]);
       chainsStore.setChain(p1, [{ id: "n1" } as never]);
       chainsStore.setChain(p2, [{ id: "n2" } as never]);
@@ -690,9 +696,10 @@ describe("connectStores", () => {
       agent_id: "a1",
       agent_name: "agent-1",
       session_id: "s1",
+      name: "Session 1",
       root_node_id: "root",
       active_branch_id: "b1",
-      state: "active",
+      lifecycle: "open",
       system_prompt: "",
       created_at: "",
       metadata: {},
@@ -704,6 +711,7 @@ describe("connectStores", () => {
       session_id: "s1",
       name: "main",
       head_node_id: "root",
+      lifecycle: "open",
       created_at: "",
       metadata: {},
     };
@@ -1191,10 +1199,11 @@ describe("connectStores", () => {
           agent_id: "a1",
           cluster_id: "c1",
           agent_name: "same",
+          name: "Session 1",
           session_id: "s1",
           root_node_id: "root",
           active_branch_id: "b1",
-          state: "active",
+          lifecycle: "open",
           system_prompt: "",
           created_at: "",
           metadata: {},
@@ -1850,6 +1859,288 @@ describe("connectStores", () => {
       ]);
       const log = roomsStore.logs.get("r1") ?? [];
       expect(log.map((e) => e.seq)).toEqual([1, 6]);
+    });
+  });
+
+  describe("session/branch sync ordering", () => {
+    function agentTarget() {
+      return { projectId: "p1", agentId: "id-agent-1", agentName: "agent-1" };
+    }
+
+    function dispatchListAgents() {
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "sync-agents",
+          success: true,
+          original_command: CommandType.LIST_AGENTS,
+          data: {
+            agents: [{ project_id: "p1", agent_id: "id-agent-1", name: "agent-1" }],
+          },
+        }),
+      );
+    }
+
+    it("late session list does not revert event-advanced active pointer", async () => {
+      await connectClient();
+      const sessionsStore = useSessionsStore();
+      const agent = agentTarget();
+
+      let resolveList: (value: unknown) => void = () => {};
+      const gate = new Promise((resolve) => {
+        resolveList = resolve;
+      });
+      vi.spyOn(client, "listSessions").mockImplementation(
+        () =>
+          gate.then(() => ({
+            request_id: "late",
+            success: true,
+            data: { sessions: [{ session_id: "s1" }], active_session_id: "s1" },
+          })) as never,
+      );
+      vi.spyOn(client, "listBranches").mockResolvedValue({
+        request_id: "b",
+        success: true,
+        data: { branches: [] },
+      } as never);
+      vi.spyOn(client, "getChainHistory").mockResolvedValue({
+        request_id: "h",
+        success: true,
+        data: { nodes: [] },
+      } as never);
+
+      dispatchListAgents();
+      await vi.waitFor(() => expect(client.listSessions).toHaveBeenCalled());
+      // list 已发出、结果未返回：事件激活 s2（revision 前进）
+      internals(client)._dispatch(
+        EventType.SESSION_ACTIVATED,
+        makeMsg(EventType.SESSION_ACTIVATED, {
+          project_id: "p1",
+          agent_id: "id-agent-1",
+          agent_name: "agent-1",
+          session: {
+            session_id: "s2",
+            agent_name: "agent-1",
+            root_node_id: "root-2",
+            active_branch_id: "b2",
+          },
+        }),
+      );
+      expect(sessionsStore.activeSessionId(agent)).toBe("s2");
+
+      // 晚到的 list（基线更旧）不得把 active 指针回退到 s1
+      resolveList(undefined);
+      await vi.waitFor(() => expect(client.listSessions).toHaveBeenCalled());
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(sessionsStore.activeSessionId(agent)).toBe("s2");
+    });
+
+    it("late branch list does not revert event-advanced head", async () => {
+      await connectClient();
+      const branchesStore = useBranchesStore();
+      const chainsStore = useActionChainsStore();
+      const agent = agentTarget();
+      const session = { ...agent, sessionId: "s1" };
+
+      vi.spyOn(client, "listSessions").mockResolvedValue({
+        request_id: "s",
+        success: true,
+        data: { sessions: [{ session_id: "s1", active_branch_id: "b1" }], active_session_id: "s1" },
+      } as never);
+      let resolveBranches: (value: unknown) => void = () => {};
+      const gate = new Promise((resolve) => {
+        resolveBranches = resolve;
+      });
+      vi.spyOn(client, "listBranches").mockImplementation(
+        () =>
+          gate.then(() => ({
+            request_id: "late-branches",
+            success: true,
+            data: {
+              branches: [{ branch_id: "b1", session_id: "s1", name: "main", head_node_id: "n1" }],
+              active_branch_id: "b1",
+            },
+          })) as never,
+      );
+      vi.spyOn(client, "getChainHistory").mockResolvedValue({
+        request_id: "h",
+        success: true,
+        data: { nodes: [] },
+      } as never);
+
+      dispatchListAgents();
+      await vi.waitFor(() => expect(client.listBranches).toHaveBeenCalled());
+      // branch list 已发出（基线已捕获）后：commit 事件把 b1 Head 权威推进到 n2
+      internals(client)._dispatch(
+        EventType.ACTION_CHAIN_UPDATED,
+        makeMsg(EventType.ACTION_CHAIN_UPDATED, {
+          project_id: "p1",
+          agent_id: "id-agent-1",
+          agent_name: "agent-1",
+          node: { id: "n2", parent_id: "n1", session_id: "s1", created_on_branch_id: "b1" },
+          branch: {
+            branch_id: "b1",
+            session_id: "s1",
+            name: "main",
+            head_node_id: "n2",
+          },
+        }),
+      );
+      // 晚到的 branch list（含旧 head n1）不得回退 Head
+      resolveBranches(undefined);
+      await vi.waitFor(() => expect(client.listBranches).toHaveBeenCalled());
+      await Promise.resolve();
+      await Promise.resolve();
+      const branch = branchesStore.getBranch({ ...session, branchId: "b1" });
+      expect(branch?.info.head_node_id).toBe("n2");
+      // 节点也被事件合并
+      expect(chainsStore.getChain({ ...session, branchId: "b1" }).map((n) => n.id)).toContain("n2");
+    });
+
+    it("dedupes concurrent history requests for the same chain", async () => {
+      await connectClient();
+      vi.spyOn(client, "listSessions").mockResolvedValue({
+        request_id: "s",
+        success: true,
+        data: { sessions: [{ session_id: "s1", active_branch_id: "b1" }], active_session_id: "s1" },
+      } as never);
+      vi.spyOn(client, "listBranches").mockResolvedValue({
+        request_id: "b",
+        success: true,
+        data: {
+          branches: [{ branch_id: "b1", session_id: "s1", name: "main", head_node_id: "n1" }],
+          active_branch_id: "b1",
+        },
+      } as never);
+      const history = vi.spyOn(client, "getChainHistory").mockResolvedValue({
+        request_id: "h",
+        success: true,
+        data: { nodes: [] },
+      } as never);
+
+      // 两轮同步同时发起（第二触发的 Agent 列表相同）
+      dispatchListAgents();
+      dispatchListAgents();
+      await vi.waitFor(() => expect(history.mock.calls.length).toBeGreaterThan(0));
+      await Promise.resolve();
+      await Promise.resolve();
+      // 第二轮 generation 更新：旧结果丢弃；同 chain key 去重后只应有一次底层请求
+      expect(history).toHaveBeenCalledTimes(1);
+    });
+
+    it("in-flight reuse never applies a snapshot older than the caller baseline (P1-1)", async () => {
+      await connectClient();
+      const sessionsStore = useSessionsStore();
+      const agent = agentTarget();
+
+      // 第一轮 listSessions 挂起（服务器尚未返回）
+      let resolveFirst: (value: unknown) => void = () => {};
+      const firstGate = new Promise((resolve) => {
+        resolveFirst = resolve;
+      });
+      let call = 0;
+      vi.spyOn(client, "listSessions").mockImplementation(() => {
+        call += 1;
+        const response =
+          call === 1
+            ? firstGate.then(() => ({
+                request_id: "first",
+                success: true,
+                // 旧快照：仅 s1、active=s1（早于 s2 激活事件）
+                data: { sessions: [{ session_id: "s1" }], active_session_id: "s1" },
+              }))
+            : Promise.resolve({
+                request_id: `second-${call}`,
+                success: true,
+                // 新快照：服务器已含 s2（发起于第二轮 baseline 之后）
+                data: {
+                  sessions: [{ session_id: "s1" }, { session_id: "s2" }],
+                  active_session_id: "s2",
+                },
+              });
+        return response as never;
+      });
+      vi.spyOn(client, "listBranches").mockResolvedValue({
+        request_id: "b",
+        success: true,
+        data: { branches: [] },
+      } as never);
+      vi.spyOn(client, "getChainHistory").mockResolvedValue({
+        request_id: "h",
+        success: true,
+        data: { nodes: [] },
+      } as never);
+
+      // 第一轮同步发起（baseline=0），listSessions 在途
+      dispatchListAgents();
+      await vi.waitFor(() => expect(client.listSessions).toHaveBeenCalledTimes(1));
+
+      // 事件先落地：s2 激活（active revision 前进到 >0）
+      internals(client)._dispatch(
+        EventType.SESSION_ACTIVATED,
+        makeMsg(EventType.SESSION_ACTIVATED, {
+          project_id: "p1",
+          agent_id: "id-agent-1",
+          agent_name: "agent-1",
+          session: {
+            session_id: "s2",
+            agent_name: "agent-1",
+            root_node_id: "root-2",
+            active_branch_id: "b2",
+          },
+        }),
+      );
+      expect(sessionsStore.activeSessionId(agent)).toBe("s2");
+
+      // 第二轮同步：baseline 已含 s2 激活的 revision；dedupe 命中第一轮在途，
+      // 但消费的响应必须发起于自身 baseline 之后——不得复用旧快照回退 s2。
+      // 旧实现复用第一轮 Promise（s1-only 旧快照）：s2 将从列表消失且 active 回退 s1。
+      dispatchListAgents();
+      await Promise.resolve();
+      // 释放第一轮的旧快照：其结果对第二轮而言早于自身发起，不允许覆盖
+      resolveFirst(undefined);
+      await vi.waitFor(() => expect(client.listSessions).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() =>
+        expect(sessionsStore.sessionsForAgent(agent).map((s) => s.info.session_id)).toEqual([
+          "s1",
+          "s2",
+        ]),
+      );
+      expect(sessionsStore.activeSessionId(agent)).toBe("s2");
+    });
+
+    it("chain history receipt does not write the runtime active pointer (P1-2)", async () => {
+      await connectClient();
+      const sessionsStore = useSessionsStore();
+      const agent = agentTarget();
+
+      vi.spyOn(client, "listSessions").mockResolvedValue({
+        request_id: "s",
+        success: true,
+        data: { sessions: [{ session_id: "s1", active_branch_id: "b1" }], active_session_id: "s1" },
+      } as never);
+      vi.spyOn(client, "listBranches").mockResolvedValue({
+        request_id: "b",
+        success: true,
+        data: {
+          branches: [{ branch_id: "b1", session_id: "s1", name: "main", head_node_id: "n1" }],
+          active_branch_id: "b1",
+        },
+      } as never);
+      vi.spyOn(client, "getChainHistory").mockResolvedValue({
+        request_id: "h",
+        success: true,
+        // 恶意/兼容冗余字段：history 回执声称 active 是别的 session
+        data: { nodes: [], active_session_id: "s-other" },
+      } as never);
+
+      dispatchListAgents();
+      await vi.waitFor(() => expect(client.getChainHistory).toHaveBeenCalled());
+      await Promise.resolve();
+      await Promise.resolve();
+      // history 回执不得直写 active 指针；初始同步后 active 仍为 list 回执的 s1
+      expect(sessionsStore.activeSessionId(agent)).toBe("s1");
     });
   });
 });

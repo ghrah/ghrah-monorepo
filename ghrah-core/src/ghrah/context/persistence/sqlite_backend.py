@@ -56,7 +56,7 @@ CREATE TABLE context_schema (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
     version   INTEGER NOT NULL
 );
-INSERT INTO context_schema (singleton, version) VALUES (1, 2);
+INSERT INTO context_schema (singleton, version) VALUES (1, 3);
 
 CREATE TABLE IF NOT EXISTS runs (
     run_id        TEXT PRIMARY KEY,
@@ -75,8 +75,11 @@ CREATE TABLE IF NOT EXISTS agents (
 CREATE TABLE IF NOT EXISTS sessions (
     session_id        TEXT PRIMARY KEY,
     agent_name        TEXT NOT NULL,
+    name              TEXT NOT NULL DEFAULT 'Session 1',
     root_node_id      TEXT NOT NULL,
     active_branch_id TEXT NOT NULL,
+    lifecycle         TEXT NOT NULL DEFAULT 'open',
+    origin_agent_name TEXT,
     origin_session_id TEXT,
     origin_node_id   TEXT,
     system_prompt     TEXT DEFAULT '',
@@ -90,6 +93,7 @@ CREATE TABLE IF NOT EXISTS branches (
     session_id        TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
     name              TEXT NOT NULL,
     head_node_id      TEXT NOT NULL,
+    lifecycle         TEXT NOT NULL DEFAULT 'open',
     parent_branch_id  TEXT,
     fork_point_node_id TEXT,
     created_at        TEXT NOT NULL,
@@ -252,7 +256,7 @@ class SqliteBackend(PersistenceBackend):
                 "SELECT version FROM context_schema WHERE singleton = 1"
             )
             version_row = await version_cursor.fetchone()
-            if version_row is None or version_row["version"] != 2:
+            if version_row is None or version_row["version"] != 3:
                 raise RuntimeError("Unsupported context database schema; rebuild explicitly")
         else:
             await self._db.executescript(_SCHEMA_SQL)
@@ -348,25 +352,32 @@ class SqliteBackend(PersistenceBackend):
                 await db.execute(
                     """
                     INSERT INTO sessions (
-                        session_id, agent_name, root_node_id, active_branch_id,
-                        origin_session_id, origin_node_id, system_prompt, created_at, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        session_id, agent_name, name, root_node_id, active_branch_id,
+                        lifecycle, origin_agent_name, origin_session_id, origin_node_id,
+                        system_prompt, created_at, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(session_id) DO UPDATE SET
+                        name=excluded.name,
                         root_node_id=excluded.root_node_id,
                         active_branch_id=excluded.active_branch_id,
+                        lifecycle=excluded.lifecycle,
+                        origin_agent_name=excluded.origin_agent_name,
                         system_prompt=excluded.system_prompt,
                         metadata=excluded.metadata
                     """,
                     (
                         data["session_id"],
                         data["agent_name"],
+                        data["name"],
                         data["root_node_id"],
                         data["active_branch_id"],
+                        data["lifecycle"],
+                        data["origin_agent_name"],
                         data["origin_session_id"],
                         data["origin_node_id"],
                         data["system_prompt"],
                         data["created_at"],
-                        data["metadata"],
+                        json.dumps(data["metadata"], ensure_ascii=False),
                     ),
                 )
             for branch in changes.branches:
@@ -374,12 +385,13 @@ class SqliteBackend(PersistenceBackend):
                 await db.execute(
                     """
                     INSERT INTO branches (
-                        branch_id, session_id, name, head_node_id,
+                        branch_id, session_id, name, head_node_id, lifecycle,
                         parent_branch_id, fork_point_node_id, created_at, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(branch_id) DO UPDATE SET
                         name=excluded.name,
                         head_node_id=excluded.head_node_id,
+                        lifecycle=excluded.lifecycle,
                         metadata=excluded.metadata
                     """,
                     (
@@ -387,10 +399,11 @@ class SqliteBackend(PersistenceBackend):
                         data["session_id"],
                         data["name"],
                         data["head_node_id"],
+                        data["lifecycle"],
                         data["parent_branch_id"],
                         data["fork_point_node_id"],
                         data["created_at"],
-                        data["metadata"],
+                        json.dumps(data["metadata"], ensure_ascii=False),
                     ),
                 )
             for node in sorted(changes.nodes, key=lambda item: item.iteration):
@@ -416,7 +429,7 @@ class SqliteBackend(PersistenceBackend):
             raise
 
     async def load_checkpoint(self, agent_name: str) -> ContextCheckpoint | None:
-        """从 SQLite 加载 Agent 的 v2 checkpoint。"""
+        """从 SQLite 加载 Agent 的 v3 checkpoint。"""
         db = await self._ensure_db()
         meta_cursor = await db.execute(
             "SELECT active_session_id FROM chain_meta WHERE agent_name = ?", (agent_name,)
@@ -426,21 +439,23 @@ class SqliteBackend(PersistenceBackend):
             return None
         session_cursor = await db.execute(
             """
-            SELECT session_id, agent_name, root_node_id, active_branch_id,
-                   origin_session_id, origin_node_id, system_prompt, created_at, metadata
+            SELECT session_id, agent_name, name, root_node_id, active_branch_id,
+                   lifecycle, origin_agent_name, origin_session_id, origin_node_id,
+                   system_prompt, created_at, metadata
             FROM sessions WHERE agent_name = ? ORDER BY created_at, session_id
             """,
             (agent_name,),
         )
         sessions = tuple(
-            deserialize_action_session(dict(row)) for row in await session_cursor.fetchall()
+            deserialize_action_session(self._session_row_to_dict(row))
+            for row in await session_cursor.fetchall()
         )
         session_ids = [session.session_id for session in sessions]
         if session_ids:
             placeholders = ", ".join("?" for _ in session_ids)
             branch_cursor = await db.execute(
                 f"""
-                SELECT branch_id, session_id, name, head_node_id,
+                SELECT branch_id, session_id, name, head_node_id, lifecycle,
                        parent_branch_id, fork_point_node_id, created_at, metadata
                 FROM branches WHERE session_id IN ({placeholders})
                 ORDER BY created_at, branch_id
@@ -448,7 +463,8 @@ class SqliteBackend(PersistenceBackend):
                 tuple(session_ids),
             )
             branches = tuple(
-                deserialize_branch(dict(row)) for row in await branch_cursor.fetchall()
+                deserialize_branch(self._branch_row_to_dict(row))
+                for row in await branch_cursor.fetchall()
             )
         else:
             branches = ()
@@ -501,6 +517,39 @@ class SqliteBackend(PersistenceBackend):
     # ----------------------------------------------------------------
     # 内部辅助
     # ----------------------------------------------------------------
+
+    @staticmethod
+    def _session_row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:
+        """将 sessions 行转为 dict，仅在 SQL 参数边界执行一次 JSON 解码。"""
+        return {
+            "session_id": row["session_id"],
+            "agent_name": row["agent_name"],
+            "name": row["name"],
+            "root_node_id": row["root_node_id"],
+            "active_branch_id": row["active_branch_id"],
+            "lifecycle": row["lifecycle"],
+            "origin_agent_name": row["origin_agent_name"],
+            "origin_session_id": row["origin_session_id"],
+            "origin_node_id": row["origin_node_id"],
+            "system_prompt": row["system_prompt"],
+            "created_at": row["created_at"],
+            "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+        }
+
+    @staticmethod
+    def _branch_row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:
+        """将 branches 行转为 dict，仅在 SQL 参数边界执行一次 JSON 解码。"""
+        return {
+            "branch_id": row["branch_id"],
+            "session_id": row["session_id"],
+            "name": row["name"],
+            "head_node_id": row["head_node_id"],
+            "lifecycle": row["lifecycle"],
+            "parent_branch_id": row["parent_branch_id"],
+            "fork_point_node_id": row["fork_point_node_id"],
+            "created_at": row["created_at"],
+            "metadata": json.loads(row["metadata"]) if row["metadata"] else {},
+        }
 
     @staticmethod
     def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:

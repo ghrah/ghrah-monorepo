@@ -855,6 +855,7 @@ export class MockState {
       cluster_id: state.clusterId,
       agent_name: p.agent_name,
       node,
+      branch: { ...branch },
     });
     this.emit(EventType.CONTEXT_USAGE_UPDATED, {
       project_id: state.projectId,
@@ -893,6 +894,7 @@ export class MockState {
     state: AgentActionState,
     agentName: string,
     options: {
+      name?: string | null;
       systemPrompt?: string | null;
       originSessionId?: string | null;
       originNodeId?: string | null;
@@ -925,6 +927,7 @@ export class MockState {
       session_id: sessionId,
       name: "main",
       head_node_id: rootId,
+      lifecycle: "open",
       parent_branch_id: null,
       fork_point_node_id: null,
       created_at: isoNow(),
@@ -936,10 +939,12 @@ export class MockState {
       cluster_id: state.clusterId,
       session_id: sessionId,
       agent_name: agentName,
+      name: options.name ?? `Session ${state.sessions.size + 1}`,
       root_node_id: rootId,
       active_branch_id: branchId,
-      state: "idle",
+      lifecycle: "open",
       system_prompt: options.systemPrompt ?? "",
+      origin_agent_name: null,
       origin_session_id: options.originSessionId ?? null,
       origin_node_id: options.originNodeId ?? null,
       created_at: isoNow(),
@@ -983,6 +988,7 @@ export class MockState {
     project_id: string;
     agent_id: string;
     agent_name: string;
+    name?: string | null;
     origin_session_id?: string | null;
     origin_node_id?: string | null;
     system_prompt?: string | null;
@@ -1000,6 +1006,7 @@ export class MockState {
       return fail(`node not found in session: ${p.origin_node_id}`);
     }
     const session = this._newSession(state, p.agent_name, {
+      name: p.name,
       originSessionId: p.origin_session_id,
       originNodeId: p.origin_node_id,
       systemPrompt: p.system_prompt,
@@ -1017,11 +1024,8 @@ export class MockState {
   }): CommandOutcome {
     const state = this._actionState(p);
     const session = state?.sessions.get(p.session_id);
-    if (!state || !session || session.metadata.deleted)
+    if (!state || !session || session.lifecycle === "deleted")
       return fail(`session not found: ${p.session_id}`);
-    const previous = state.sessions.get(state.activeSessionId);
-    if (previous) previous.state = previous.metadata.archived ? "archived" : "idle";
-    session.state = "active";
     state.activeSessionId = session.session_id;
     this.emit(EventType.SESSION_ACTIVATED, { ...p, session });
     return ok(session);
@@ -1034,7 +1038,10 @@ export class MockState {
   }): CommandOutcome {
     const state = this._actionState(p);
     if (!state) return fail("agent context not found");
-    return ok({ sessions: [...state.sessions.values()].filter((item) => !item.metadata.deleted) });
+    return ok({
+      active_session_id: state.activeSessionId,
+      sessions: [...state.sessions.values()].filter((item) => item.lifecycle !== "deleted"),
+    });
   }
 
   private _sessionLifecycle(
@@ -1045,8 +1052,7 @@ export class MockState {
     const session = state?.sessions.get(p.session_id);
     if (!state || !session) return fail(`session not found: ${p.session_id}`);
     if (state.activeSessionId === p.session_id) return fail(`cannot ${action} active session`);
-    session.metadata = { ...session.metadata, [action]: true };
-    session.state = action;
+    session.lifecycle = action;
     this.emit(action === "archived" ? EventType.SESSION_ARCHIVED : EventType.SESSION_DELETED, p);
     return ok({ session_id: p.session_id, [action]: true });
   }
@@ -1074,6 +1080,7 @@ export class MockState {
       session_id: p.session_id,
       name: p.name,
       head_node_id: headNodeId,
+      lifecycle: "open",
       parent_branch_id: parent.branch_id,
       fork_point_node_id: headNodeId,
       created_at: isoNow(),
@@ -1098,7 +1105,7 @@ export class MockState {
       return fail(`branch not found: ${p.branch_id}`);
     }
     if (state.activeSessionId !== p.session_id) return fail("activate the session first");
-    if (branch.metadata.deleted) return fail("cannot activate deleted branch");
+    if (branch.lifecycle === "deleted") return fail("cannot activate deleted branch");
     session.active_branch_id = branch.branch_id;
     this.emit(EventType.BRANCH_ACTIVATED, { ...p, branch });
     return ok(branch);
@@ -1111,11 +1118,14 @@ export class MockState {
     session_id: string;
   }): CommandOutcome {
     const state = this._actionState(p);
-    if (!state?.sessions.has(p.session_id)) return fail(`session not found: ${p.session_id}`);
+    const session = state?.sessions.get(p.session_id);
+    if (!state || !session) return fail(`session not found: ${p.session_id}`);
     return ok({
       session_id: p.session_id,
+      // active_branch_id 是 Session 域必填不变量，与运行态 active 指针无关
+      active_branch_id: session.active_branch_id,
       branches: [...state.branches.values()].filter(
-        (item) => item.session_id === p.session_id && !item.metadata.deleted,
+        (item) => item.session_id === p.session_id && item.lifecycle !== "deleted",
       ),
     });
   }
@@ -1137,7 +1147,7 @@ export class MockState {
     if (state.activeSessionId === p.session_id && session.active_branch_id === p.branch_id) {
       return fail(`cannot ${action} active branch`);
     }
-    branch.metadata = { ...branch.metadata, [action]: true };
+    branch.lifecycle = action;
     this.emit(action === "archived" ? EventType.BRANCH_ARCHIVED : EventType.BRANCH_DELETED, p);
     return ok({ session_id: p.session_id, branch_id: p.branch_id, [action]: true });
   }
@@ -1160,7 +1170,12 @@ export class MockState {
       node = node.parent_id ? state.nodes.get(node.parent_id) : undefined;
     }
     history.reverse();
-    return ok({ ...p, nodes: p.limit > 0 ? history.slice(-p.limit) : history });
+    // 与 Core/Subject 回执形状对齐（Subject units/ledger.py 组装同名字段）
+    return ok({
+      ...p,
+      nodes: p.limit > 0 ? history.slice(-p.limit) : history,
+      active_session_id: state.activeSessionId,
+    });
   }
 
   spawnAgent(
@@ -1203,9 +1218,19 @@ export class MockState {
     const session = this._newSession(actionState, config.name, {
       systemPrompt: config.system_prompt,
     });
-    session.state = "active";
     actionState.activeSessionId = session.session_id;
     this.actionStates.set(key, actionState);
+    // 演示数据：每个 Agent 附带一个归档 Session（含归档 Branch），
+    // 供 UI 验证 lifecycle 展示与"非活跃 Session 仍有域 active Branch"。
+    const archivedSession = this._newSession(actionState, config.name, {
+      name: "Archived worklog",
+      systemPrompt: config.system_prompt,
+    });
+    archivedSession.lifecycle = "archived";
+    const archivedBranch = [...actionState.branches.values()].find(
+      (item) => item.session_id === archivedSession.session_id,
+    );
+    if (archivedBranch) archivedBranch.lifecycle = "archived";
     project.agents.push({
       agent_id: agentId,
       name: config.name,
@@ -1311,6 +1336,7 @@ export class MockState {
           session_id: session.session_id,
           name: `retry-${Math.floor(iteration / 7)}`,
           head_node_id: branch.head_node_id,
+          lifecycle: "open",
           parent_branch_id: branch.branch_id,
           fork_point_node_id: branch.head_node_id,
           created_at: isoNow(),
@@ -1367,6 +1393,7 @@ export class MockState {
         cluster_id: state.clusterId,
         agent_name: agent.name,
         node,
+        branch: { ...branch },
       });
       this.emit(EventType.CONTEXT_USAGE_UPDATED, {
         project_id: state.projectId,

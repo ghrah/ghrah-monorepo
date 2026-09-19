@@ -44,8 +44,6 @@ PERSIST_COMMANDS: frozenset[str] = frozenset(
         CommandType.PERSIST_SAVE_NODE.value,
         CommandType.PERSIST_LOAD_NODE.value,
         CommandType.PERSIST_LOAD_CHAIN.value,
-        CommandType.PERSIST_SAVE_CHAIN_META.value,
-        CommandType.PERSIST_LOAD_CHAIN_META.value,
         CommandType.PERSIST_SAVE_MESSAGES.value,
         CommandType.PERSIST_LOAD_MESSAGES.value,
         CommandType.PERSIST_DELETE_CHAIN.value,

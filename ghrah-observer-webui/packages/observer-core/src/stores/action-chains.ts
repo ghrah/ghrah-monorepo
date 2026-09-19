@@ -88,8 +88,28 @@ export const useActionChainsStore = defineStore("ghrah-action-chains", () => {
     chains.value.set(chainKey(target), { target, nodes: snapshot });
   }
 
+  /** history 结果只合并不可变 node，不整体覆盖既有桶（抗乱序增量补齐）。 */
+  function mergeHistory(target: ChainTarget, nodes: ActionNode[]) {
+    if (!hasCompleteChainTarget(target)) return;
+    mergeNodes(target, nodes);
+  }
+
   function getChain(target: ChainTarget): ActionNode[] {
     return chains.value.get(chainKey(target))?.nodes ?? [];
+  }
+
+  function nodesForSession(target: SessionTarget): ActionNode[] {
+    const collected: ActionNode[] = [];
+    for (const chain of chains.value.values()) {
+      if (
+        chain.target.projectId === target.projectId &&
+        chain.target.agentId === target.agentId &&
+        chain.target.sessionId === target.sessionId
+      ) {
+        collected.push(...chain.nodes);
+      }
+    }
+    return collected;
   }
 
   function clearChain(target: ChainTarget) {
@@ -132,7 +152,9 @@ export const useActionChainsStore = defineStore("ghrah-action-chains", () => {
     diagnostics,
     onActionChainUpdated,
     setChain,
+    mergeHistory,
     getChain,
+    nodesForSession,
     clearChain,
     clearSession,
     clearAgent,

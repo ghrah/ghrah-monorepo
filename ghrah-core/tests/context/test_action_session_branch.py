@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from ghrah.context.action_session import ActionSession
@@ -28,6 +30,7 @@ def test_root_session_and_branch_have_distinct_stable_ids() -> None:
     session = ActionSession.create(
         session_id=session_id,
         agent_name="planner",
+        name="Session 1",
         root_node_id="root-node",
         active_branch_id=branch.branch_id,
     )
@@ -75,13 +78,15 @@ def test_branch_rejects_partial_fork_provenance(
 
 
 def test_session_rejects_partial_cross_session_origin() -> None:
-    """派生 Session 必须完整记录来源 Session 与节点。"""
-    with pytest.raises(ValueError, match="must either both be set"):
+    """派生 Session 必须完整记录来源 Agent、Session 与节点。"""
+    with pytest.raises(ValueError, match="must either"):
         ActionSession(
             session_id="session-2",
             agent_name="planner",
+            name="Session 2",
             root_node_id="root-2",
             active_branch_id="branch-2",
+            origin_agent_name="planner",
             origin_session_id="session-1",
         )
 
@@ -91,6 +96,7 @@ def test_metadata_is_copied_at_domain_boundary() -> None:
     metadata = {"archived": False}
     session = ActionSession.create(
         agent_name="planner",
+        name="Session 1",
         root_node_id="root",
         active_branch_id="main",
         metadata=metadata,
@@ -147,6 +153,7 @@ def test_valid_session_topology_accepts_shared_ancestors() -> None:
     session = ActionSession.create(
         session_id=session_id,
         agent_name="planner",
+        name="Session 1",
         root_node_id=root.id,
         active_branch_id=retry_id,
     )
@@ -176,6 +183,7 @@ def test_session_topology_rejects_multiple_roots() -> None:
     session = ActionSession.create(
         session_id=session_id,
         agent_name="planner",
+        name="Session 1",
         root_node_id=first_root.id,
         active_branch_id=branch_id,
     )
@@ -201,6 +209,7 @@ def test_session_topology_rejects_cross_session_node() -> None:
     session = ActionSession.create(
         session_id="session-1",
         agent_name="planner",
+        name="Session 1",
         root_node_id=root.id,
         active_branch_id=branch.branch_id,
     )
@@ -214,9 +223,11 @@ def test_action_session_serialization_round_trip() -> None:
     session = ActionSession.create(
         session_id="session-2",
         agent_name="planner",
+        name="Session 2",
         root_node_id="root-2",
         active_branch_id="branch-2",
         system_prompt="system",
+        origin_agent_name="planner",
         origin_session_id="session-1",
         origin_node_id="node-9",
         metadata={"label": "retry cleanly"},
@@ -242,3 +253,48 @@ def test_action_branch_serialization_round_trip() -> None:
     restored = deserialize_branch(serialize_branch(branch))
 
     assert restored == branch
+
+
+def test_session_rejects_invalid_lifecycle() -> None:
+    """lifecycle 只允许 open|archived|deleted。"""
+    with pytest.raises(ValueError, match="invalid lifecycle"):
+        ActionSession(
+            session_id="session-1",
+            agent_name="planner",
+            name="Session 1",
+            root_node_id="root-1",
+            active_branch_id="branch-1",
+            lifecycle="bogus",
+        )
+
+
+def test_branch_rejects_invalid_lifecycle() -> None:
+    """Branch lifecycle 与 Session 同构，只允许 open|archived|deleted。"""
+    with pytest.raises(ValueError, match="invalid lifecycle"):
+        ActionBranch(
+            branch_id="branch-1",
+            session_id="session-1",
+            name="main",
+            head_node_id="node-1",
+            lifecycle="bogus",
+        )
+
+
+def test_lifecycle_transitions_follow_state_machine() -> None:
+    """open→archived/deleted 合法；archived/deleted 为终态。"""
+    session = ActionSession.create(
+        agent_name="planner",
+        name="Session 1",
+        root_node_id="root",
+        active_branch_id="main",
+    )
+    assert session.lifecycle == "open"
+
+    archived = dataclasses.replace(session, lifecycle="archived")
+    assert archived.lifecycle == "archived"
+    deleted = dataclasses.replace(session, lifecycle="deleted")
+    assert deleted.lifecycle == "deleted"
+    # 终态语义由 ContextManager 守卫（activate/create_branch 拒绝），域层
+    # 只锁定枚举合法值；从终态再次 dataclasses.replace 到非法值仍被拒绝。
+    with pytest.raises(ValueError, match="invalid lifecycle"):
+        dataclasses.replace(archived, lifecycle="bogus")

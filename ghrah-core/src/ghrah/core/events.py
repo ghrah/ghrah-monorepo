@@ -136,10 +136,12 @@ class ActionChainUpdatedEvent(CoreEvent):
 
     Attributes:
         node: 变更的节点数据
+        branch: 本次 commit 后的权威 Branch 快照（含 head_node_id）
     """
 
     event_type: CoreEventType = field(default=CoreEventType.ACTION_CHAIN_UPDATED, init=False)
     node: dict[str, Any] = field(default_factory=dict)
+    branch: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

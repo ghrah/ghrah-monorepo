@@ -301,34 +301,40 @@ def deserialize_node(data: dict[str, Any]) -> ContextNode:
 
 
 def serialize_action_session(session: ActionSession) -> dict[str, Any]:
-    """将 ActionSession 序列化为 JSON 兼容的 dict。"""
+    """将 ActionSession 序列化为 JSON 兼容的 dict；metadata 始终为对象。"""
     return {
         "session_id": session.session_id,
         "agent_name": session.agent_name,
+        "name": session.name,
         "root_node_id": session.root_node_id,
         "active_branch_id": session.active_branch_id,
+        "lifecycle": session.lifecycle,
         "system_prompt": session.system_prompt,
+        "origin_agent_name": session.origin_agent_name,
         "origin_session_id": session.origin_session_id,
         "origin_node_id": session.origin_node_id,
         "created_at": session.created_at.isoformat(),
-        "metadata": json.dumps(session.metadata) if session.metadata else "{}",
+        "metadata": dict(session.metadata),
     }
 
 
 def deserialize_action_session(data: dict[str, Any]) -> ActionSession:
-    """从 dict 反序列化 ActionSession。"""
+    """从 dict 反序列化 ActionSession；metadata 兼容旧 JSON 字符串编码。"""
     created_at = data["created_at"]
     if isinstance(created_at, str):
         created_at = datetime.fromisoformat(created_at)
-    metadata = data.get("metadata", "{}")
+    metadata = data.get("metadata", {})
     if isinstance(metadata, str):
         metadata = json.loads(metadata)
     return ActionSession(
         session_id=data["session_id"],
         agent_name=data["agent_name"],
+        name=data.get("name") or "Session 1",
         root_node_id=data["root_node_id"],
         active_branch_id=data["active_branch_id"],
+        lifecycle=data.get("lifecycle", "open"),
         system_prompt=data.get("system_prompt", ""),
+        origin_agent_name=data.get("origin_agent_name"),
         origin_session_id=data.get("origin_session_id"),
         origin_node_id=data.get("origin_node_id"),
         created_at=created_at,
@@ -337,25 +343,26 @@ def deserialize_action_session(data: dict[str, Any]) -> ActionSession:
 
 
 def serialize_branch(branch: ActionBranch) -> dict[str, Any]:
-    """将 ActionBranch 序列化为 JSON 兼容的 dict。"""
+    """将 ActionBranch 序列化为 JSON 兼容的 dict；metadata 始终为对象。"""
     return {
         "branch_id": branch.branch_id,
         "session_id": branch.session_id,
         "name": branch.name,
         "head_node_id": branch.head_node_id,
+        "lifecycle": branch.lifecycle,
         "parent_branch_id": branch.parent_branch_id,
         "fork_point_node_id": branch.fork_point_node_id,
         "created_at": branch.created_at.isoformat(),
-        "metadata": json.dumps(branch.metadata) if branch.metadata else "{}",
+        "metadata": dict(branch.metadata),
     }
 
 
 def deserialize_branch(data: dict[str, Any]) -> ActionBranch:
-    """从 dict 反序列化 ActionBranch。"""
+    """从 dict 反序列化 ActionBranch；metadata 兼容旧 JSON 字符串编码。"""
     created_at = data["created_at"]
     if isinstance(created_at, str):
         created_at = datetime.fromisoformat(created_at)
-    metadata = data.get("metadata", "{}")
+    metadata = data.get("metadata", {})
     if isinstance(metadata, str):
         metadata = json.loads(metadata)
     return ActionBranch(
@@ -363,6 +370,7 @@ def deserialize_branch(data: dict[str, Any]) -> ActionBranch:
         session_id=data["session_id"],
         name=data["name"],
         head_node_id=data["head_node_id"],
+        lifecycle=data.get("lifecycle", "open"),
         parent_branch_id=data.get("parent_branch_id"),
         fork_point_node_id=data.get("fork_point_node_id"),
         created_at=created_at,

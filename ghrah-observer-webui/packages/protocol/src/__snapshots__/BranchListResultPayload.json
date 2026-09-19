@@ -4,5 +4,6 @@
   "cluster_id": "cluster-1",
   "agent_name": "agent-1",
   "session_id": "session-001",
+  "active_branch_id": "branch-main",
   "branches": []
 }

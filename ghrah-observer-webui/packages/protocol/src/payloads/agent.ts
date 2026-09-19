@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BranchInfoPayloadSchema } from "./session.js";
 
 export const AgentConfigPayloadSchema = z.object({
   name: z.string(),
@@ -289,6 +290,7 @@ export const ActionChainUpdatedPayloadSchema = z.object({
   cluster_id: z.string().optional().default(""),
   agent_name: z.string(),
   node: ActionNodeSchema.optional().default({}),
+  branch: BranchInfoPayloadSchema.nullable().optional(),
 });
 
 export const ContextUsageUpdatedPayloadSchema = z.object({

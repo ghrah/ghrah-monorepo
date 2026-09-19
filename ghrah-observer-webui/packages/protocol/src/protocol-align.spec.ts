@@ -444,4 +444,25 @@ describe("ActionNode typed schema alignment", () => {
     expect(parsed.id).toBe("");
     expect(parsed.messages_delta).toEqual([]);
   });
+
+  // S7 P1-3：commit 事件的权威 branch 快照必须与 BranchInfoPayload 契约严格对齐，
+  // 漂移在测试期而非运行期暴露（对齐源是 _core_event_to_dict 的实际发射形状）。
+  it("ActionChainUpdatedPayload.branch snapshot aligns strictly with BranchInfoPayloadSchema", () => {
+    const snap = loadSnapshot("ActionChainUpdatedPayload");
+    const branch = snap.branch as Record<string, unknown> | null | undefined;
+    expect(branch, "snapshot must carry an authoritative branch object").toBeTruthy();
+
+    const parsed = BranchInfoPayloadSchema.parse(branch);
+
+    const pythonKeys = new Set(Object.keys(branch as Record<string, unknown>));
+    const tsKeys = new Set(Object.keys(parsed));
+    const missingFromTs = [...pythonKeys].filter((k) => !tsKeys.has(k));
+    expect(missingFromTs, `Keys missing from TS: ${missingFromTs.join(", ")}`).toEqual([]);
+    const extraInTs = [...tsKeys].filter((k) => !pythonKeys.has(k));
+    expect(extraInTs, `Undeclared extra keys in TS: ${extraInTs.join(", ")}`).toEqual([]);
+
+    expect(parsed.branch_id).toBe("branch-main");
+    expect(parsed.lifecycle).toBe("open");
+    expect(parsed.head_node_id).toBe("node-001");
+  });
 });

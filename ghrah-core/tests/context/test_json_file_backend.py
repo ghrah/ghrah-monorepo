@@ -83,7 +83,7 @@ async def test_compressed_records_are_valid_gzip(tmp_path: Path) -> None:
 
     record = next(backend._changes_dir("agent").glob("*.json.gz"))
     with gzip.open(record, "rt", encoding="utf-8") as stream:
-        assert json.load(stream)["schema_version"] == 2
+        assert json.load(stream)["schema_version"] == 3
 
 
 @pytest.mark.asyncio
@@ -111,3 +111,40 @@ async def test_legacy_layout_fails_fast(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="Legacy context checkpoint"):
         await backend.load_checkpoint("agent")
+
+
+@pytest.mark.asyncio
+async def test_changes_v3_round_trip_preserves_explicit_fields(tmp_path: Path) -> None:
+    """changes-v3 记录对 v3 显式字段（name/lifecycle/origin_*）往返保真。"""
+    backend = JsonFileBackend(root_dir=tmp_path, run_id="run")
+    cm = _manager(backend)
+    first = cm.create_session(name="显式名-一")
+    second = cm.create_session(
+        origin_session_id=first.session_id,
+        origin_node_id=first.root_node_id,
+    )
+    cm.begin_iteration()
+    cm.add_messages([ChatMessage.user(text_or_blocks="step")])
+    cm.commit_iteration(ability_names=["work"])
+    cm.archive_session(first.session_id)
+    retry = cm.create_branch(session_id=second.session_id, name="retry")
+    cm.archive_branch(second.session_id, retry.branch_id)
+    await cm.persist()
+
+    # 记录落在 changes-v3 目录
+    changes_dir = backend._agent_dir("agent") / "changes-v3"
+    assert changes_dir.is_dir() and any(changes_dir.iterdir())
+
+    restored = _manager(backend)
+    await restored.restore("agent")
+    sessions = {
+        session.session_id: session for session in restored.list_sessions(include_deleted=True)
+    }
+    assert sessions[first.session_id].name == "显式名-一"
+    assert sessions[first.session_id].lifecycle == "archived"
+    assert sessions[second.session_id].origin_agent_name == "agent"
+    assert sessions[second.session_id].origin_session_id == first.session_id
+    assert sessions[second.session_id].origin_node_id == first.root_node_id
+    by_name = {branch.name: branch for branch in restored.list_branches(second.session_id)}
+    assert by_name["retry"].lifecycle == "archived"
+    assert by_name["main"].lifecycle == "open"

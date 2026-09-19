@@ -180,13 +180,18 @@ class AgentResponsePayload(BaseModel):
 
 
 class ActionChainUpdatedPayload(BaseModel):
-    """action_chain_updated 事件载荷。"""
+    """action_chain_updated 事件载荷。
+
+    ``branch`` 为本次 commit 后的权威 Branch 快照（序列化 dict），
+    Head 前移只由该快照驱动；``None`` 表示事件不携带快照（非 commit 路径）。
+    """
 
     project_id: str = ""
     agent_id: str = ""
     cluster_id: str = ""
     agent_name: str
     node: dict[str, Any] = Field(default_factory=dict)
+    branch: dict[str, Any] | None = None
 
 
 class AgentErrorPayload(BaseModel):

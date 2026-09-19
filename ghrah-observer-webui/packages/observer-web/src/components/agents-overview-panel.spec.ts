@@ -69,16 +69,13 @@ describe("AgentsOverviewPanel", () => {
       "active",
     );
     const agent = { projectId: "p1", agentId: "a1", agentName: "Coder" };
-    useSessionsStore().replaceAgentSessions(
-      agent,
-      [{ session_id: "s1", agent_name: "Coder", state: "active" } as never],
-      "s1",
-    );
-    useBranchesStore().replaceSessionBranches(
-      { ...agent, sessionId: "s1" },
-      [{ branch_id: "b1", session_id: "s1", name: "main" } as never],
-      "b1",
-    );
+    const sessionsStore = useSessionsStore();
+    sessionsStore.replaceAgentSessions(agent, [{ session_id: "s1", agent_name: "Coder" } as never]);
+    sessionsStore.setActiveSession(agent, "s1");
+    useBranchesStore().replaceSessionBranches({ ...agent, sessionId: "s1" }, [
+      { branch_id: "b1", session_id: "s1", name: "main" } as never,
+    ]);
+    useBranchesStore().setActiveBranch({ ...agent, sessionId: "s1" }, "b1");
   });
 
   it("renders only project agents with room and runtime context", () => {

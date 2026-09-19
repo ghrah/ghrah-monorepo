@@ -52,8 +52,6 @@ describe("CommandType", () => {
     "persist_save_node",
     "persist_load_node",
     "persist_load_chain",
-    "persist_save_chain_meta",
-    "persist_load_chain_meta",
     "persist_save_messages",
     "persist_load_messages",
     "persist_delete_chain",
@@ -130,7 +128,7 @@ describe("CommandType", () => {
     "reconcile_status",
   ]);
 
-  it("has exactly 101 values matching Python CommandType", () => {
+  it("matches Python CommandType values exactly", () => {
     const tsValues = new Set(Object.values(CommandType));
     expect(tsValues).toEqual(PYTHON_COMMAND_VALUES);
   });
@@ -229,15 +227,13 @@ describe("PERSIST_COMMANDS", () => {
     "persist_save_node",
     "persist_load_node",
     "persist_load_chain",
-    "persist_save_chain_meta",
-    "persist_load_chain_meta",
     "persist_save_messages",
     "persist_load_messages",
     "persist_delete_chain",
     "persist_list_agents",
   ]);
 
-  it("contains exactly 9 persist command values", () => {
+  it("contains exactly Python persist command values", () => {
     expect(PERSIST_COMMANDS).toEqual(PYTHON_PERSIST);
   });
 });

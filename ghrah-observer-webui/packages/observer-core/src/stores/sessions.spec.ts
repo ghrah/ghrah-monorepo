@@ -11,9 +11,10 @@ const session = (id: string, overrides: Partial<SessionInfoPayload> = {}): Sessi
   cluster_id: "",
   session_id: id,
   agent_name: "coder",
+  name: `Session ${id}`,
   root_node_id: `root-${id}`,
   active_branch_id: `branch-${id}`,
-  state: "active",
+  lifecycle: "open",
   system_prompt: "",
   created_at: "",
   metadata: {},
@@ -27,7 +28,9 @@ describe("useSessionsStore", () => {
 
   it("stores multiple independent Root Sessions for one Agent", () => {
     const store = useSessionsStore();
-    store.replaceAgentSessions(agent, [session("s1"), session("s2")], "s2");
+    store.replaceAgentSessions(agent, [session("s1"), session("s2")], {
+      explicitActiveSessionId: "s2",
+    });
     expect(store.sessionsForAgent(agent).map((item) => item.target.sessionId)).toEqual([
       "s1",
       "s2",
@@ -57,7 +60,9 @@ describe("useSessionsStore", () => {
 
   it("archive/delete removes only the exact Session", () => {
     const store = useSessionsStore();
-    store.replaceAgentSessions(agent, [session("s1"), session("s2")], "s1");
+    store.replaceAgentSessions(agent, [session("s1"), session("s2")], {
+      explicitActiveSessionId: "s1",
+    });
     store.removeSession({
       project_id: "p1",
       agent_id: "a1",

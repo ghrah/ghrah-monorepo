@@ -22,6 +22,7 @@ class ActionBranch:
     session_id: str
     name: str
     head_node_id: str
+    lifecycle: str = "open"
     parent_branch_id: str | None = None
     fork_point_node_id: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -37,6 +38,8 @@ class ActionBranch:
             raise ValueError("name must not be empty")
         if not self.head_node_id:
             raise ValueError("head_node_id must not be empty")
+        if self.lifecycle not in ("open", "archived", "deleted"):
+            raise ValueError(f"invalid lifecycle: {self.lifecycle}")
         if (self.parent_branch_id is None) != (self.fork_point_node_id is None):
             raise ValueError(
                 "parent_branch_id and fork_point_node_id must either both be set or both be None"
@@ -56,6 +59,7 @@ class ActionBranch:
         head_node_id: str,
         name: str = "main",
         branch_id: str | None = None,
+        lifecycle: str = "open",
         metadata: dict[str, Any] | None = None,
     ) -> Self:
         """创建 Session 的默认 Root Branch。"""
@@ -64,6 +68,7 @@ class ActionBranch:
             session_id=session_id,
             name=name,
             head_node_id=head_node_id,
+            lifecycle=lifecycle,
             metadata=metadata or {},
         )
 
@@ -77,6 +82,7 @@ class ActionBranch:
         parent_branch_id: str,
         fork_point_node_id: str,
         branch_id: str | None = None,
+        lifecycle: str = "open",
         metadata: dict[str, Any] | None = None,
     ) -> Self:
         """创建从同 Session 节点派生的 Branch。"""
@@ -87,6 +93,7 @@ class ActionBranch:
             head_node_id=head_node_id,
             parent_branch_id=parent_branch_id,
             fork_point_node_id=fork_point_node_id,
+            lifecycle=lifecycle,
             metadata=metadata or {},
         )
 

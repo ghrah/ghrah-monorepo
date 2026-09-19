@@ -577,6 +577,7 @@ class SupervisorActor:
     async def create_session(
         self,
         agent_name: str,
+        name: str | None = None,
         origin_session_id: str | None = None,
         origin_node_id: str | None = None,
         system_prompt: str | None = None,
@@ -586,10 +587,11 @@ class SupervisorActor:
 
         Args:
             agent_name: Agent 名称
-            session_name: 可选的 session 名称
-            from_node_id: 可选的 fork 起始节点 ID
+            name: 可选的展示名（缺省按 Agent 内序号分配 Session N）
+            origin_session_id: 可选的来源 Session ID
+            origin_node_id: 可选的来源节点 ID
             system_prompt: 可选的系统提示词
-            session_metadata: 可选的元数据
+            metadata: 可选的元数据
 
         Returns:
             新 session 信息字典
@@ -599,6 +601,7 @@ class SupervisorActor:
         """
         handle = await self.get_agent_handle(agent_name)
         session = await handle.create_session(
+            name=name,
             origin_session_id=origin_session_id,
             origin_node_id=origin_node_id,
             system_prompt=system_prompt,
@@ -622,20 +625,20 @@ class SupervisorActor:
         handle = await self.get_agent_handle(agent_name)
         return await handle.activate_session(session_id)
 
-    async def list_sessions(self, agent_name: str) -> list[dict[str, Any]]:
+    async def list_sessions(self, agent_name: str) -> dict[str, Any]:
         """列出指定 Agent 的所有 session。
 
         Args:
             agent_name: Agent 名称
 
         Returns:
-            session 信息字典列表
+            含 active_session_id 与 sessions 列表的结果字典
 
         Raises:
             AgentNotFoundError: Agent 未注册
         """
         handle = await self.get_agent_handle(agent_name)
-        return handle.list_sessions()
+        return handle.list_sessions_result()
 
     async def archive_session(self, agent_name: str, session_id: str) -> None:
         """归档指定 Agent 的 session。
@@ -689,10 +692,14 @@ class SupervisorActor:
         handle = await self.get_agent_handle(agent_name)
         return await handle.activate_branch(session_id, branch_id)
 
-    async def list_branches(self, agent_name: str, session_id: str) -> list[dict[str, Any]]:
-        """列出 Session 内 Branch。"""
+    async def list_branches(self, agent_name: str, session_id: str) -> dict[str, Any]:
+        """列出 Session 内 Branch。
+
+        Returns:
+            含 session_id、active_branch_id 与 branches 列表的结果字典
+        """
         handle = await self.get_agent_handle(agent_name)
-        return handle.list_branches(session_id)
+        return handle.list_branches_result(session_id)
 
     async def archive_branch(self, agent_name: str, session_id: str, branch_id: str) -> None:
         """归档非运行 Branch。"""

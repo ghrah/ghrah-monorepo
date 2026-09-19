@@ -193,6 +193,11 @@ export default {
     newBranch: "New branch",
     newBranchName: "Branch {index}",
     switchFailed: "Switch failed",
+    activateSession: "Activate session",
+    activateBranch: "Activate branch",
+    activateSessionConfirm: "Activate this session as the agent's runtime context?",
+    activateBranchConfirm: "Set this branch as the runtime branch?",
+    allBranches: "All branches",
     compactBadge: "⇕ compact · {source}",
     compactDetail:
       "Summarized {range} · kept {kept} nodes · tokens {before} → {after} · post-check {check}",

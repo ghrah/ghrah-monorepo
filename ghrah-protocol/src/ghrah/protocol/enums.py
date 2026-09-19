@@ -81,8 +81,6 @@ class CommandType(StrEnum):
     PERSIST_SAVE_NODE = "persist_save_node"
     PERSIST_LOAD_NODE = "persist_load_node"
     PERSIST_LOAD_CHAIN = "persist_load_chain"
-    PERSIST_SAVE_CHAIN_META = "persist_save_chain_meta"
-    PERSIST_LOAD_CHAIN_META = "persist_load_chain_meta"
     PERSIST_SAVE_MESSAGES = "persist_save_messages"
     PERSIST_LOAD_MESSAGES = "persist_load_messages"
     PERSIST_DELETE_CHAIN = "persist_delete_chain"

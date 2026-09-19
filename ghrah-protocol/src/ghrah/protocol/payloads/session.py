@@ -18,6 +18,7 @@ class SessionCreatePayload(BaseModel):
     project_id: str
     agent_id: str
     agent_name: str
+    name: str | None = None
     origin_session_id: str | None = None
     origin_node_id: str | None = None
     system_prompt: str | None = None
@@ -119,7 +120,10 @@ class ChainHistoryResultPayload(BaseModel):
     session_id: str
     branch_id: str
     active_session_id: str = ""
-    nodes: list[dict[str, Any]] = Field(default_factory=list)  # ─── Session 事件载荷模型 ───
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# ─── Session 事件载荷模型 ───
 
 
 class SessionInfoPayload(BaseModel):
@@ -130,10 +134,12 @@ class SessionInfoPayload(BaseModel):
     cluster_id: str = ""
     session_id: str
     agent_name: str
+    name: str = "Session 1"
     root_node_id: str
     active_branch_id: str
-    state: str = "active"
+    lifecycle: str = "open"
     system_prompt: str = ""
+    origin_agent_name: str | None = None
     origin_session_id: str | None = None
     origin_node_id: str | None = None
     created_at: str = ""
@@ -189,6 +195,7 @@ class SessionListResultPayload(BaseModel):
     agent_id: str = ""
     cluster_id: str = ""
     agent_name: str
+    active_session_id: str = ""
     sessions: list[SessionInfoPayload]
 
 
@@ -199,6 +206,7 @@ class BranchInfoPayload(BaseModel):
     session_id: str
     name: str
     head_node_id: str
+    lifecycle: str = "open"
     parent_branch_id: str | None = None
     fork_point_node_id: str | None = None
     created_at: str = ""
@@ -234,4 +242,5 @@ class BranchListResultPayload(BaseModel):
     cluster_id: str = ""
     agent_name: str
     session_id: str
+    active_branch_id: str = ""
     branches: list[BranchInfoPayload]

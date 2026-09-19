@@ -97,6 +97,7 @@ class ContextManager:
         initial_messages: list[Any] | None = None,
         origin_session_id: str | None = None,
         origin_node_id: str | None = None,
+        origin_agent_name: str | None = None,
         session_metadata: dict[str, Any] | None = None,
         root_metadata: dict[str, Any] | None = None,
         compact_threshold: float | None = None,
@@ -151,6 +152,7 @@ class ContextManager:
             system_prompt=system_prompt,
             agent_state=initial_state or {},
             messages=effective_messages,
+            origin_agent_name=origin_agent_name,
             origin_session_id=origin_session_id,
             origin_node_id=origin_node_id,
             metadata=session_metadata,
@@ -276,6 +278,7 @@ class ContextManager:
     def create_session(
         self,
         *,
+        name: str | None = None,
         origin_session_id: str | None = None,
         origin_node_id: str | None = None,
         system_prompt: str | None = None,
@@ -286,7 +289,8 @@ class ContextManager:
         """创建拥有独立 Root 的 Session，不隐式激活。
 
         传入 origin_session_id + origin_node_id 时，新 Root 复制来源节点的
-        state/messages，但 parent_id 仍为 None。
+        state/messages，但 parent_id 仍为 None。name 省略时按 Agent 内
+        既有 Session 数量分配确定性的 ``Session N`` 展示名。
         """
         self._ensure_not_in_iteration("create a session")
         if (origin_session_id is None) != (origin_node_id is None):
@@ -298,9 +302,13 @@ class ContextManager:
         ):
             raise ValueError("origin context and explicit initial context are mutually exclusive")
 
+        effective_name = self._next_session_name() if name is None else name.strip()
+        if not effective_name:
+            raise ValueError("session name must be a non-empty trimmed string")
         effective_prompt = self._system_prompt if system_prompt is None else system_prompt
         effective_state = initial_state or {}
         effective_messages = list(initial_messages or [])
+        origin_agent_name: str | None = None
         if origin_session_id is not None and origin_node_id is not None:
             source = self._get_runtime(origin_session_id)
             source_node = source.chain.checkout(origin_node_id)
@@ -308,6 +316,7 @@ class ContextManager:
                 raise ValueError(
                     f"Node '{origin_node_id}' not found in session '{origin_session_id}'."
                 )
+            origin_agent_name = source.session.agent_name
             effective_state = source_node.agent_state
             effective_messages = self._messages_from_history(
                 source.chain.get_history_from(origin_node_id)
@@ -328,9 +337,11 @@ class ContextManager:
 
         runtime = SessionRuntime.create(
             agent_name=self._agent_name,
+            name=effective_name,
             system_prompt=effective_prompt,
             agent_state=effective_state,
             messages=effective_messages,
+            origin_agent_name=origin_agent_name,
             origin_session_id=origin_session_id,
             origin_node_id=origin_node_id,
             metadata=metadata,
@@ -349,22 +360,30 @@ class ContextManager:
             )
         return runtime.session
 
+    def _next_session_name(self) -> str:
+        """为 Agent 内新 Session 分配确定性展示名 ``Session N``。"""
+        return f"Session {len(self._session_runtimes) + 1}"
+
     def list_sessions(self, *, include_deleted: bool = False) -> list[ActionSession]:
         """列出独立 Root Session；默认隐藏删除墓碑。"""
         sessions = [runtime.session for runtime in self._session_runtimes.values()]
         if include_deleted:
             return sessions
-        return [session for session in sessions if not session.metadata.get("deleted")]
+        return [session for session in sessions if session.lifecycle != "deleted"]
 
     def get_active_session(self) -> ActionSession:
         """获取当前激活 Session。"""
         return self._active_runtime.session
 
+    def get_active_session_branch(self) -> ActionBranch:
+        """获取当前激活 Session 的 active Branch（commit 后的权威 Head 引用）。"""
+        return self._active_runtime.active_branch
+
     def activate_session(self, session_id: str) -> None:
         """显式激活 Session 并完整恢复其记忆的 Branch Head 上下文。"""
         self._ensure_not_in_iteration("activate a session")
         runtime = self._get_runtime(session_id)
-        if runtime.session.metadata.get("deleted"):
+        if runtime.session.lifecycle == "deleted":
             raise ValueError("Cannot activate a deleted session.")
         self._active_session_id = session_id
         self._restore_active_context()
@@ -405,7 +424,7 @@ class ContextManager:
         """在同一 Session 内从指定节点创建 Branch，不隐式激活。"""
         self._ensure_not_in_iteration("create a branch")
         runtime = self._get_runtime(session_id)
-        if runtime.session.metadata.get("deleted"):
+        if runtime.session.lifecycle == "deleted":
             raise ValueError("Cannot create a branch in a deleted session.")
         branch = runtime.create_branch(
             name=name,
@@ -430,7 +449,7 @@ class ContextManager:
         branches = list(self._get_runtime(session_id).branches.values())
         if include_deleted:
             return branches
-        return [branch for branch in branches if not branch.metadata.get("deleted")]
+        return [branch for branch in branches if branch.lifecycle != "deleted"]
 
     def activate_branch(self, session_id: str, branch_id: str) -> None:
         """显式激活当前 Session 内的 Branch 并完整恢复上下文。"""
@@ -438,7 +457,7 @@ class ContextManager:
         if session_id != self._active_session_id:
             raise ValueError("activate the session before activating one of its branches")
         runtime = self._get_runtime(session_id)
-        if runtime.get_branch(branch_id).metadata.get("deleted"):
+        if runtime.get_branch(branch_id).lifecycle == "deleted":
             raise ValueError("Cannot activate a deleted branch.")
         runtime.activate_branch(branch_id)
         self._restore_active_context()
@@ -462,7 +481,7 @@ class ContextManager:
         return node
 
     def archive_session(self, session_id: str) -> ActionSession:
-        """归档指定 session（标记 metadata.archived=True）。
+        """归档指定 session（lifecycle → archived）。
 
         Args:
             session_id: 要归档的 session ID
@@ -478,10 +497,7 @@ class ContextManager:
         if session_id == self._active_session_id:
             raise ValueError("Cannot archive the active session.")
         session = runtime.session
-        archived = dataclasses.replace(
-            session,
-            metadata={**session.metadata, "archived": True},
-        )
+        archived = dataclasses.replace(session, lifecycle="archived")
         runtime.session = archived
         if self._auto_persist and self._persistence is not None:
             self._schedule_changes(
@@ -491,7 +507,7 @@ class ContextManager:
         return archived
 
     def delete_session(self, session_id: str) -> ActionSession:
-        """删除指定 session。
+        """删除指定 session（lifecycle → deleted 墓碑，历史节点保留）。
 
         不能删除当前活跃的 session。
 
@@ -511,10 +527,7 @@ class ContextManager:
             raise ValueError("Cannot delete the active session.")
         self._ensure_not_in_iteration("delete a session")
         runtime = self._session_runtimes[session_id]
-        deleted = dataclasses.replace(
-            runtime.session,
-            metadata={**runtime.session.metadata, "deleted": True},
-        )
+        deleted = dataclasses.replace(runtime.session, lifecycle="deleted")
         runtime.session = deleted
         if self._auto_persist and self._persistence is not None:
             self._schedule_changes(
@@ -527,16 +540,13 @@ class ContextManager:
         return deleted
 
     def archive_branch(self, session_id: str, branch_id: str) -> ActionBranch:
-        """归档非运行 Branch，同时保留不可变节点的来源引用。"""
+        """归档非运行 Branch（lifecycle → archived），保留不可变节点。"""
         self._ensure_not_in_iteration("archive a branch")
         runtime = self._get_runtime(session_id)
         if session_id == self._active_session_id and branch_id == runtime.session.active_branch_id:
             raise ValueError("Cannot archive the active branch.")
         branch = runtime.get_branch(branch_id)
-        archived = dataclasses.replace(
-            branch,
-            metadata={**branch.metadata, "archived": True},
-        )
+        archived = dataclasses.replace(branch, lifecycle="archived")
         runtime.branches[branch_id] = archived
         if self._auto_persist and self._persistence is not None:
             self._schedule_changes(
@@ -546,16 +556,13 @@ class ContextManager:
         return archived
 
     def delete_branch(self, session_id: str, branch_id: str) -> ActionBranch:
-        """删除非运行 Branch（墓碑），不破坏节点 provenance 与拓扑。"""
+        """删除非运行 Branch（lifecycle → deleted 墓碑），不破坏节点 provenance 与拓扑。"""
         self._ensure_not_in_iteration("delete a branch")
         runtime = self._get_runtime(session_id)
         if session_id == self._active_session_id and branch_id == runtime.session.active_branch_id:
             raise ValueError("Cannot delete the active branch.")
         branch = runtime.get_branch(branch_id)
-        deleted = dataclasses.replace(
-            branch,
-            metadata={**branch.metadata, "deleted": True},
-        )
+        deleted = dataclasses.replace(branch, lifecycle="deleted")
         runtime.branches[branch_id] = deleted
         if self._auto_persist and self._persistence is not None:
             self._schedule_changes(
@@ -1436,15 +1443,3 @@ class ContextManager:
             tasks.add(task)
         except RuntimeError:
             logger.debug("No running event loop, skipping auto-persist for %s", label)
-
-    # ----------------------------------------------------------------
-    # 内部辅助
-    # ----------------------------------------------------------------
-
-    def _get_conversation_history(self) -> list[Any]:
-        """获取对话历史（Message 对象列表）。
-
-        Returns:
-            消息历史列表
-        """
-        return []

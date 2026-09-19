@@ -101,7 +101,7 @@ def create_rebased_context(
         initial_messages=source_messages,
         origin_session_id=source_cm.get_active_session().session_id,
         origin_node_id=source_node_id,
-        session_metadata={"origin_agent_name": source_cm.agent_name},
+        origin_agent_name=source_cm.agent_name,
         root_metadata={
             "origin_agent_name": source_cm.agent_name,
             "origin_node_id": source_node_id,

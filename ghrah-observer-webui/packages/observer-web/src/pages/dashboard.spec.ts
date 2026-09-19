@@ -161,12 +161,12 @@ describe("Dashboard workspace tabs", () => {
     useSessionsStore().replaceAgentSessions(
       agent,
       [{ session_id: "s2", agent_name: "Coder", state: "active" } as never],
-      "s2",
+      { explicitActiveSessionId: "s2" },
     );
     useBranchesStore().replaceSessionBranches(
       { ...agent, sessionId: "s2" },
       [{ branch_id: "b2", session_id: "s2", name: "main" } as never],
-      "b2",
+      { explicitActiveBranchId: "b2" },
     );
 
     switchProjectMock.mockImplementation(async (projectId: string) => {
@@ -269,12 +269,12 @@ describe("Dashboard workspace tabs", () => {
     useSessionsStore().replaceAgentSessions(
       agent,
       [{ session_id: "s2", agent_name: "Coder", state: "active" } as never],
-      "s2",
+      { explicitActiveSessionId: "s2" },
     );
     useBranchesStore().replaceSessionBranches(
       { ...agent, sessionId: "s2" },
       [{ branch_id: "b2", session_id: "s2", name: "main" } as never],
-      "b2",
+      { explicitActiveBranchId: "b2" },
     );
     await wrapper.find("#open-chain").trigger("click");
 

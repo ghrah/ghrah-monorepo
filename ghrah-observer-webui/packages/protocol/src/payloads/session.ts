@@ -6,6 +6,7 @@ export const SessionCreatePayloadSchema = z.object({
   project_id: z.string(),
   agent_id: z.string(),
   agent_name: z.string(),
+  name: z.string().nullable().optional(),
   origin_session_id: z.string().nullable().optional(),
   origin_node_id: z.string().nullable().optional(),
   system_prompt: z.string().nullable().optional(),
@@ -76,10 +77,12 @@ export const SessionInfoPayloadSchema = z.object({
   cluster_id: z.string().optional().default(""),
   session_id: z.string(),
   agent_name: z.string(),
+  name: z.string().optional().default("Session 1"),
   root_node_id: z.string(),
   active_branch_id: z.string(),
-  state: z.string().optional().default("active"),
+  lifecycle: z.string().optional().default("open"),
   system_prompt: z.string().optional().default(""),
+  origin_agent_name: z.string().nullable().optional(),
   origin_session_id: z.string().nullable().optional(),
   origin_node_id: z.string().nullable().optional(),
   created_at: z.string().optional().default(""),
@@ -113,6 +116,7 @@ export const SessionListResultPayloadSchema = z.object({
   agent_id: z.string().optional().default(""),
   cluster_id: z.string().optional().default(""),
   agent_name: z.string(),
+  active_session_id: z.string().optional().default(""),
   sessions: z.array(SessionInfoPayloadSchema),
 });
 
@@ -121,6 +125,7 @@ export const BranchInfoPayloadSchema = z.object({
   session_id: z.string(),
   name: z.string(),
   head_node_id: z.string(),
+  lifecycle: z.string().optional().default("open"),
   parent_branch_id: z.string().nullable().optional(),
   fork_point_node_id: z.string().nullable().optional(),
   created_at: z.string().optional().default(""),
@@ -150,6 +155,7 @@ export const BranchListResultPayloadSchema = z.object({
   cluster_id: z.string().optional().default(""),
   agent_name: z.string(),
   session_id: z.string(),
+  active_branch_id: z.string().optional().default(""),
   branches: z.array(BranchInfoPayloadSchema),
 });
 

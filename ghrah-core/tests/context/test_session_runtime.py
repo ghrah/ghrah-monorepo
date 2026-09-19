@@ -136,6 +136,7 @@ def test_restore_rejects_disconnected_branch_head() -> None:
     )
     foreign_session = ActionSession.create(
         agent_name="agent",
+        name="Session 1",
         root_node_id=runtime.session.root_node_id,
         active_branch_id="branch-main",
         session_id="session-a",

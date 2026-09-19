@@ -295,7 +295,7 @@ def _core_event_to_dict(event: CoreEvent) -> tuple[str, dict[str, Any]]:
             }
         )
     elif isinstance(event, ActionChainUpdatedEvent):
-        payload.update({"node": event.node})
+        payload.update({"node": event.node, "branch": event.branch})
     elif isinstance(event, AgentErrorEvent):
         payload.update({"error": event.error})
     elif isinstance(event, AgentResponseEvent):
@@ -1361,6 +1361,7 @@ class CoreUnit:
         self._validate_agent(sp.project_id, sp.agent_id, sp.agent_name)
         data = await supervisor.create_session(
             agent_name=sp.agent_name,
+            name=sp.name,
             origin_session_id=sp.origin_session_id,
             origin_node_id=sp.origin_node_id,
             system_prompt=sp.system_prompt,
@@ -1381,8 +1382,8 @@ class CoreUnit:
         supervisor = self._require_supervisor()
         sp = SessionListPayload.model_validate(payload)
         self._validate_agent(sp.project_id, sp.agent_id, sp.agent_name)
-        sessions = await supervisor.list_sessions(sp.agent_name)
-        return self._ok({"sessions": sessions})
+        data = await supervisor.list_sessions(sp.agent_name)
+        return self._ok(data)
 
     async def _handle_session_archive(
         self, payload: dict[str, Any], cmd_ctx: Any
@@ -1427,8 +1428,8 @@ class CoreUnit:
         supervisor = self._require_supervisor()
         bp = BranchListPayload.model_validate(payload)
         self._validate_agent(bp.project_id, bp.agent_id, bp.agent_name)
-        branches = await supervisor.list_branches(bp.agent_name, bp.session_id)
-        return self._ok({"session_id": bp.session_id, "branches": branches})
+        data = await supervisor.list_branches(bp.agent_name, bp.session_id)
+        return self._ok(data)
 
     async def _handle_branch_archive(self, payload: dict[str, Any], cmd_ctx: Any) -> dict[str, Any]:
         supervisor = self._require_supervisor()

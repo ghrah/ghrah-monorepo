@@ -618,12 +618,17 @@ class ActorAgent:
                 # ────── 发布 ActionChainUpdated 事件 ──────
                 # NOTE: 性能优化点 — 当前传输完整序列化 node，
                 # 后续可改为仅传输 delta 数据以减少序列化/反序列化开销。
-                from ghrah.context.persistence.serialization import serialize_node
+                from ghrah.context.persistence.serialization import (
+                    serialize_branch,
+                    serialize_node,
+                )
 
+                active_branch = cm.get_active_session_branch()
                 await self._event_publisher.publish(
                     ActionChainUpdatedEvent(
                         agent_name=self.config.name,
                         node=serialize_node(node),
+                        branch=serialize_branch(active_branch),
                     )
                 )
                 # ────── 结束 ──────
@@ -782,7 +787,7 @@ class ActorAgent:
             split_compact_windows,
             truncate_summary_input,
         )
-        from ghrah.context.persistence.serialization import serialize_node
+        from ghrah.context.persistence.serialization import serialize_branch, serialize_node
         from ghrah.context.strategies.llm_summary import format_messages_for_summary
 
         cm = self._context_manager
@@ -910,11 +915,12 @@ class ActorAgent:
             metadata["usage"] = summary_usage
 
         node = cm.commit_compact_node(snapshot, metadata)
-
+        active_branch = cm.get_active_session_branch()
         await self._event_publisher.publish(
             ActionChainUpdatedEvent(
                 agent_name=self.config.name,
                 node=serialize_node(node),
+                branch=serialize_branch(active_branch),
             )
         )
 
@@ -1312,6 +1318,7 @@ class ActorAgent:
 
     async def create_session(
         self,
+        name: str | None = None,
         origin_session_id: str | None = None,
         origin_node_id: str | None = None,
         system_prompt: str | None = None,
@@ -1319,6 +1326,7 @@ class ActorAgent:
     ) -> ActionSession:
         """创建独立 Root Session 并发布事件。"""
         session = self._context_manager.create_session(
+            name=name,
             origin_session_id=origin_session_id,
             origin_node_id=origin_node_id,
             system_prompt=system_prompt,
@@ -1351,22 +1359,25 @@ class ActorAgent:
         """列出独立 Root Session。"""
         return [self._session_info(session) for session in self._context_manager.list_sessions()]
 
+    def list_sessions_result(self) -> dict[str, Any]:
+        """列出 Session 并携带权威 active_session_id。"""
+        return {
+            "active_session_id": self._context_manager.active_session_id,
+            "sessions": self.list_sessions(),
+        }
+
     def _session_info(self, session: ActionSession) -> dict[str, Any]:
         """将 Session 领域对象转换为稳定 wire 结构。"""
         history = self._context_manager.get_history(session_id=session.session_id)
         return {
             "session_id": session.session_id,
             "agent_name": session.agent_name,
+            "name": session.name,
             "root_node_id": session.root_node_id,
             "active_branch_id": session.active_branch_id,
-            "state": (
-                "active"
-                if session.session_id == self._context_manager.active_session_id
-                else "archived"
-                if session.metadata.get("archived")
-                else "idle"
-            ),
+            "lifecycle": session.lifecycle,
             "system_prompt": session.system_prompt,
+            "origin_agent_name": session.origin_agent_name,
             "origin_session_id": session.origin_session_id,
             "origin_node_id": session.origin_node_id,
             "created_at": session.created_at.isoformat(),
@@ -1383,6 +1394,7 @@ class ActorAgent:
             "session_id": branch.session_id,
             "name": branch.name,
             "head_node_id": branch.head_node_id,
+            "lifecycle": branch.lifecycle,
             "parent_branch_id": branch.parent_branch_id,
             "fork_point_node_id": branch.fork_point_node_id,
             "created_at": branch.created_at.isoformat(),
@@ -1430,6 +1442,19 @@ class ActorAgent:
         return [
             self._branch_info(branch) for branch in self._context_manager.list_branches(session_id)
         ]
+
+    def list_branches_result(self, session_id: str) -> dict[str, Any]:
+        """列出 Branch 并携带权威 active_branch_id。
+
+        ``active_branch_id`` 是 Session 域必填不变量（每个 Session 必有 active
+        Branch），与运行态 active_session 指针无关：非活跃 Session 也直读其
+        自身的 ``active_branch_id``，不置空。
+        """
+        return {
+            "session_id": session_id,
+            "active_branch_id": self._context_manager.get_session(session_id).active_branch_id,
+            "branches": self.list_branches(session_id),
+        }
 
     async def archive_branch(self, session_id: str, branch_id: str) -> None:
         """归档非运行 Branch。"""

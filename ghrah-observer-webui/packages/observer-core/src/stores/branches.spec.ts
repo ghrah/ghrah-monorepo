@@ -15,6 +15,7 @@ const branch = (id: string): BranchInfoPayload => ({
   session_id: "s1",
   name: id,
   head_node_id: `head-${id}`,
+  lifecycle: "open",
   parent_branch_id: null,
   fork_point_node_id: null,
   created_at: "",
@@ -26,7 +27,9 @@ describe("useBranchesStore", () => {
 
   it("stores multiple stable branches and active branch per Session", () => {
     const store = useBranchesStore();
-    store.replaceSessionBranches(session, [branch("b1"), branch("b2")], "b2");
+    store.replaceSessionBranches(session, [branch("b1"), branch("b2")], {
+      explicitActiveBranchId: "b2",
+    });
     expect(store.branchesForSession(session).map((item) => item.target.branchId)).toEqual([
       "b1",
       "b2",
@@ -57,7 +60,9 @@ describe("useBranchesStore", () => {
 
   it("archive/delete removes only the exact Branch", () => {
     const store = useBranchesStore();
-    store.replaceSessionBranches(session, [branch("b1"), branch("b2")], "b1");
+    store.replaceSessionBranches(session, [branch("b1"), branch("b2")], {
+      explicitActiveBranchId: "b1",
+    });
     store.removeBranch({
       project_id: "p1",
       agent_id: "a1",

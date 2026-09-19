@@ -35,7 +35,14 @@ import { CommandType, EventType, SystemType } from "@ghrah/protocol";
 import { clearAgentDerived, clearProjectDerived, clearRoomDerived } from "./clear-derived.js";
 import type { ObserverClient } from "./client.js";
 import { createFrameBatcher, type FrameBatcher } from "./frame-batcher.js";
-import type { AgentTarget, ChainTarget, SessionTarget } from "./scope.js";
+import {
+  type AgentTarget,
+  agentKey,
+  type ChainTarget,
+  chainKey,
+  type SessionTarget,
+  sessionKey,
+} from "./scope.js";
 import { useActionChainsStore } from "./stores/action-chains.js";
 import { type AgentListItem, useAgentsStore } from "./stores/agents.js";
 import { useBranchesStore } from "./stores/branches.js";
@@ -112,6 +119,10 @@ export function connectStores(
         branchId: node.created_on_branch_id,
       };
       changes.onActionChainNode(target, node);
+      // commit 事件携带的权威 Branch 快照：只前移 Head（不回退）。
+      if (payload.branch?.branch_id) {
+        branches.advanceHead(target, payload.branch);
+      }
     });
   });
 
@@ -338,6 +349,7 @@ export function connectStores(
         agentName: payload.agent_name,
       },
       payload.sessions,
+      { explicitActiveSessionId: payload.active_session_id || null },
     );
   });
 
@@ -366,6 +378,7 @@ export function connectStores(
         sessionId: payload.session_id,
       },
       payload.branches,
+      { explicitActiveBranchId: payload.active_branch_id || null },
     );
   });
 
@@ -439,16 +452,60 @@ export function connectStores(
     ]);
   }
 
+  /** 每 Agent 单调递增同步 generation；新同步轮次使旧结果逻辑过期。 */
+  const syncGenerations = new Map<string, number>();
+  /** in-flight 串行化尾指针：resource key → 最近一次排队中的请求。断线时清空。 */
+  const inFlight = new Map<string, Promise<unknown>>();
+
+  function nextGeneration(agentTarget: AgentTarget): number {
+    const key = agentKey(agentTarget);
+    const next = (syncGenerations.get(key) ?? 0) + 1;
+    syncGenerations.set(key, next);
+    return next;
+  }
+
+  function isStale(agentTarget: AgentTarget, generation: number): boolean {
+    return (syncGenerations.get(agentKey(agentTarget)) ?? 0) !== generation;
+  }
+
+  /**
+   * 同键请求串行化（S7 P1-1）：命中在途请求时等待其完成后再发起自己的新请求，
+   * 保证每个调用方消费的响应都发起于自身 baseline 捕获之后（"响应 ≥ baseline"
+   * 不变式）；同时在任意时刻同键至多只有一个底层请求在途。
+   */
+  function dedupe<T>(key: string, run: () => Promise<T>): Promise<T> {
+    const tail = inFlight.get(key);
+    const next = (tail ? tail.catch(() => undefined) : Promise.resolve()).then(run);
+    inFlight.set(key, next);
+    next
+      .finally(() => {
+        if (inFlight.get(key) === next) inFlight.delete(key);
+      })
+      .catch(() => undefined);
+    return next;
+  }
+
+  const onDisconnectedForSync = () => inFlight.clear();
+  client.onDisconnected(onDisconnectedForSync);
+
   async function syncAgentActionState(agentList: AgentTarget[]) {
     await Promise.all(
       agentList.map(async (agentTarget) => {
+        const generation = nextGeneration(agentTarget);
+        const sessionBaseline = sessions.captureBaseline(agentTarget);
         try {
-          const sessionResult = await client.listSessions(agentTarget);
+          const sessionResult = await dedupe(`sessions:${agentKey(agentTarget)}`, () =>
+            client.listSessions(agentTarget),
+          );
+          if (isStale(agentTarget, generation)) return;
           const sessionData = sessionResult.data as Record<string, unknown> | null;
           if (!sessionResult.success || !Array.isArray(sessionData?.sessions)) return;
           const oldSessions = sessions.sessionsForAgent(agentTarget);
           const sessionList = sessionData.sessions as SessionInfoPayload[];
-          sessions.replaceAgentSessions(agentTarget, sessionList);
+          sessions.replaceAgentSessions(agentTarget, sessionList, {
+            explicitActiveSessionId: stringField(sessionData.active_session_id),
+            baseline: sessionBaseline,
+          });
           const sessionIds = new Set(sessionList.map((session) => session.session_id));
           for (const stale of oldSessions) {
             if (sessionIds.has(stale.target.sessionId)) continue;
@@ -462,16 +519,20 @@ export function connectStores(
                 ...agentTarget,
                 sessionId: sessionInfo.session_id,
               };
-              const branchResult = await client.listBranches(sessionTarget);
+              const branchBaseline = branches.captureBaseline(sessionTarget);
+              const branchResult = await dedupe(`branches:${sessionKey(sessionTarget)}`, () =>
+                client.listBranches(sessionTarget),
+              );
+              if (isStale(agentTarget, generation)) return;
               const branchData = branchResult.data as Record<string, unknown> | null;
               if (!branchResult.success || !Array.isArray(branchData?.branches)) return;
               const oldBranches = branches.branchesForSession(sessionTarget);
               const branchList = branchData.branches as BranchInfoPayload[];
-              branches.replaceSessionBranches(
-                sessionTarget,
-                branchList,
-                sessionInfo.active_branch_id || null,
-              );
+              branches.replaceSessionBranches(sessionTarget, branchList, {
+                explicitActiveBranchId:
+                  stringField(branchData.active_branch_id) ?? sessionInfo.active_branch_id,
+                baseline: branchBaseline,
+              });
               const branchIds = new Set(branchList.map((branch) => branch.branch_id));
               for (const stale of oldBranches) {
                 if (!branchIds.has(stale.target.branchId)) chains.clearChain(stale.target);
@@ -483,12 +544,16 @@ export function connectStores(
                     ...sessionTarget,
                     branchId: branchInfo.branch_id,
                   };
-                  const history = await client.getChainHistory(target);
+                  const history = await dedupe(`history:${chainKey(target)}`, () =>
+                    client.getChainHistory(target),
+                  );
+                  if (isStale(agentTarget, generation)) return;
                   const historyData = history.data as Record<string, unknown> | null;
                   if (!history.success || !Array.isArray(historyData?.nodes)) return;
-                  chains.setChain(target, historyData.nodes as ActionNode[]);
-                  const activeSessionId = stringField(historyData.active_session_id);
-                  if (activeSessionId) sessions.setActiveSession(agentTarget, activeSessionId);
+                  // history 只合并不可变 node；不覆盖 Session/Branch 快照，
+                  // 也不触碰 active 指针（S7 P1-2：active 唯一写路径是
+                  // session_list 回执的 revision 门 + session_activated 事件）。
+                  chains.mergeHistory(target, historyData.nodes as ActionNode[]);
                 }),
               );
             }),
@@ -505,5 +570,7 @@ export function connectStores(
     client.off(SystemType.COMMAND_RESULT);
     client.clearLifecycleCallbacks();
     batcher.cancel();
+    inFlight.clear();
+    syncGenerations.clear();
   };
 }

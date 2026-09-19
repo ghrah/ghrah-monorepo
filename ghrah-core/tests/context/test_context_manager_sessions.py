@@ -128,6 +128,47 @@ def test_deleted_session_cannot_be_activated_or_extended() -> None:
         cm.create_branch(session_id=deleted.session_id, name="retry")
 
 
+def test_auto_session_names_are_deterministic() -> None:
+    """省略 name 时按 Agent 内 Session 数量分配 Session N（含初始 Session）。"""
+    cm = _manager()
+    # 初始 Session 在构造时已占用 Session 1
+    assert cm.get_active_session().name == "Session 1"
+    second = cm.create_session(initial_state={})
+    third = cm.create_session(initial_state={})
+    assert second.name == "Session 2"
+    assert third.name == "Session 3"
+
+
+def test_explicit_session_name_may_collide_with_auto_name() -> None:
+    """显式 name 不与自动名查重（当前行为锁定；是否拒绝见 P2-U2 裁决）。"""
+    cm = _manager()
+    duplicate = cm.create_session(name="Session 1", initial_state={})
+    assert duplicate.name == "Session 1"
+    assert cm.get_active_session().name == "Session 1"
+
+
+def test_blank_session_name_is_rejected() -> None:
+    """name trim 后非空校验。"""
+    cm = _manager()
+    with pytest.raises(ValueError, match="non-empty trimmed string"):
+        cm.create_session(name="   ")
+
+
+def test_list_sessions_filters_deleted_tombstones() -> None:
+    """默认隐藏删除墓碑；include_deleted=True 时包含。"""
+    cm = _manager()
+    kept = cm.create_session(initial_state={})
+    removed = cm.create_session(initial_state={})
+    cm.delete_session(removed.session_id)
+
+    visible_ids = {session.session_id for session in cm.list_sessions()}
+    assert removed.session_id not in visible_ids
+    assert kept.session_id in visible_ids
+
+    all_ids = {session.session_id for session in cm.list_sessions(include_deleted=True)}
+    assert removed.session_id in all_ids
+
+
 @pytest.mark.asyncio
 async def test_memory_checkpoint_restores_multiple_sessions_and_active_context() -> None:
     """内存 checkpoint 往返后恢复多 Root 与 active Session/Branch。"""

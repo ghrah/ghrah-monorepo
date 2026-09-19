@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""SQLite v2 多 Session checkpoint 与增量写入测试。"""
+"""SQLite v3 多 Session checkpoint 与增量写入测试。"""
 
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ async def test_sqlite_commits_do_not_delete_existing_nodes(tmp_path: Path) -> No
 
 @pytest.mark.asyncio
 async def test_legacy_sqlite_schema_fails_fast(tmp_path: Path) -> None:
-    """无 v2 schema marker 的旧库必须显式重建。"""
+    """无 schema marker 的旧库必须显式重建。"""
     path = tmp_path / "legacy.db"
     connection = sqlite3.connect(path)
     connection.execute("CREATE TABLE nodes (id TEXT PRIMARY KEY)")
@@ -105,3 +105,69 @@ async def test_legacy_sqlite_schema_fails_fast(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="Legacy context database schema"):
         await backend.load_checkpoint("agent")
     await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_v2_sqlite_schema_fails_fast(tmp_path: Path) -> None:
+    """v2 marker 库（版本 < 3）快速失败，禁止迁移/静默兼容。"""
+    path = tmp_path / "v2.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "CREATE TABLE context_schema (singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL)"
+    )
+    connection.execute("INSERT INTO context_schema (singleton, version) VALUES (1, 2)")
+    connection.commit()
+    connection.close()
+
+    backend = SqliteBackend(db_path=path, run_id="run-a")
+    await backend.connect()
+    with pytest.raises(RuntimeError, match="Unsupported context database schema"):
+        await backend.load_checkpoint("agent")
+    await backend.close()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_v3_columns_round_trip(tmp_path: Path) -> None:
+    """v3 新列（session name/lifecycle/origin_*、branch lifecycle）往返保真。"""
+    backend = SqliteBackend(db_path=tmp_path / "context.db", run_id="run-a")
+    await backend.connect()
+    cm = ContextManager(
+        agent_name="agent",
+        persistence=backend,
+        message_factory=ChatMessageFactory(),
+    )
+    first = cm.create_session(name="显式名-一")
+    second = cm.create_session(
+        origin_session_id=first.session_id,
+        origin_node_id=first.root_node_id,
+    )
+    cm.begin_iteration()
+    cm.commit_iteration(ability_names=["step"])
+    cm.archive_session(first.session_id)
+    retry = cm.create_branch(session_id=second.session_id, name="retry")
+    cm.archive_branch(second.session_id, retry.branch_id)
+    await cm.persist()
+    await backend.close()
+
+    restored_backend = SqliteBackend(db_path=tmp_path / "context.db", run_id="run-b")
+    await restored_backend.connect()
+    restored = ContextManager(
+        agent_name="agent",
+        persistence=restored_backend,
+        message_factory=ChatMessageFactory(),
+    )
+    await restored.restore("agent")
+
+    sessions = {
+        session.session_id: session for session in restored.list_sessions(include_deleted=True)
+    }
+    assert sessions[first.session_id].name == "显式名-一"
+    assert sessions[first.session_id].lifecycle == "archived"
+    assert sessions[second.session_id].origin_agent_name == "agent"
+    assert sessions[second.session_id].origin_session_id == first.session_id
+    assert sessions[second.session_id].origin_node_id == first.root_node_id
+    branches = restored.list_branches(second.session_id)
+    by_name = {branch.name: branch for branch in branches}
+    assert by_name["retry"].lifecycle == "archived"
+    assert by_name["main"].lifecycle == "open"
+    await restored_backend.close()

@@ -93,7 +93,7 @@ class JsonFileBackend(PersistenceBackend):
         return self._run_dir / agent_name
 
     def _changes_dir(self, agent_name: str) -> Path:
-        return self._agent_dir(agent_name) / "changes-v2"
+        return self._agent_dir(agent_name) / "changes-v3"
 
     def _record_path(self, agent_name: str) -> Path:
         suffix = ".json.gz" if self._compress else ".json"
@@ -128,7 +128,7 @@ class JsonFileBackend(PersistenceBackend):
     @staticmethod
     def _serialize_changes(changes: ContextChanges) -> dict[str, Any]:
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "agent_name": changes.agent_name,
             "active_session_id": changes.active_session_id,
             "sessions": [serialize_action_session(item) for item in changes.sessions],
@@ -143,7 +143,7 @@ class JsonFileBackend(PersistenceBackend):
         self._write_json(self._record_path(changes.agent_name), self._serialize_changes(changes))
 
     async def load_checkpoint(self, agent_name: str) -> ContextCheckpoint | None:
-        """按顺序重放 Agent 的 v2 变更记录。"""
+        """按顺序重放 Agent 的 v3 变更记录。"""
         changes_dir = self._changes_dir(agent_name)
         if not changes_dir.exists():
             agent_dir = self._agent_dir(agent_name)
@@ -160,7 +160,7 @@ class JsonFileBackend(PersistenceBackend):
         records = sorted(path for path in changes_dir.iterdir() if not path.name.endswith(".tmp"))
         for path in records:
             raw = self._read_json(path)
-            if not isinstance(raw, dict) or raw.get("schema_version") != 2:
+            if not isinstance(raw, dict) or raw.get("schema_version") != 3:
                 raise RuntimeError("Unsupported context checkpoint schema; rebuild explicitly")
             if raw.get("agent_name") != agent_name:
                 raise RuntimeError("Context change record belongs to another agent")
@@ -205,13 +205,13 @@ class JsonFileBackend(PersistenceBackend):
             shutil.rmtree(agent_dir)
 
     async def list_agents(self) -> list[str]:
-        """列出至少包含一条 v2 变更记录的 Agent。"""
+        """列出至少包含一条 v3 变更记录的 Agent。"""
         if not self._run_dir.exists():
             return []
         return sorted(
             directory.name
             for directory in self._run_dir.iterdir()
             if directory.is_dir()
-            and (directory / "changes-v2").is_dir()
-            and any((directory / "changes-v2").iterdir())
+            and (directory / "changes-v3").is_dir()
+            and any((directory / "changes-v3").iterdir())
         )

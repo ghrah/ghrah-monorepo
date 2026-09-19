@@ -268,6 +268,7 @@ export class ObserverClient extends ServerClient {
   async createSession(
     target: AgentTarget,
     options: {
+      name?: string;
       originSessionId?: string;
       originNodeId?: string;
       systemPrompt?: string;
@@ -275,6 +276,7 @@ export class ObserverClient extends ServerClient {
     } = {},
   ): Promise<CommandResultPayload> {
     return this._agentContextRequest(CommandType.SESSION_CREATE, target, {
+      name: options.name,
       origin_session_id: options.originSessionId,
       origin_node_id: options.originNodeId,
       system_prompt: options.systemPrompt,
