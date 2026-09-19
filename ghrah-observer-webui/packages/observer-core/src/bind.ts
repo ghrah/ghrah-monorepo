@@ -213,6 +213,62 @@ export function connectStores(
       if (roomId) rooms.setRoomLog(roomId, entries);
     }
 
+    if (command === CommandType.GET_AGENT_INFO && data.context_usage != null) {
+      const usage = data.context_usage as Record<string, unknown>;
+      const target = {
+        projectId: stringField(context?.payload.project_id) ?? stringField(data.project_id),
+        agentId: stringField(context?.payload.agent_id) ?? stringField(data.agent_id),
+        agentName: stringField(context?.payload.name) ?? stringField(data.agent_name),
+      };
+      const input = usage.real_input_tokens;
+      if (target.projectId && target.agentId && typeof input === "number") {
+        contextUsage.restoreSnapshot(
+          {
+            project_id: target.projectId,
+            agent_id: target.agentId,
+            cluster_id: "",
+            agent_name: target.agentName ?? "",
+            phase: "post_call",
+            occupied_tokens:
+              typeof usage.occupied_tokens === "number" ? usage.occupied_tokens : null,
+            basis: stringField(usage.basis) ?? "anchor",
+            budget_tokens: typeof usage.budget_tokens === "number" ? usage.budget_tokens : 0,
+            budget_source: stringField(usage.budget_source),
+            compact_threshold:
+              typeof usage.compact_threshold === "number" ? usage.compact_threshold : null,
+            real_input_tokens: input,
+            real_output_tokens:
+              typeof usage.real_output_tokens === "number" ? usage.real_output_tokens : null,
+            real_cache_read_tokens:
+              typeof usage.real_cache_read_tokens === "number"
+                ? usage.real_cache_read_tokens
+                : null,
+            real_cache_write_tokens:
+              typeof usage.real_cache_write_tokens === "number"
+                ? usage.real_cache_write_tokens
+                : null,
+            compaction: null,
+            iteration: null,
+          },
+          {
+            input:
+              typeof usage.cumulative_input_tokens === "number"
+                ? usage.cumulative_input_tokens
+                : input,
+            output:
+              typeof usage.cumulative_output_tokens === "number"
+                ? usage.cumulative_output_tokens
+                : 0,
+            cache_read:
+              typeof usage.cumulative_cache_read_tokens === "number"
+                ? usage.cumulative_cache_read_tokens
+                : 0,
+          },
+          msg.timestamp ?? null,
+        );
+      }
+    }
+
     if (command === CommandType.PROJECT_LIST && Array.isArray(data.projects)) {
       const list = data.projects as ProjectInfoPayload[];
       const archived = boolField(context?.payload.archived) ?? false;
@@ -507,6 +563,10 @@ export function connectStores(
         const generation = nextGeneration(agentTarget);
         const sessionBaseline = sessions.captureBaseline(agentTarget);
         try {
+          // 用量恢复读通量：与三层链并行拉取（权威在 Core，事件只做实时投影）
+          void dedupe(`usage:${agentKey(agentTarget)}`, () =>
+            client.getAgentInfo(agentTarget),
+          ).catch(() => undefined);
           const sessionResult = await dedupe(`sessions:${agentKey(agentTarget)}`, () =>
             client.listSessions(agentTarget),
           );

@@ -159,6 +159,35 @@ export const useContextUsageStore = defineStore("ghrah-context-usage", () => {
     entries.value.delete(agentKey(target));
   }
 
+  /** 权威快照恢复入口（get_agent_info 回执）：直置 latest 槽与累计值，非累加。 */
+  function restoreSnapshot(
+    payload: ContextUsageUpdatedPayload,
+    cumulative: { input: number; output: number; cache_read: number },
+    timestamp: number | null = null,
+  ): boolean {
+    if (!payload.project_id || !payload.agent_id) return false;
+    const snapshot = toSnapshot(payload, timestamp);
+    const key = agentKey(snapshot.target);
+    const existing = entries.value.get(key);
+    // 竞态守卫：实时事件先于恢复回执到达时不回退快照槽（后端无事件时序，
+    // 恢复读通量只重建"缺失"投影，不覆盖更新的实时状态）
+    if (existing && existing.latest.updatedAt != null && timestamp != null) {
+      if (existing.latest.updatedAt > timestamp) return false;
+    }
+    const next: ContextUsageEntry = {
+      target: snapshot.target,
+      latest: snapshot,
+      latestPostCall:
+        snapshot.phase === "post_call" ? snapshot : (existing?.latestPostCall ?? null),
+      // 累计为 Core 权威（成本口径），无条件直置即纠偏
+      cumulativeInputTokens: cumulative.input,
+      cumulativeOutputTokens: cumulative.output,
+      cumulativeCacheReadTokens: cumulative.cache_read,
+    };
+    entries.value.set(key, next);
+    return true;
+  }
+
   function clearProject(projectId: string) {
     entries.value = new Map(
       [...entries.value.entries()].filter(([, entry]) => entry.target.projectId !== projectId),
@@ -172,6 +201,7 @@ export const useContextUsageStore = defineStore("ghrah-context-usage", () => {
   return {
     entries,
     onContextUsageUpdated,
+    restoreSnapshot,
     usageFor,
     clearAgent,
     clearProject,

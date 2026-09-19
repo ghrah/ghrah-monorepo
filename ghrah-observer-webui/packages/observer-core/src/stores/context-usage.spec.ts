@@ -141,4 +141,47 @@ describe("useContextUsageStore", () => {
     store.clearAll();
     expect(store.entries.size).toBe(0);
   });
+
+  it("restoreSnapshot directly sets snapshot slots and cumulative values", () => {
+    const store = useContextUsageStore();
+    // 刷新后 store 为空：恢复直置 latest/latestPostCall/cumulative
+    const restored = store.restoreSnapshot(
+      payload({ real_input_tokens: 500, real_output_tokens: 50 }),
+      { input: 3500, output: 300, cache_read: 2000 },
+      100,
+    );
+    expect(restored).toBe(true);
+    const display = store.usageFor({ projectId: "p1", agentId: "a1" });
+    expect(display?.realInputTokens).toBe(500);
+    expect(display?.realOutputTokens).toBe(50);
+    expect(display?.cumulativeInputTokens).toBe(3500);
+    expect(display?.cumulativeOutputTokens).toBe(300);
+    expect(display?.cumulativeCacheReadTokens).toBe(2000);
+    // latestPostCall 槽恢复（breakdown 展示依赖）
+    const entry = store.entries.get(JSON.stringify(["p1", "a1"]));
+    expect(entry?.latestPostCall?.realInputTokens).toBe(500);
+  });
+
+  it("restoreSnapshot skips stale restore when realtime event is newer", () => {
+    const store = useContextUsageStore();
+    // 实时事件先到（t=200），恢复回执较旧（t=100）：不回退快照
+    store.onContextUsageUpdated(payload({ real_input_tokens: 999, occupied_tokens: 999 }), 200);
+    const restored = store.restoreSnapshot(
+      payload({ real_input_tokens: 500 }),
+      { input: 3500, output: 300, cache_read: 2000 },
+      100,
+    );
+    expect(restored).toBe(false);
+    const display = store.usageFor({ projectId: "p1", agentId: "a1" });
+    expect(display?.realInputTokens).toBe(999);
+    expect(display?.cumulativeInputTokens).toBe(999);
+  });
+
+  it("restoreSnapshot rejects payloads without identity", () => {
+    const store = useContextUsageStore();
+    expect(
+      store.restoreSnapshot(payload({ project_id: "" }), { input: 1, output: 1, cache_read: 1 }),
+    ).toBe(false);
+    expect(store.entries.size).toBe(0);
+  });
 });

@@ -12,6 +12,7 @@ import {
   CommandType,
   EventType,
   GetChainHistoryPayloadSchema,
+  GetAgentInfoPayloadSchema,
   type HITLRequestPayload,
   HITLResponsePayloadSchema,
   ListAgentsPayloadSchema,
@@ -134,6 +135,11 @@ export class MockState {
   private readonly _simulateChains: boolean;
   private readonly _chainTimers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly _chainIterations = new Map<string, number>();
+  // 累计用量模拟（成本口径）：post_call 模拟时累加，链模拟停止后保留供 get_agent_info 恢复
+  private readonly _cumulativeUsage = new Map<
+    string,
+    { input: number; output: number; cache_read: number }
+  >();
   private readonly _hitlTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(options: MockStateOptions = {}) {
@@ -263,6 +269,8 @@ export class MockState {
         return this._parse(ListAgentsPayloadSchema, rawPayload, (p) =>
           this._listAgents(p.project_id),
         );
+      case CommandType.GET_AGENT_INFO:
+        return this._parse(GetAgentInfoPayloadSchema, rawPayload, (p) => this._getAgentInfo(p));
       case CommandType.HEALTH_CHECK:
         return ok({ status: "ok" });
 
@@ -878,6 +886,40 @@ export class MockState {
     return ok({ executed: true, node_id: node.id, trigger_source: "manual" });
   }
 
+  private _getAgentInfo(p: { project_id: string; agent_id: string; name: string }): CommandOutcome {
+    const agent = this.agents.get(agentKey(p.project_id, p.agent_id));
+    if (!agent) return fail(`agent not found: ${p.agent_id}`);
+    const key = agentKey(p.project_id, p.agent_id);
+    const cumulative = this._cumulativeUsage.get(key) ?? { input: 0, output: 0, cache_read: 0 };
+    const context_usage =
+      cumulative.input > 0
+        ? {
+            phase: "post_call",
+            occupied_tokens: null,
+            basis: "anchor",
+            budget_tokens: 8192,
+            budget_source: "declared",
+            compact_threshold: 0.8,
+            real_input_tokens: null,
+            real_output_tokens: null,
+            real_cache_read_tokens: null,
+            real_cache_write_tokens: null,
+            cumulative_input_tokens: cumulative.input,
+            cumulative_output_tokens: cumulative.output,
+            cumulative_cache_read_tokens: cumulative.cache_read,
+          }
+        : null;
+    return ok({
+      name: agent.name,
+      state: { name: agent.name, initialized: true, runtime_state: agent.runtimeState },
+      abilities: [],
+      context_usage,
+      project_id: p.project_id,
+      agent_id: p.agent_id,
+      cluster_id: agent.clusterId ?? "",
+    });
+  }
+
   private _actionState(p: {
     project_id: string;
     agent_id: string;
@@ -1294,6 +1336,7 @@ export class MockState {
 
   private _startChainSimulation(key: string): void {
     this._chainIterations.set(key, 0);
+    this._cumulativeUsage.set(key, { input: 0, output: 0, cache_read: 0 });
     const timer = setInterval(() => {
       const agent = this.agents.get(key);
       if (agent?.runtimeState !== "running") {
@@ -1418,6 +1461,13 @@ export class MockState {
         },
         iteration: iteration,
       });
+      // 累计用量同步累加（与真实 Core record_real_usage 口径一致）
+      const cumulative = this._cumulativeUsage.get(key);
+      if (cumulative != null) {
+        cumulative.input += usageOccupied + 400;
+        cumulative.output += 180;
+        cumulative.cache_read += Math.floor((usageOccupied + 400) * 0.7);
+      }
     }, this._chainIntervalMs);
     this._chainTimers.set(key, timer);
   }

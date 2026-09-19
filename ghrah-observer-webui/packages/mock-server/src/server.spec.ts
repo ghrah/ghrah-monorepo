@@ -836,6 +836,20 @@ describe("mock-server 协议层", () => {
       expect(postPayload.real_cache_read_tokens).toBeLessThan(
         postPayload.real_input_tokens as number,
       );
+
+      // 恢复通道：get_agent_info 回执携带累计用量（与 post_call 模拟同源累加）
+      const info = await request(client, CommandType.GET_AGENT_INFO, {
+        project_id: projectId,
+        agent_id: "usage-agent-id",
+        name: "planner",
+      });
+      expect(info.success).toBe(true);
+      const usage = (info.data as { context_usage: Record<string, unknown> }).context_usage;
+      expect(usage).not.toBeNull();
+      expect(usage.cumulative_input_tokens).toBeGreaterThanOrEqual(
+        postPayload.real_input_tokens as number,
+      );
+      expect(usage.cumulative_output_tokens).toBeGreaterThan(0);
     } finally {
       await client.disconnect();
       await chainServer.close();

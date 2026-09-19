@@ -127,6 +127,14 @@ class ContextManager:
         # 最近一次主循环真实 input_tokens 锚点；None 表示尚无可靠锚点
         self._window_occupied: int | None = None
         self._last_real_input_tokens: int | None = None
+        # 最近一次调用完整用量留存（get_agent_info 恢复通道数据源）
+        self._last_real_output_tokens: int | None = None
+        self._last_real_cache_read_tokens: int | None = None
+        self._last_real_cache_write_tokens: int | None = None
+        # 累计真实用量（成本口径：compact 不清零，reset 随 ContextManager 重建归零）
+        self._cumulative_input_tokens: int = 0
+        self._cumulative_output_tokens: int = 0
+        self._cumulative_cache_read_tokens: int = 0
         # 手动 compact 请求标志（B/H 节接线消费）
         self._compact_requested: bool = False
         # 空窗跳过标志（振荡防护第二形态）：阈值触发的 compact 回合发现
@@ -955,6 +963,24 @@ class ContextManager:
         # 新真实锚点重新武装阈值触发（清除空窗跳过标志）
         self._compact_skip_until_reanchor = False
 
+    def record_real_usage(self, usage: Any) -> None:
+        """记录最近一次主循环真实 LLM 调用的完整用量。
+
+        在锚点语义（record_window_occupied）之上扩展：留存 output/cache
+        拆分并累计三值（成本口径）。锚点失效（回滚/head 变更）只清
+        occupied 锚点，本方法的留存与累计不受影响。
+
+        Args:
+            usage: 首响应的 TokenUsage（多响应取首响应）
+        """
+        self.record_window_occupied(usage.input_tokens)
+        self._last_real_output_tokens = usage.output_tokens
+        self._last_real_cache_read_tokens = usage.cache_read_tokens
+        self._last_real_cache_write_tokens = usage.cache_write_tokens
+        self._cumulative_input_tokens += usage.input_tokens
+        self._cumulative_output_tokens += usage.output_tokens
+        self._cumulative_cache_read_tokens += usage.cache_read_tokens
+
     def evaluate_compaction_decision(self) -> dict[str, Any] | None:
         """评估当前是否需要链上 compact，产出决策记录。
 
@@ -1101,6 +1127,12 @@ class ContextManager:
             "compact_keep_recent": self._compact_keep_recent,
             "compact_method": self._compact_method,
             "last_real_input_tokens": self._last_real_input_tokens,
+            "last_real_output_tokens": self._last_real_output_tokens,
+            "last_real_cache_read_tokens": self._last_real_cache_read_tokens,
+            "last_real_cache_write_tokens": self._last_real_cache_write_tokens,
+            "cumulative_input_tokens": self._cumulative_input_tokens,
+            "cumulative_output_tokens": self._cumulative_output_tokens,
+            "cumulative_cache_read_tokens": self._cumulative_cache_read_tokens,
         }
 
     def peek_pending_compaction(self) -> list[dict[str, Any]]:

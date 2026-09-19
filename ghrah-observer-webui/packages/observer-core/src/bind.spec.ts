@@ -1372,6 +1372,11 @@ describe("connectStores", () => {
           data: { nodes },
         } as Awaited<ReturnType<typeof client.getChainHistory>>);
       });
+      const usageSpy = vi.spyOn(client, "getAgentInfo").mockResolvedValue({
+        request_id: "u",
+        success: true,
+        data: { context_usage: null },
+      } as Awaited<ReturnType<typeof client.getAgentInfo>>);
 
       internals(client)._dispatch(
         SystemType.COMMAND_RESULT,
@@ -1411,6 +1416,19 @@ describe("connectStores", () => {
           agentId: "a2",
           sessionId: "s-agent-2",
           branchId: "b-agent-2",
+        });
+      });
+      // 用量恢复读通量与链同步并行发起
+      await vi.waitFor(() => {
+        expect(usageSpy).toHaveBeenCalledWith({
+          projectId: "p1",
+          agentId: "a1",
+          agentName: "agent-1",
+        });
+        expect(usageSpy).toHaveBeenCalledWith({
+          projectId: "p1",
+          agentId: "a2",
+          agentName: "agent-2",
         });
       });
       const firstTarget = chainTarget("agent-1", {
@@ -1581,6 +1599,86 @@ describe("connectStores", () => {
       );
 
       expect(agentsStore.agents.size).toBe(0);
+    });
+
+    it("restores usage snapshot on get_agent_info command_result", async () => {
+      await connectClient();
+      const usage = useContextUsageStore();
+      vi.spyOn(client, "getRequestContext").mockReturnValue({
+        command: CommandType.GET_AGENT_INFO,
+        payload: { project_id: "p1", agent_id: "a1", name: "agent-1" },
+      });
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "restore-usage",
+          success: true,
+          data: {
+            name: "agent-1",
+            context_usage: {
+              phase: "post_call",
+              occupied_tokens: 4096,
+              basis: "anchor",
+              budget_tokens: 8192,
+              budget_source: "declared",
+              compact_threshold: 0.8,
+              real_input_tokens: 4096,
+              real_output_tokens: 200,
+              real_cache_read_tokens: 3200,
+              real_cache_write_tokens: 128,
+              cumulative_input_tokens: 12000,
+              cumulative_output_tokens: 600,
+              cumulative_cache_read_tokens: 9000,
+            },
+          },
+        }),
+      );
+
+      const display = usage.usageFor({ projectId: "p1", agentId: "a1" });
+      expect(display).not.toBeNull();
+      expect(display?.mode).toBe("ratio");
+      expect(display?.percent).toBe(50);
+      expect(display?.realOutputTokens).toBe(200);
+      expect(display?.cumulativeInputTokens).toBe(12000);
+      expect(display?.cumulativeOutputTokens).toBe(600);
+      expect(display?.cumulativeCacheReadTokens).toBe(9000);
+    });
+
+    it("skips usage restore when context_usage is null", async () => {
+      await connectClient();
+      const usage = useContextUsageStore();
+      usage.onContextUsageUpdated(
+        {
+          project_id: "p1",
+          agent_id: "a1",
+          cluster_id: "c1",
+          agent_name: "agent-1",
+          phase: "post_call",
+          occupied_tokens: 100,
+          basis: "real",
+          budget_tokens: 0,
+          real_input_tokens: 100,
+          real_output_tokens: 10,
+        },
+        1,
+      );
+      vi.spyOn(client, "getRequestContext").mockReturnValue({
+        command: CommandType.GET_AGENT_INFO,
+        payload: { project_id: "p1", agent_id: "a1", name: "agent-1" },
+      });
+
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "restore-null",
+          success: true,
+          data: { name: "agent-1", context_usage: null },
+        }),
+      );
+
+      // 免挂载/无记录回执不覆盖既有投影
+      expect(usage.usageFor({ projectId: "p1", agentId: "a1" })?.realInputTokens).toBe(100);
     });
 
     it("ignores failed command_result", async () => {

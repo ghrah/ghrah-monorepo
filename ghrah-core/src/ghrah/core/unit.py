@@ -1200,7 +1200,14 @@ class CoreUnit:
         agent_handle = await supervisor.get_agent_handle(gp.name)
         state = agent_handle.get_state()
         abilities = agent_handle.get_abilities()
-        return self._ok({"name": gp.name, "state": state, "abilities": abilities})
+        return self._ok(
+            {
+                "name": gp.name,
+                "state": state,
+                "abilities": abilities,
+                "context_usage": agent_handle.get_context_usage_snapshot(),
+            }
+        )
 
     async def _handle_agent_compact_context(
         self, payload: dict[str, Any], cmd_ctx: Any

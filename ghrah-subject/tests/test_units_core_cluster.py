@@ -478,6 +478,8 @@ class TestProjectRuntimeStateGuards:
             assert info["success"]
             assert info["data"]["runtime_state"] == "stopped"
             assert info["data"]["agent_id"] == "agent-1"
+            # 免挂载兜底无 runtime 用量，显式置 None（前端跳过覆盖）
+            assert info["data"]["context_usage"] is None
 
             sessions = await unit.handle_command(
                 "session_list",

@@ -812,6 +812,50 @@ class TestWindowOccupancyAnchor:
         assert status["occupied_tokens"] == 1234
         assert status["last_real_input_tokens"] == 1234
 
+    def test_record_real_usage_retains_breakdown_and_accumulates(self) -> None:
+        """record_real_usage 留存 output/cache 拆分并累计三值。"""
+        from ghrah.types.tokens import TokenUsage
+
+        cm = _make_cm()
+        cm.record_real_usage(
+            TokenUsage(
+                input_tokens=100, output_tokens=10, cache_read_tokens=60, cache_write_tokens=5
+            )
+        )
+        cm.record_real_usage(
+            TokenUsage(
+                input_tokens=200, output_tokens=20, cache_read_tokens=120, cache_write_tokens=7
+            )
+        )
+
+        status = cm.get_window_status()
+        assert status["occupied_tokens"] == 200
+        assert status["last_real_input_tokens"] == 200
+        assert status["last_real_output_tokens"] == 20
+        assert status["last_real_cache_read_tokens"] == 120
+        assert status["last_real_cache_write_tokens"] == 7
+        assert status["cumulative_input_tokens"] == 300
+        assert status["cumulative_output_tokens"] == 30
+        assert status["cumulative_cache_read_tokens"] == 180
+
+    def test_rollback_invalidates_anchor_but_keeps_cumulative(self) -> None:
+        """迭代回滚只失效锚点，留存与累计（成本口径）不受影响。"""
+        from ghrah.types.tokens import TokenUsage
+
+        cm = _make_cm()
+        cm.record_real_usage(
+            TokenUsage(
+                input_tokens=500, output_tokens=50, cache_read_tokens=0, cache_write_tokens=0
+            )
+        )
+        cm.begin_iteration()
+        cm.rollback_iteration(RuntimeError("test rollback"))
+
+        status = cm.get_window_status()
+        assert status["occupied_tokens"] is None
+        assert status["last_real_input_tokens"] == 500
+        assert status["cumulative_input_tokens"] == 500
+
     def test_evaluate_decision_returns_none_when_threshold_unset(self) -> None:
         """threshold=None（默认禁用）不参与决策，返回 None。"""
         cm = _make_cm()

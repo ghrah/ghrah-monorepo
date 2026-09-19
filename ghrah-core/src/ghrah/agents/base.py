@@ -1073,7 +1073,7 @@ class ActorAgent:
         # 从未有过锚点则不触发决策，交发送侧安全阀兜底。
         first_usage = token_usages[0] if token_usages else None
         if first_usage is not None:
-            cm.record_window_occupied(first_usage.input_tokens)
+            cm.record_real_usage(first_usage)
 
         # 上下文占用 post_call 事件（所有 agent，真实值口径）
         await self._publish_context_usage("post_call", real_usage=first_usage)
@@ -1566,6 +1566,34 @@ class ActorAgent:
             "state": self._context_manager.get_current_state(),
             "event_publisher_type": type(self._event_publisher).__name__,
             "ability_executor_type": type(self._ability_executor).__name__,
+        }
+
+    def get_context_usage_snapshot(self) -> dict[str, Any]:
+        """组装上下文用量恢复快照（get_agent_info 回执数据源）。
+
+        与 ContextUsageUpdatedPayload 同构（phase 恒为 post_call、basis
+        为 anchor——同步快照即锚点口径），另附 cumulative 三值（成本口径
+        权威累计，前端恢复时直置）。
+
+        Returns:
+            dict：context_usage 子对象；无任何真实调用记录时
+            real_* 全为 None（前端跳过覆盖）
+        """
+        status = self._context_manager.get_window_status()
+        return {
+            "phase": "post_call",
+            "occupied_tokens": status["occupied_tokens"],
+            "basis": status["basis"],
+            "budget_tokens": status["budget_tokens"],
+            "budget_source": status["budget_source"],
+            "compact_threshold": status["compact_threshold"],
+            "real_input_tokens": status["last_real_input_tokens"],
+            "real_output_tokens": status["last_real_output_tokens"],
+            "real_cache_read_tokens": status["last_real_cache_read_tokens"],
+            "real_cache_write_tokens": status["last_real_cache_write_tokens"],
+            "cumulative_input_tokens": status["cumulative_input_tokens"],
+            "cumulative_output_tokens": status["cumulative_output_tokens"],
+            "cumulative_cache_read_tokens": status["cumulative_cache_read_tokens"],
         }
 
     def set_state(self, key: str, value: Any) -> None:

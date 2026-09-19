@@ -283,6 +283,7 @@ class CoreClusterRegistryUnit(SubjectUnit):
                 "system_prompt": agent.get("system_prompt") or "",
                 "abilities": list(agent.get("abilities") or []),
                 "runtime_state": "stopped",
+                "context_usage": None,
                 **identity,
             },
         }

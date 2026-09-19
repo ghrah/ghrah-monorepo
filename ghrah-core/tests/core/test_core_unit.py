@@ -212,6 +212,33 @@ class TestSpawnTerminate:
         agents = await unit.supervisor.list_agents()
         assert [a["name"] for a in agents] == ["agent-1"]
 
+    async def test_get_agent_info_includes_context_usage(self, unit: CoreUnit) -> None:
+        """get_agent_info 回执含 context_usage（恢复通道数据源）。"""
+        from ghrah.types.tokens import TokenUsage
+
+        result = await unit.handle_command("spawn_agent", _spawn_payload("agent-1"), None)
+        assert result["success"] is True
+        actor = _actor_of(unit, "agent-1")
+        actor._context_manager.record_real_usage(
+            TokenUsage(input_tokens=1000, output_tokens=80, cache_read_tokens=600)
+        )
+
+        info = await unit.handle_command(
+            "get_agent_info",
+            {"project_id": "default", "agent_id": "agent-1", "name": "agent-1"},
+            None,
+        )
+        assert info["success"] is True
+        usage = info["data"]["context_usage"]
+        assert usage["phase"] == "post_call"
+        assert usage["occupied_tokens"] == 1000
+        assert usage["real_input_tokens"] == 1000
+        assert usage["real_output_tokens"] == 80
+        assert usage["real_cache_read_tokens"] == 600
+        assert usage["cumulative_input_tokens"] == 1000
+        assert usage["cumulative_output_tokens"] == 80
+        assert usage["cumulative_cache_read_tokens"] == 600
+
     async def test_spawn_emits_agent_spawned(self, unit: CoreUnit, ctx: FakeCtx) -> None:
         await unit.handle_command("spawn_agent", _spawn_payload("agent-1"), None)
         assert f"core:{EventType.AGENT_SPAWNED.value}" in ctx.event_names()
