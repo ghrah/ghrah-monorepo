@@ -542,4 +542,106 @@ describe("ActionChainPanel", () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.findAll(".ac-node.selected")).toHaveLength(0);
   });
+
+  // ── 详情区组合（阶段 3 S2 增补） ──
+
+  it("shows node detail when a canvas node is selected", async () => {
+    const agents = useAgentsStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    setActiveChain("alpha", [
+      {
+        id: "a1",
+        parent_id: null,
+        timestamp: "t1",
+        ability_names: ["write_file"],
+        action_results: [
+          {
+            ability_name: "write_file",
+            action_result: { outcome: "success", data: { file_path: "src/foo.py" } },
+          },
+        ],
+      },
+      { id: "a2", parent_id: "a1", timestamp: "t2" },
+    ]);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
+    await wrapper.vm.$nextTick();
+    // 未选中时占位提示
+    expect(wrapper.find(".ac-detail--empty").exists()).toBe(true);
+
+    await wrapper.findAll(".ac-node")[0].trigger("click");
+    await wrapper.vm.$nextTick();
+    const detail = wrapper.find(".ac-detail");
+    expect(detail.exists()).toBe(true);
+    expect(wrapper.find(".ac-detail--empty").exists()).toBe(false);
+    // write_file 节点渲染出 file_path 表格
+    expect(detail.text()).toContain("src/foo.py");
+    expect(wrapper.findAll(".ac-node.selected")).toHaveLength(1);
+
+    // 再次点击背景清空选中与详情
+    await wrapper.find(".ac-canvas-viewport").trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".ac-detail--empty").exists()).toBe(true);
+  });
+
+  it("clears detail when the viewed session switches", async () => {
+    const agents = useAgentsStore();
+    const sessions = useSessionsStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    const agent = target("alpha");
+    // setActiveChain 会重置 agent 的 session 列表，先建第一条链再补第二个 Session
+    setActiveChain("alpha", [{ id: "a1", parent_id: null, timestamp: "t1" }]);
+    sessions.replaceAgentSessions(agent, [
+      SessionInfoPayloadSchema.parse({
+        session_id: "alpha-session",
+        agent_name: "alpha",
+        root_node_id: "a1",
+        active_branch_id: "alpha-branch",
+      }),
+      SessionInfoPayloadSchema.parse({
+        session_id: "alpha-session-2",
+        agent_name: "alpha",
+        root_node_id: "z1",
+        active_branch_id: "alpha-branch",
+      }),
+    ]);
+    sessions.setActiveSession(agent, "alpha-session");
+    chains_setup2();
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
+    await wrapper.vm.$nextTick();
+    await wrapper.findAll(".ac-node")[0].trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".ac-detail").exists()).toBe(true);
+    expect(wrapper.find(".ac-detail--empty").exists()).toBe(false);
+
+    // 切换 viewed Session：详情随选中更新（选中节点不在新链中 → 占位）
+    await wrapper.get<HTMLSelectElement>(".chain-session-select").setValue("alpha-session-2");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find(".ac-detail--empty").exists()).toBe(true);
+  });
+
+  /** 第二个 Session（alpha-session-2）的单节点链与 branch 夹具。 */
+  function chains_setup2(): void {
+    const session: SessionTarget = { ...target("alpha"), sessionId: "alpha-session-2" };
+    useBranchesStore().replaceSessionBranches(
+      session,
+      [
+        BranchInfoPayloadSchema.parse({
+          branch_id: "alpha-branch",
+          session_id: "alpha-session-2",
+          name: "main",
+          head_node_id: "z1",
+        }),
+      ],
+      { explicitActiveBranchId: "alpha-branch" },
+    );
+    useActionChainsStore().setChain({ ...session, branchId: "alpha-branch" }, [
+      node({
+        id: "z1",
+        parent_id: null,
+        timestamp: "t9",
+        session_id: "alpha-session-2",
+        created_on_branch_id: "alpha-branch",
+      }),
+    ]);
+  }
 });

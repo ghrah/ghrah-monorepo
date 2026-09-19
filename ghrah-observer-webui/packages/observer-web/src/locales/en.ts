@@ -208,6 +208,23 @@ export default {
     compactBadge: "⇕ compact · {source}",
     compactDetail:
       "Summarized {range} · kept {kept} nodes · tokens {before} → {after} · post-check {check}",
+    detailTitle: "Node detail",
+    detailEmpty: "Select a node to inspect its parameters and results",
+    detailParams: "Parameters",
+    detailResults: "Results",
+    detailMessages: "Message delta",
+    detailNoMessages: "No message blocks",
+    detailNoResults: "No action results",
+    detailUnknownData: "Unknown format (JSON)",
+    detailTruncated: "Content truncated ({length} chars shown)",
+    detailMediaPreview: "Media preview",
+    detailToggleJson: "Toggle JSON",
+    detailOutcome: {
+      success: "Success",
+      failure: "Failure",
+      needs_input: "Needs input",
+      delegate: "Delegated",
+    },
   },
   changes: {
     title: "File Changes",

@@ -13,6 +13,7 @@ import { useI18n } from "vue-i18n";
 import { useObserver } from "@/composables/useObserver";
 import { useTabScrollRestore } from "@/composables/useTabScrollRestore";
 import ActionChainCanvas from "./action-chain-canvas.vue";
+import ActionChainDetail from "./action-chain-detail.vue";
 import { layoutGraph } from "./layout-graph.js";
 
 const { t } = useI18n();
@@ -76,9 +77,7 @@ const branchOptions = computed(() =>
 
 function failureOf(
   result:
-    | { error?: string | null; error_detail?: string | null; success: boolean }
-    | null
-    | undefined,
+    { error?: string | null; error_detail?: string | null; success: boolean } | null | undefined,
 ): string {
   return result?.error_detail ?? result?.error ?? t("actionChain.switchFailed");
 }
@@ -214,6 +213,11 @@ const graph = computed(() => layoutGraph(visibleNodes.value, visibleBranches.val
 // 画布选中节点（阶段 3 详情区输入；面板本地持有）
 const selectedNodeId = ref<string | null>(null);
 
+/** 选中节点对象：从可视节点集中取（选中的节点必然在画布上）。 */
+const selectedNode = computed(
+  () => visibleNodes.value.find((item) => item.id === selectedNodeId.value) ?? null,
+);
+
 // 滚动恢复挂接画布内部视口（canvas 组件经 defineExpose 暴露；面板不重复包滚动层）
 const canvasRef = ref<InstanceType<typeof ActionChainCanvas> | null>(null);
 const chainViewport = computed<HTMLElement | null>(() => canvasRef.value?.viewport ?? null);
@@ -231,8 +235,12 @@ const selectBranchValue = computed(() => {
 <template>
   <div class="p-3 h-full flex flex-col">
     <div class="flex items-center justify-between mb-2">
-      <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">{{ t("actionChain.title") }}</h3>
-      <span v-if="selectedAgentName" class="text-xs text-gray-500 dark:text-gray-400">@{{ selectedAgentName }}</span>
+      <h3 class="text-sm font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+        {{ t("actionChain.title") }}
+      </h3>
+      <span v-if="selectedAgentName" class="text-xs text-gray-500 dark:text-gray-400"
+        >@{{ selectedAgentName }}</span
+      >
     </div>
 
     <div v-if="agentTarget" class="flex items-center gap-2 flex-wrap mb-2">
@@ -245,7 +253,11 @@ const selectBranchValue = computed(() => {
           @change="viewSession(($event.target as HTMLSelectElement).value)"
         >
           <option value="" disabled>{{ t("actionChain.selectSession") }}</option>
-          <option v-for="option in sessionOptions" :key="option.target.sessionId" :value="option.target.sessionId">
+          <option
+            v-for="option in sessionOptions"
+            :key="option.target.sessionId"
+            :value="option.target.sessionId"
+          >
             {{ option.info.name || option.target.sessionId }}
             <template v-if="option.target.sessionId === runtimeSessionId">●</template>
           </option>
@@ -270,7 +282,11 @@ const selectBranchValue = computed(() => {
         >
           <option value="" disabled>{{ t("actionChain.selectBranch") }}</option>
           <option value="__all__">{{ t("actionChain.allBranches") }}</option>
-          <option v-for="option in branchOptions" :key="option.target.branchId" :value="option.target.branchId">
+          <option
+            v-for="option in branchOptions"
+            :key="option.target.branchId"
+            :value="option.target.branchId"
+          >
             {{ option.info.name || option.target.branchId }}
             <template v-if="option.target.branchId === runtimeBranchId">●</template>
           </option>
@@ -307,16 +323,27 @@ const selectBranchValue = computed(() => {
       {{ actionError }}
     </div>
 
-    <div v-if="!selectedAgentName" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm italic">
+    <div
+      v-if="!selectedAgentName"
+      class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm italic"
+    >
       {{ t("actionChain.selectAgent") }}
     </div>
 
-    <div v-else-if="graph.nodes.length === 0" class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm italic">
+    <div
+      v-else-if="graph.nodes.length === 0"
+      class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600 text-sm italic"
+    >
       {{ t("actionChain.empty") }}
     </div>
 
-    <div v-else class="flex-1 flex flex-col border border-gray-200 dark:border-gray-700 rounded min-h-0">
-      <div class="px-2 py-1 bg-gray-50 dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
+    <div
+      v-else
+      class="flex-1 flex flex-col border border-gray-200 dark:border-gray-700 rounded min-h-0"
+    >
+      <div
+        class="px-2 py-1 bg-gray-50 dark:bg-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700"
+      >
         @{{ selectedAgentName }}
       </div>
       <ActionChainCanvas
@@ -326,6 +353,8 @@ const selectBranchValue = computed(() => {
         @select="selectedNodeId = $event"
         @scroll="onChainScroll"
       />
+      <!-- 详情区（D4 裁决 A：画布下方展开；selectedNodeId 无效时占位提示） -->
+      <ActionChainDetail :node="selectedNode" />
     </div>
   </div>
 </template>
