@@ -22,6 +22,7 @@ function room(id: string, name: string, agents: string[] = []): RoomInfoPayload 
     members: agents.map((a) => ({
       subject: a,
       subject_type: "agent" as const,
+      subject_name: `Name-${a}`,
       joined_at: "",
     })),
     seq_watermark: 0,
@@ -218,6 +219,29 @@ describe("ChatPanel", () => {
     const headers = wrapper.findAll(".entry-header");
     expect(headers[0].text()).toContain("→ @frontend");
     expect(headers[1].text()).not.toContain("→");
+  });
+
+  it("author/targets 为稳定 ID 时 header 解析为成员显示名", async () => {
+    const { rooms } = setup();
+    rooms.replaceProjectRooms(
+      "p1",
+      [room("r1", "arch", ["447c4313e38242fb8e173bcb68e183ea", "b2a1"])],
+      "active",
+    );
+    rooms.setRoomLog("r1", [
+      logEntry("r1", 1, "447c4313e38242fb8e173bcb68e183ea", "agent", "reply", {
+        targets: ["b2a1"],
+      }),
+      logEntry("r1", 2, "user", "human", "ask", {
+        targets: ["447c4313e38242fb8e173bcb68e183ea"],
+      }),
+    ]);
+    const wrapper = mountPanel("r1");
+    await wrapper.vm.$nextTick();
+    const headers = wrapper.findAll(".entry-header");
+    expect(headers[0].text()).toBe("@Name-447c4313e38242fb8e173bcb68e183ea → @Name-b2a1");
+    expect(headers[1].text()).toContain("→ @Name-447c4313e38242fb8e173bcb68e183ea");
+    expect(headers[1].text()).not.toContain("@447c4313e38242fb8e173bcb68e183ea→");
   });
 
   it("does not send when input is empty", async () => {

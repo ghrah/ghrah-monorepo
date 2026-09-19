@@ -12,6 +12,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useMarkdown } from "@/composables/useMarkdown";
 import { useObserver } from "@/composables/useObserver";
+import { useRoomMemberLabel } from "@/composables/useRoomMemberLabel";
 import { useTabScrollRestore } from "@/composables/useTabScrollRestore";
 import MessageInput from "./message-input.vue";
 
@@ -27,6 +28,7 @@ const connection = useConnectionStore();
 const { roomSend } = useObserver();
 const { render: renderMarkdown } = useMarkdown();
 const { t } = useI18n();
+const memberLabel = useRoomMemberLabel();
 
 const messageContainer = ref<HTMLElement | null>(null);
 
@@ -128,24 +130,36 @@ function entryClass(entry: ChatEntry): string {
   }
 }
 
+/** 成员 ID → 显示名（subject_name / agents store / room 成员表回退原始值）。 */
+function displayName(id: string): string {
+  const projectId = props.projectId;
+  const room = rooms.rooms.get(props.roomId);
+  const member = room?.members.find((m) => m.subject === id);
+  if (member) return memberLabel(member, projectId);
+  return (
+    agents.agentsForProject(projectId).find((a) => a.agentId === id || a.agentName === id)
+      ?.agentName ?? id
+  );
+}
+
 function entryHeader(entry: ChatEntry): string {
   const targetSuffix =
     entry.targets && entry.targets.length > 0
-      ? ` → ${entry.targets.map((t) => `@${t}`).join(" ")}`
+      ? ` → ${entry.targets.map((t) => `@${displayName(t)}`).join(" ")}`
       : "";
   switch (entry.kind) {
     case "human_input":
       return `${t("chat.header.you")}${targetSuffix}`;
     case "conversation":
-      return `@${entry.from}${targetSuffix}`;
+      return `@${displayName(entry.from)}${targetSuffix}`;
     case "send_message":
-      return `@${entry.from} → @${entry.to}`;
+      return `@${displayName(entry.from)} → @${displayName(entry.to)}`;
     case "broadcast":
-      return `@${entry.from} → @${t("chat.header.all")}`;
+      return `@${displayName(entry.from)} → @${t("chat.header.all")}`;
     case "end_task":
-      return `✓ @${entry.from}`;
+      return `✓ @${displayName(entry.from)}`;
     default:
-      return `@${entry.from}`;
+      return `@${displayName(entry.from)}`;
   }
 }
 
