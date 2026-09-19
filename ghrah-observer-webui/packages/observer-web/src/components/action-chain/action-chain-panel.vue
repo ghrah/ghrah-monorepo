@@ -12,8 +12,10 @@ import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useObserver } from "@/composables/useObserver";
 import { useTabScrollRestore } from "@/composables/useTabScrollRestore";
+import ActionChainBranchBar from "./action-chain-branch-bar.vue";
 import ActionChainCanvas from "./action-chain-canvas.vue";
 import ActionChainDetail from "./action-chain-detail.vue";
+import ActionChainSessionPicker from "./action-chain-session-picker.vue";
 import { layoutGraph } from "./layout-graph.js";
 
 const { t } = useI18n();
@@ -26,7 +28,16 @@ const chains = useActionChainsStore();
 const agents = useAgentsStore();
 const sessions = useSessionsStore();
 const branches = useBranchesStore();
-const { activateSession, activateBranch, createSession, createBranch } = useObserver();
+const {
+  activateSession,
+  activateBranch,
+  createSession,
+  createBranch,
+  archiveSession,
+  deleteSession,
+  archiveBranch,
+  deleteBranch,
+} = useObserver();
 
 // store 中的 AgentInfo 含 clusterId/config 等额外字段，对外（RPC/store 键）只投影纯 AgentTarget
 const agentTarget = computed<AgentTarget>(() => {
@@ -37,7 +48,16 @@ const agentTarget = computed<AgentTarget>(() => {
 });
 const selectedAgentName = computed(() => agentTarget.value.agentName);
 
-type SwitchKind = "session" | "branch" | "new-session" | "new-branch";
+type SwitchKind =
+  | "session"
+  | "branch"
+  | "new-session"
+  | "new-branch"
+  | "archive-session"
+  | "delete-session"
+  | "archive-branch"
+  | "delete-branch"
+  | "retry";
 const switching = ref<SwitchKind | null>(null);
 const actionError = ref<string | null>(null);
 
@@ -173,6 +193,92 @@ async function startBranch() {
   }
 }
 
+// ── 显式管理动作（confirm + 命令；成功后 store 由事件面推进，此处不写投影） ──
+
+async function confirmArchiveSession() {
+  const session = viewedSessionTarget.value;
+  if (!session) return;
+  if (!window.confirm(t("actionChain.archiveSessionConfirm"))) return;
+  switching.value = "archive-session";
+  actionError.value = null;
+  try {
+    const result = await archiveSession(session);
+    if (!result?.success) actionError.value = failureOf(result);
+  } finally {
+    switching.value = null;
+  }
+}
+
+async function confirmDeleteSession() {
+  const session = viewedSessionTarget.value;
+  if (!session || session.sessionId === runtimeSessionId.value) return;
+  if (!window.confirm(t("actionChain.deleteSessionConfirm"))) return;
+  switching.value = "delete-session";
+  actionError.value = null;
+  try {
+    const result = await deleteSession(session);
+    if (!result?.success) actionError.value = failureOf(result);
+  } finally {
+    switching.value = null;
+  }
+}
+
+async function confirmArchiveBranch() {
+  const session = viewedSessionTarget.value;
+  const branchId = viewedBranchSelection.value;
+  if (!session || !branchId) return;
+  if (!window.confirm(t("actionChain.archiveBranchConfirm"))) return;
+  switching.value = "archive-branch";
+  actionError.value = null;
+  try {
+    const result = await archiveBranch({ ...session, branchId });
+    if (!result?.success) actionError.value = failureOf(result);
+  } finally {
+    switching.value = null;
+  }
+}
+
+async function confirmDeleteBranch() {
+  const session = viewedSessionTarget.value;
+  const branchId = viewedBranchSelection.value;
+  if (!session || !branchId || branchId === runtimeBranchId.value) return;
+  if (!window.confirm(t("actionChain.deleteBranchConfirm"))) return;
+  switching.value = "delete-branch";
+  actionError.value = null;
+  try {
+    const result = await deleteBranch({ ...session, branchId });
+    if (!result?.success) actionError.value = failureOf(result);
+  } finally {
+    switching.value = null;
+  }
+}
+
+/** 从选中节点重试：confirm → createBranch(fromNodeId)；成功后仅切查看（D6），绝不隐式激活。 */
+async function retryFromSelectedNode() {
+  const session = viewedSessionTarget.value;
+  const node = selectedNode.value;
+  if (!session || !node?.id) return;
+  if (!window.confirm(t("actionChain.retryFromNodeConfirm"))) return;
+  switching.value = "retry";
+  actionError.value = null;
+  try {
+    // n = 当前 Session 非 deleted Branch 数 + 1
+    const count = branches
+      .branchesForSession(session)
+      .filter((item) => item.info.lifecycle !== "deleted").length;
+    const name = t("actionChain.retryBranchName", { index: count + 1 });
+    const result = await createBranch(session, name, { fromNodeId: node.id });
+    if (!result?.success) {
+      actionError.value = failureOf(result);
+      return;
+    }
+    const data = result.data as { branch_id?: string } | null;
+    if (data?.branch_id) branches.viewBranch(session, data.branch_id);
+  } finally {
+    switching.value = null;
+  }
+}
+
 // ── 可视节点（getVisibleNodes：viewed Session + viewed/runtime Branch 回溯） ──
 const visibleNodes = computed(() => {
   const agent = agentTarget.value;
@@ -244,79 +350,29 @@ const selectBranchValue = computed(() => {
     </div>
 
     <div v-if="agentTarget" class="flex items-center gap-2 flex-wrap mb-2">
-      <label class="text-xs text-gray-500 dark:text-gray-400">
-        {{ t("actionChain.session") }}
-        <select
-          class="chain-session-select text-xs rounded-sm border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
-          :value="viewedSessionId ?? ''"
-          :disabled="switching !== null"
-          @change="viewSession(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="" disabled>{{ t("actionChain.selectSession") }}</option>
-          <option
-            v-for="option in sessionOptions"
-            :key="option.target.sessionId"
-            :value="option.target.sessionId"
-          >
-            {{ option.info.name || option.target.sessionId }}
-            <template v-if="option.target.sessionId === runtimeSessionId">●</template>
-          </option>
-        </select>
-      </label>
-      <button
-        v-if="viewedSessionId && viewedSessionId !== runtimeSessionId"
-        type="button"
-        class="chain-activate-session text-xs underline text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+      <ActionChainSessionPicker
+        :sessions="sessionOptions"
+        :viewed-session-id="viewedSessionId"
+        :runtime-session-id="runtimeSessionId"
         :disabled="switching !== null"
-        @click="confirmActivateSession"
-      >
-        {{ t("actionChain.activateSession") }}
-      </button>
-      <label v-if="viewedSessionTarget" class="text-xs text-gray-500 dark:text-gray-400">
-        {{ t("actionChain.branch") }}
-        <select
-          class="chain-branch-select text-xs rounded-sm border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
-          :value="selectBranchValue"
-          :disabled="switching !== null || !viewedSessionTarget"
-          @change="viewBranch(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="" disabled>{{ t("actionChain.selectBranch") }}</option>
-          <option value="__all__">{{ t("actionChain.allBranches") }}</option>
-          <option
-            v-for="option in branchOptions"
-            :key="option.target.branchId"
-            :value="option.target.branchId"
-          >
-            {{ option.info.name || option.target.branchId }}
-            <template v-if="option.target.branchId === runtimeBranchId">●</template>
-          </option>
-        </select>
-      </label>
-      <button
-        v-if="viewedBranchSelection && viewedBranchSelection !== runtimeBranchId"
-        type="button"
-        class="chain-activate-branch text-xs underline text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-        :disabled="switching !== null || !viewedSessionTarget"
-        @click="confirmActivateBranch"
-      >
-        {{ t("actionChain.activateBranch") }}
-      </button>
-      <button
-        type="button"
-        class="chain-new-session text-xs underline text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+        @view="viewSession"
+        @activate="confirmActivateSession"
+        @archive="confirmArchiveSession"
+        @remove="confirmDeleteSession"
+        @create="startSession"
+      />
+      <ActionChainBranchBar
+        v-if="viewedSessionTarget"
+        :branches="branchOptions"
+        :selected-value="selectBranchValue"
+        :runtime-branch-id="runtimeBranchId"
         :disabled="switching !== null"
-        @click="startSession"
-      >
-        {{ t("actionChain.newSession") }}
-      </button>
-      <button
-        type="button"
-        class="chain-new-branch text-xs underline text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
-        :disabled="switching !== null || !viewedSessionTarget"
-        @click="startBranch"
-      >
-        {{ t("actionChain.newBranch") }}
-      </button>
+        @view="viewBranch"
+        @activate="confirmActivateBranch"
+        @archive="confirmArchiveBranch"
+        @remove="confirmDeleteBranch"
+        @create="startBranch"
+      />
     </div>
 
     <div v-if="actionError" class="mb-2 text-xs text-red-600 dark:text-red-400" role="alert">
@@ -354,7 +410,19 @@ const selectBranchValue = computed(() => {
         @scroll="onChainScroll"
       />
       <!-- 详情区（D4 裁决 A：画布下方展开；selectedNodeId 无效时占位提示） -->
-      <ActionChainDetail :node="selectedNode" />
+      <div class="ac-detail-wrap">
+        <ActionChainDetail :node="selectedNode" />
+        <div v-if="selectedNode" class="ac-detail-actions">
+          <button
+            type="button"
+            class="chain-retry-from-node text-xs underline text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+            :disabled="switching !== null"
+            @click="retryFromSelectedNode"
+          >
+            {{ t("actionChain.retryFromNode") }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

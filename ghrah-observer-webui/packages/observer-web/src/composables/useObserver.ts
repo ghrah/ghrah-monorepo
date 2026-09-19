@@ -267,6 +267,14 @@ export function useObserver() {
     return withClient((c) => c.activateSession(target));
   }
 
+  async function archiveSession(target: SessionTarget) {
+    return withClient((c) => c.archiveSession(target));
+  }
+
+  async function deleteSession(target: SessionTarget) {
+    return withClient((c) => c.deleteSession(target));
+  }
+
   async function listBranches(target: SessionTarget) {
     return withClient((c) => c.listBranches(target));
   }
@@ -286,6 +294,14 @@ export function useObserver() {
 
   async function activateBranch(target: ChainTarget) {
     return withClient((c) => c.activateBranch(target));
+  }
+
+  async function archiveBranch(target: ChainTarget) {
+    return withClient((c) => c.archiveBranch(target));
+  }
+
+  async function deleteBranch(target: ChainTarget) {
+    return withClient((c) => c.deleteBranch(target));
   }
 
   /** 切换 active room；缓存缺失时拉历史。 */
@@ -444,9 +460,13 @@ export function useObserver() {
     listSessions,
     createSession,
     activateSession,
+    archiveSession,
+    deleteSession,
     listBranches,
     createBranch,
     activateBranch,
+    archiveBranch,
+    deleteBranch,
     switchRoom,
     switchProject,
     selectAgent,

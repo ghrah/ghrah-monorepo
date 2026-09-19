@@ -24,9 +24,22 @@ const activateSession = vi.fn();
 const activateBranch = vi.fn();
 const createSession = vi.fn();
 const createBranch = vi.fn();
+const archiveSession = vi.fn();
+const deleteSession = vi.fn();
+const archiveBranch = vi.fn();
+const deleteBranch = vi.fn();
 
 vi.mock("@/composables/useObserver", () => ({
-  useObserver: () => ({ activateSession, activateBranch, createSession, createBranch }),
+  useObserver: () => ({
+    activateSession,
+    activateBranch,
+    createSession,
+    createBranch,
+    archiveSession,
+    deleteSession,
+    archiveBranch,
+    deleteBranch,
+  }),
 }));
 
 import ActionChainPanel from "./action-chain-panel.vue";
@@ -106,7 +119,16 @@ function setActiveChain(name: string, overrides: Partial<ActionNode>[]) {
 describe("ActionChainPanel", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
-    for (const mock of [activateSession, activateBranch, createSession, createBranch]) {
+    for (const mock of [
+      activateSession,
+      activateBranch,
+      createSession,
+      createBranch,
+      archiveSession,
+      deleteSession,
+      archiveBranch,
+      deleteBranch,
+    ]) {
       mock.mockReset();
       mock.mockResolvedValue({ success: true });
     }
@@ -643,5 +665,206 @@ describe("ActionChainPanel", () => {
         created_on_branch_id: "alpha-branch",
       }),
     ]);
+  }
+
+  // ── S3：管理操作（归档/删除）与从此节点重试 ──
+
+  it("archives the viewed session with confirmation and correct scope", async () => {
+    const agents = useAgentsStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    setActiveChain("alpha", [{ id: "a1", parent_id: null, timestamp: "t1" }]);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
+    await wrapper.vm.$nextTick();
+
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    await wrapper.get("button.chain-archive-session").trigger("click");
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(archiveSession).toHaveBeenCalledWith({
+      ...target("alpha"),
+      sessionId: "alpha-session",
+    });
+
+    // 拒绝确认不发命令
+    confirm.mockReturnValue(false);
+    await wrapper.get("button.chain-archive-session").trigger("click");
+    expect(archiveSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("archives and deletes the viewed branch with correct scope", async () => {
+    const agents = useAgentsStore();
+    const branches = useBranchesStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    const agent = target("alpha");
+    const session: SessionTarget = { ...agent, sessionId: "alpha-session" };
+    sessions_setupTwoBranches();
+    const wrapper = mount(ActionChainPanel, { props: { agent } });
+    await wrapper.vm.$nextTick();
+
+    // viewed Branch 初始回退 runtime（alpha-branch），切到第二个 Branch 后操作
+    await wrapper.get<HTMLSelectElement>(".chain-branch-select").setValue("alpha-branch-2");
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await wrapper.get("button.chain-archive-branch").trigger("click");
+    expect(archiveBranch).toHaveBeenCalledWith({ ...session, branchId: "alpha-branch-2" });
+
+    await wrapper.get("button.chain-delete-branch").trigger("click");
+    expect(deleteBranch).toHaveBeenCalledWith({ ...session, branchId: "alpha-branch-2" });
+
+    // 运行 Branch（runtime = alpha-branch）删除禁用
+    await wrapper.get<HTMLSelectElement>(".chain-branch-select").setValue("alpha-branch");
+    const deleteBtn = wrapper.get<HTMLButtonElement>("button.chain-delete-branch");
+    expect(deleteBtn.attributes("disabled")).toBeDefined();
+    expect(branches.activeBranchId(session)).toBe("alpha-branch");
+  });
+
+  it("disables deleting the running session", async () => {
+    const agents = useAgentsStore();
+    const sessions = useSessionsStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    setActiveChain("alpha", [{ id: "a1", parent_id: null, timestamp: "t1" }]);
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
+    await wrapper.vm.$nextTick();
+    // 单 Session：viewed = runtime → 删除禁用
+    expect(sessions.activeSessionId(target("alpha"))).toBe("alpha-session");
+    const btn = wrapper.get<HTMLButtonElement>("button.chain-delete-session");
+    expect(btn.attributes("disabled")).toBeDefined();
+  });
+
+  it("deletes a non-running session with confirmation", async () => {
+    const agents = useAgentsStore();
+    const sessions = useSessionsStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    const agent = target("alpha");
+    setActiveChain("alpha", [{ id: "a1", parent_id: null, timestamp: "t1" }]);
+    sessions.replaceAgentSessions(agent, [
+      SessionInfoPayloadSchema.parse({
+        session_id: "alpha-session",
+        agent_name: "alpha",
+        root_node_id: "a1",
+        active_branch_id: "alpha-branch",
+      }),
+      SessionInfoPayloadSchema.parse({
+        session_id: "alpha-session-2",
+        agent_name: "alpha",
+        root_node_id: "z1",
+        active_branch_id: "alpha-branch",
+      }),
+    ]);
+    sessions.setActiveSession(agent, "alpha-session");
+    chains_setup2();
+
+    const wrapper = mount(ActionChainPanel, { props: { agent } });
+    await wrapper.vm.$nextTick();
+    await wrapper.get<HTMLSelectElement>(".chain-session-select").setValue("alpha-session-2");
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await wrapper.get("button.chain-delete-session").trigger("click");
+    expect(deleteSession).toHaveBeenCalledWith({ ...agent, sessionId: "alpha-session-2" });
+    // 运行态不被触碰
+    expect(sessions.activeSessionId(agent)).toBe("alpha-session");
+  });
+
+  it("retries from the selected node: createBranch(fromNodeId) only, no implicit activate", async () => {
+    const agents = useAgentsStore();
+    const branches = useBranchesStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    setActiveChain("alpha", [
+      { id: "a1", parent_id: null, timestamp: "t1" },
+      { id: "a2", parent_id: "a1", timestamp: "t2" },
+    ]);
+    createBranch.mockResolvedValue({ success: true, data: { branch_id: "alpha-branch-2" } });
+
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
+    await wrapper.vm.$nextTick();
+    // 未选中节点时无重试入口
+    expect(wrapper.find("button.chain-retry-from-node").exists()).toBe(false);
+
+    await wrapper.findAll(".ac-node")[1].trigger("click");
+    await wrapper.vm.$nextTick();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await wrapper.get("button.chain-retry-from-node").trigger("click");
+
+    // 重试 = createBranch(fromNodeId)，绝不 sessionCreate / activate*
+    const session: SessionTarget = { ...target("alpha"), sessionId: "alpha-session" };
+    expect(createBranch).toHaveBeenCalledWith(session, "retry-2", { fromNodeId: "a2" });
+    expect(createSession).not.toHaveBeenCalled();
+    expect(activateSession).not.toHaveBeenCalled();
+    expect(activateBranch).not.toHaveBeenCalled();
+    // 成功后仅 viewBranch 切展示（D6）
+    expect(branches.viewedBranchId(session)).toBe("alpha-branch-2");
+    // 运行 Branch 不动
+    expect(branches.activeBranchId(session)).toBe("alpha-branch");
+  });
+
+  it("shows failure receipts for management actions without moving viewed/runtime pointers", async () => {
+    const agents = useAgentsStore();
+    const sessions = useSessionsStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    setActiveChain("alpha", [
+      { id: "a1", parent_id: null, timestamp: "t1" },
+      { id: "a2", parent_id: "a1", timestamp: "t2" },
+    ]);
+    const agent = target("alpha");
+    const session: SessionTarget = { ...agent, sessionId: "alpha-session" };
+
+    // 归档失败：回执展示，列表不移除、viewed 不动
+    archiveSession.mockResolvedValue({
+      success: false,
+      error: "session is active",
+      error_detail: "cannot archive the active session",
+    });
+    const wrapper = mount(ActionChainPanel, { props: { agent } });
+    await wrapper.vm.$nextTick();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await wrapper.get("button.chain-archive-session").trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('[role="alert"]').text()).toContain("cannot archive the active session");
+    expect(sessions.sessionsForAgent(agent).map((s) => s.target.sessionId)).toContain(
+      "alpha-session",
+    );
+
+    // 重试失败：回执展示，不切 viewed Branch
+    createBranch.mockResolvedValue({
+      success: false,
+      error: "fork node not found",
+      error_detail: "fork node is not readable",
+    });
+    await wrapper.findAll(".ac-node")[0].trigger("click");
+    await wrapper.vm.$nextTick();
+    await wrapper.get("button.chain-retry-from-node").trigger("click");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get('[role="alert"]').text()).toContain("fork node is not readable");
+    expect(useBranchesStore().viewedBranchId(session)).not.toBe("alpha-branch-2");
+  });
+
+  /** 双 Branch 夹具：alpha-branch（runtime，head=root）+ alpha-branch-2。 */
+  function sessions_setupTwoBranches(): void {
+    const agent = target("alpha");
+    const session: SessionTarget = { ...agent, sessionId: "alpha-session" };
+    useSessionsStore().replaceAgentSessions(agent, [
+      SessionInfoPayloadSchema.parse({
+        session_id: "alpha-session",
+        agent_name: "alpha",
+        root_node_id: "root",
+        active_branch_id: "alpha-branch",
+      }),
+    ]);
+    useSessionsStore().setActiveSession(agent, "alpha-session");
+    useBranchesStore().replaceSessionBranches(
+      session,
+      [
+        BranchInfoPayloadSchema.parse({
+          branch_id: "alpha-branch",
+          session_id: "alpha-session",
+          name: "Branch 1",
+          head_node_id: "root",
+        }),
+        BranchInfoPayloadSchema.parse({
+          branch_id: "alpha-branch-2",
+          session_id: "alpha-session",
+          name: "Branch 2",
+          head_node_id: "root",
+        }),
+      ],
+      { explicitActiveBranchId: "alpha-branch" },
+    );
   }
 });

@@ -2582,6 +2582,21 @@ button:focus-visible,
 
 /* ── ActionChain 详情区（阶段 3 S2；--ac-* token 驱动，零裸色值） ── */
 
+/* 详情容器（S3）：详情 + 操作行（重试入口） */
+.ac-detail-wrap {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ac-detail-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  border-top: 1px solid var(--ac-node-border);
+}
+
 /* 详情面板：画布下方固定高度独立滚动（不与画布视口争用滚动） */
 .ac-detail {
   flex-shrink: 0;
