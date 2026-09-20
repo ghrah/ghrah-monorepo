@@ -306,6 +306,35 @@ describe("ObserverClient", () => {
     });
   });
 
+  describe("agentReset", () => {
+    it("sends agent_reset with stable scope only and links the receipt by request_id", async () => {
+      await connectClient(client, mockWs);
+      mockWs.sent.length = 0;
+
+      const resetPromise = client.agentReset(AGENT_TARGET);
+
+      const parsed = JSON.parse(mockWs.sent[0]);
+      expect(parsed.type).toBe(CommandType.AGENT_RESET);
+      expect(parsed.type).toBe("agent_reset");
+      expect(parsed.payload).toEqual({ project_id: "p1", agent_id: "a1" });
+      expect(parsed.request_id).toBeTruthy();
+
+      mockWs.onmessage!({
+        data: JSON.stringify({
+          type: "command_result",
+          payload: {
+            request_id: parsed.request_id,
+            success: true,
+            data: { session_id: "s2", branch_id: "b2", root_node_id: "n1" },
+          },
+          request_id: parsed.request_id,
+        }),
+      } as MessageEvent);
+      const result = await resetPromise;
+      expect(result?.success).toBe(true);
+    });
+  });
+
   describe("sendHitlResponse", () => {
     it("sends hitl_response and resolves on command_result receipt", async () => {
       await connectClient(client, mockWs);

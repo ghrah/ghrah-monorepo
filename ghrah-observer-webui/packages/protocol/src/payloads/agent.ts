@@ -33,6 +33,11 @@ export const TerminateAgentPayloadSchema = z.object({
   name: z.string(),
 });
 
+export const AgentResetPayloadSchema = z.object({
+  project_id: z.string(),
+  agent_id: z.string(),
+});
+
 export const SendMessagePayloadSchema = z.object({
   project_id: z.string(),
   agent_id: z.string(),
@@ -352,6 +357,7 @@ export type AgentConfigPayload = z.infer<typeof AgentConfigPayloadSchema>;
 export type AbilityDefinitionPayload = z.infer<typeof AbilityDefinitionPayloadSchema>;
 export type SpawnAgentPayload = z.infer<typeof SpawnAgentPayloadSchema>;
 export type TerminateAgentPayload = z.infer<typeof TerminateAgentPayloadSchema>;
+export type AgentResetPayload = z.infer<typeof AgentResetPayloadSchema>;
 export type SendMessagePayload = z.infer<typeof SendMessagePayloadSchema>;
 export type BroadcastMessagePayload = z.infer<typeof BroadcastMessagePayloadSchema>;
 export type RegisterAbilityPayload = z.infer<typeof RegisterAbilityPayloadSchema>;

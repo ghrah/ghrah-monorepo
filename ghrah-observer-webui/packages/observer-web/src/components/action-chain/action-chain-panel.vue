@@ -38,6 +38,7 @@ const {
   deleteSession,
   archiveBranch,
   deleteBranch,
+  agentReset,
 } = useObserver();
 
 // store 中的 AgentInfo 含 clusterId/config 等额外字段，对外（RPC/store 键）只投影纯 AgentTarget
@@ -58,9 +59,11 @@ type SwitchKind =
   | "delete-session"
   | "archive-branch"
   | "delete-branch"
-  | "retry";
+  | "retry"
+  | "reset-agent";
 const switching = ref<SwitchKind | null>(null);
 const actionError = ref<string | null>(null);
+const actionNotice = ref<string | null>(null);
 
 // ── 运行态（runtimeActive*）：只由后端事件/同步结果推进 ──
 const runtimeSessionId = computed(() =>
@@ -280,6 +283,29 @@ async function retryFromSelectedNode() {
   }
 }
 
+/** 重置 Agent：confirm → agentReset；新 Session 实体与运行标记由事件面推进（回执仅提示）。 */
+async function confirmResetAgent() {
+  const agent = agentTarget.value;
+  if (!agent) return;
+  if (!window.confirm(t("actionChain.resetAgentConfirm"))) return;
+  switching.value = "reset-agent";
+  actionError.value = null;
+  actionNotice.value = null;
+  try {
+    const result = await agentReset(agent);
+    if (!result?.success) {
+      actionError.value = failureOf(result);
+      return;
+    }
+    const data = result.data as { session_id?: string } | null;
+    if (data?.session_id) {
+      actionNotice.value = t("actionChain.resetAgentDone", { session: data.session_id });
+    }
+  } finally {
+    switching.value = null;
+  }
+}
+
 // ── 可视节点（getVisibleNodes：viewed Session + viewed/runtime Branch 回溯） ──
 const visibleNodes = computed(() => {
   const agent = agentTarget.value;
@@ -387,10 +413,21 @@ const selectBranchValue = computed(() => {
         @remove="confirmDeleteBranch"
         @create="startBranch"
       />
+      <button
+        type="button"
+        class="chain-reset-agent text-xs underline text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 disabled:opacity-50 disabled:cursor-not-allowed"
+        :disabled="switching !== null"
+        @click="confirmResetAgent"
+      >
+        {{ t("actionChain.resetAgent") }}
+      </button>
     </div>
 
     <div v-if="actionError" class="mb-2 text-xs text-red-600 dark:text-red-400" role="alert">
       {{ actionError }}
+    </div>
+    <div v-else-if="actionNotice" class="mb-2 text-xs text-emerald-600 dark:text-emerald-400">
+      {{ actionNotice }}
     </div>
 
     <div

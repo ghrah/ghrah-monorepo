@@ -28,6 +28,7 @@ const archiveSession = vi.fn();
 const deleteSession = vi.fn();
 const archiveBranch = vi.fn();
 const deleteBranch = vi.fn();
+const agentReset = vi.fn();
 
 vi.mock("@/composables/useObserver", () => ({
   useObserver: () => ({
@@ -39,6 +40,7 @@ vi.mock("@/composables/useObserver", () => ({
     deleteSession,
     archiveBranch,
     deleteBranch,
+    agentReset,
   }),
 }));
 
@@ -128,6 +130,7 @@ describe("ActionChainPanel", () => {
       deleteSession,
       archiveBranch,
       deleteBranch,
+      agentReset,
     ]) {
       mock.mockReset();
       mock.mockResolvedValue({ success: true });
@@ -833,6 +836,69 @@ describe("ActionChainPanel", () => {
     await wrapper.vm.$nextTick();
     expect(wrapper.get('[role="alert"]').text()).toContain("fork node is not readable");
     expect(useBranchesStore().viewedBranchId(session)).not.toBe("alpha-branch-2");
+  });
+
+  // ── S2：重置 Agent（agent_reset 面板入口） ──
+
+  it("resets the agent: confirm gates the command, receipt drives notice only", async () => {
+    const agents = useAgentsStore();
+    const sessions = useSessionsStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    setActiveChain("alpha", [{ id: "a1", parent_id: null, timestamp: "t1" }]);
+    agentReset.mockResolvedValue({
+      success: true,
+      data: { session_id: "alpha-session-2", branch_id: "alpha-branch-2", root_node_id: "r1" },
+    });
+
+    const wrapper = mount(ActionChainPanel, { props: { agent: target("alpha") } });
+    await wrapper.vm.$nextTick();
+
+    // confirm 拒绝 → 零调用
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await wrapper.get("button.chain-reset-agent").trigger("click");
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(agentReset).not.toHaveBeenCalled();
+
+    // 确认 → agentReset(projectId, agentId 口径的 AgentTarget) 恰一次
+    confirm.mockReturnValue(true);
+    await wrapper.get("button.chain-reset-agent").trigger("click");
+    expect(agentReset).toHaveBeenCalledTimes(1);
+    expect(agentReset).toHaveBeenCalledWith(target("alpha"));
+    await wrapper.vm.$nextTick();
+    // 成功提示来自回执 data（仅提示；实体/运行标记由事件面推进）
+    expect(wrapper.text()).toContain("alpha-session-2");
+    // 面板不发运行时切换命令，viewed 指针不动
+    expect(activateSession).not.toHaveBeenCalled();
+    expect(activateBranch).not.toHaveBeenCalled();
+    expect(sessions.viewedSessionId(target("alpha"))).toBe("alpha-session");
+  });
+
+  it("shows reset failure receipts without moving viewed/runtime pointers", async () => {
+    const agents = useAgentsStore();
+    const sessions = useSessionsStore();
+    agents.onAgentSpawned(spawn("alpha"));
+    setActiveChain("alpha", [{ id: "a1", parent_id: null, timestamp: "t1" }]);
+    const agent = target("alpha");
+    agentReset.mockResolvedValue({
+      success: false,
+      error: "reset rejected",
+      error_detail: "Cannot reset agent 'alpha' while its drive loop is active",
+    });
+
+    const wrapper = mount(ActionChainPanel, { props: { agent } });
+    await wrapper.vm.$nextTick();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    await wrapper.get("button.chain-reset-agent").trigger("click");
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      "Cannot reset agent 'alpha' while its drive loop is active",
+    );
+    // 失败回执不改 viewed/runtime 指针
+    expect(sessions.viewedSessionId(agent)).toBe("alpha-session");
+    expect(sessions.activeSessionId(agent)).toBe("alpha-session");
+    // 无成功提示
+    expect(wrapper.text()).not.toContain("resetAgentDone");
   });
 
   /** 双 Branch 夹具：alpha-branch（runtime，head=root）+ alpha-branch-2。 */

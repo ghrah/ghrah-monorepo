@@ -154,6 +154,20 @@ export class ObserverClient extends ServerClient {
     return this.request(msg, 30_000);
   }
 
+  /** agent_reset：wire 载荷恰 {project_id, agent_id}（稳定寻址，无 agent_name）。 */
+  async agentReset(target: AgentTarget): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.AGENT_RESET,
+      payload: {
+        project_id: target.projectId,
+        agent_id: target.agentId,
+      },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
   async sendMessage(
     target: AgentTarget,
     content: string,

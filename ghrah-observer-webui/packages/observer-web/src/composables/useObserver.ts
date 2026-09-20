@@ -161,6 +161,10 @@ export function useObserver() {
     return withClient((c) => c.agentCompactContext(target));
   }
 
+  async function agentReset(target: AgentTarget) {
+    return withClient((c) => c.agentReset(target));
+  }
+
   // ── Room / Project / 导航 ──
 
   /** 人类向 room 发消息（author 默认对齐 DEFAULT_HUMAN_AUTHOR）。 */
@@ -440,6 +444,7 @@ export function useObserver() {
     spawnAgent,
     terminateAgent,
     agentCompactContext,
+    agentReset,
     roomSend,
     listRooms,
     createRoom,

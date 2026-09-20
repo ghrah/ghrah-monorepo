@@ -16,6 +16,7 @@ export enum CommandType {
   DELEGATE = "delegate",
   GET_AGENT_INFO = "get_agent_info",
   AGENT_COMPACT_CONTEXT = "agent_compact_context",
+  AGENT_RESET = "agent_reset",
 
   INIT_CLUSTER = "init_cluster",
   SHUTDOWN_CLUSTER = "shutdown_cluster",
@@ -214,6 +215,7 @@ export const CORE_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.DELEGATE,
   CommandType.GET_AGENT_INFO,
   CommandType.AGENT_COMPACT_CONTEXT,
+  CommandType.AGENT_RESET,
   CommandType.INIT_CLUSTER,
   CommandType.SHUTDOWN_CLUSTER,
   CommandType.CLUSTER_STATUS,

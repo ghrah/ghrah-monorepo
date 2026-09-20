@@ -41,6 +41,7 @@ describe("CommandType", () => {
     "delegate",
     "get_agent_info",
     "agent_compact_context",
+    "agent_reset",
     "init_cluster",
     "shutdown_cluster",
     "cluster_status",
@@ -251,6 +252,7 @@ describe("CORE_COMMANDS", () => {
     "delegate",
     "get_agent_info",
     "agent_compact_context",
+    "agent_reset",
     "init_cluster",
     "shutdown_cluster",
     "cluster_status",
@@ -267,7 +269,7 @@ describe("CORE_COMMANDS", () => {
     "branch_delete",
   ]);
 
-  it("contains exactly 25 core command values", () => {
+  it("contains exactly 26 core command values", () => {
     expect(CORE_COMMANDS).toEqual(PYTHON_CORE_COMMANDS);
   });
 });

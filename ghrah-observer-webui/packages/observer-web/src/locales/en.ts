@@ -212,6 +212,10 @@ export default {
     retryFromNodeConfirm:
       "Create a new branch retrying from this node? The current runtime branch stays unchanged until you activate the new one.",
     retryBranchName: "retry-{index}",
+    resetAgent: "Reset agent",
+    resetAgentConfirm:
+      "Reset this agent? A fresh session becomes the runtime context; existing sessions are kept and remain viewable.",
+    resetAgentDone: "Agent reset. New session {session} is now running.",
     allBranches: "All branches",
     headBadge: "HEAD",
     forkBadge: "FORK",

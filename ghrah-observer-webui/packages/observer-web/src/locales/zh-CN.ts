@@ -205,6 +205,10 @@ export default {
     retryFromNode: "从此节点重试",
     retryFromNodeConfirm: "从该节点新建 Branch 重试？当前运行分支保持不变，需显式激活新分支。",
     retryBranchName: "retry-{index}",
+    resetAgent: "重置 Agent",
+    resetAgentConfirm:
+      "重置该 Agent？将新起 Session 作为运行上下文；既有 Session 全部保留，仍可查看。",
+    resetAgentDone: "已重置 Agent，新 Session {session} 已成为运行上下文。",
     allBranches: "全部 Branch",
     headBadge: "HEAD",
     forkBadge: "FORK",
