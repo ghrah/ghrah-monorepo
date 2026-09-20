@@ -47,6 +47,10 @@ from ghrah.protocol.payloads import (
     ListClustersPayload,
     ManifestAbilityEventPayload,
     ManifestAgentEventPayload,
+    PluginCrashedPayload,
+    PluginLifecyclePayload,
+    PluginNegotiatedPayload,
+    PluginNegotiatePayload,
     ProjectAddAgentPayload,
     ProjectAgentEventPayload,
     ProjectCreatePayload,
@@ -95,6 +99,8 @@ from ghrah.protocol.payloads import (
     TaskAssignPayload,
     TaskBlockPayload,
     TaskCancelPayload,
+    TaskClaimEventPayload,
+    TaskClaimListPayload,
     TaskCompletePayload,
     TaskCreatePayload,
     TaskDeletePayload,
@@ -102,7 +108,9 @@ from ghrah.protocol.payloads import (
     TaskFailPayload,
     TaskIdPayload,
     TaskListPayload,
+    TaskSubmitCompletionPayload,
     TaskUpdatePayload,
+    TaskVerifyPayload,
     TerminateAgentPayload,
     UnregisterAbilityPayload,
     UnsubscribePayload,
@@ -192,6 +200,8 @@ class Envelope(BaseModel):
 #   留待 Stage 2（Subject 插件化）补齐真实 payload。此处 payload 保持裸 dict 透传。
 # - command_result / error / ping / pong 不登记：welcome 包手写 payload 与
 #   CommandResultPayload schema 不符（见 S1.2.5）。此处 payload 保持裸 dict。
+# - plugin_* / task 归因切面例外：契约先行（类型期即登记，消费方在 S2-S4 接线），  ← S1 插件期起
+#   schema 与 wire 已定且经双侧一致性测试覆盖，非"schema 与 wire 不符"的欠账。
 
 
 COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
@@ -239,6 +249,11 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     CommandType.TASK_LIST: TaskListPayload,
     CommandType.TASK_GET: TaskIdPayload,
     CommandType.TASK_DELETE: TaskDeletePayload,
+    # Task 归因切面（3 个；响应经 command_result.data：TaskClaimListResultPayload /
+    # TaskVerificationGapsPayload 有模型但按惯例不登记 result）
+    CommandType.TASK_SUBMIT_COMPLETION: TaskSubmitCompletionPayload,
+    CommandType.TASK_VERIFY: TaskVerifyPayload,
+    CommandType.TASK_LIST_CLAIMS: TaskClaimListPayload,
     # Session 管理（5 个）
     CommandType.SESSION_CREATE: SessionCreatePayload,
     CommandType.SESSION_ACTIVATE: SessionActivatePayload,
@@ -282,6 +297,9 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     # 恢复（2 个）
     CommandType.RECONCILE_NOW: ReconcileNowPayload,
     CommandType.RECONCILE_STATUS: ReconcileStatusPayload,
+    # Plugin 协商（Observer → Subject；响应经 command_result.data =
+    # PluginNegotiateResultPayload，形状由 ghrah-plugin negotiator 单一权威）
+    CommandType.PLUGIN_NEGOTIATE: PluginNegotiatePayload,
 }
 
 EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
@@ -319,6 +337,10 @@ EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
     EventType.TASK_CANCELED: TaskEventPayload,
     EventType.TASK_BLOCKED: TaskEventPayload,
     EventType.TASK_DELETED: TaskEventPayload,
+    # Task 归因事件（3 个；task 附 claim，TaskClaimEventPayload 共用）
+    EventType.TASK_DELIVERED: TaskClaimEventPayload,
+    EventType.TASK_VERIFIED: TaskClaimEventPayload,
+    EventType.TASK_REJECTED: TaskClaimEventPayload,
     # manifest_* 事件 payload 模型存在
     EventType.MANIFEST_ABILITY_CREATED: ManifestAbilityEventPayload,
     EventType.MANIFEST_ABILITY_UPDATED: ManifestAbilityEventPayload,
@@ -350,6 +372,11 @@ EVENT_PAYLOAD_MAP: dict[EventType, type[BaseModel]] = {
     # 恢复事件（2 个）
     EventType.SUBJECT_RECONCILED: ReconcileReportPayload,
     EventType.RECONCILE_FAILED: ReconcileReportPayload,
+    # Plugin 事件（4 个；enabled/disabled 共用 PluginLifecyclePayload）
+    EventType.PLUGIN_ENABLED: PluginLifecyclePayload,
+    EventType.PLUGIN_DISABLED: PluginLifecyclePayload,
+    EventType.PLUGIN_NEGOTIATED: PluginNegotiatedPayload,
+    EventType.PLUGIN_CRASHED: PluginCrashedPayload,
 }
 
 

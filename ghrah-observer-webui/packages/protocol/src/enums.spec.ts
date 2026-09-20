@@ -8,6 +8,7 @@ import {
   EventType,
   MANIFEST_COMMANDS,
   PERSIST_COMMANDS,
+  PLUGIN_COMMANDS,
   PROJECT_COMMANDS,
   ROOM_COMMANDS,
   SESSION_COMMANDS,
@@ -87,6 +88,10 @@ describe("CommandType", () => {
     "task_list",
     "task_get",
     "task_delete",
+    "task_submit_completion",
+    "task_verify",
+    "task_list_claims",
+    "plugin_negotiate",
     "project_create",
     "project_update",
     "project_list",
@@ -171,6 +176,9 @@ describe("EventType", () => {
     "task_canceled",
     "task_blocked",
     "task_deleted",
+    "task_delivered",
+    "task_verified",
+    "task_rejected",
     "project_created",
     "project_updated",
     "project_archived",
@@ -202,9 +210,13 @@ describe("EventType", () => {
     "branch_list_result",
     "subject_reconciled",
     "reconcile_failed",
+    "plugin_enabled",
+    "plugin_disabled",
+    "plugin_negotiated",
+    "plugin_crashed",
   ]);
 
-  it("has exactly 58 values matching Python EventType", () => {
+  it("has exactly 65 values matching Python EventType", () => {
     const tsValues = new Set(Object.values(EventType));
     expect(tsValues).toEqual(PYTHON_EVENT_VALUES);
   });
@@ -358,10 +370,21 @@ describe("TASK_COMMANDS", () => {
     "task_list",
     "task_get",
     "task_delete",
+    "task_submit_completion",
+    "task_verify",
+    "task_list_claims",
   ]);
 
-  it("contains exactly 11 task command values", () => {
+  it("contains exactly 14 task command values", () => {
     expect(TASK_COMMANDS).toEqual(PYTHON_TASK);
+  });
+});
+
+describe("PLUGIN_COMMANDS", () => {
+  const PYTHON_PLUGIN = new Set(["plugin_negotiate"]);
+
+  it("contains exactly 1 plugin command value", () => {
+    expect(PLUGIN_COMMANDS).toEqual(PYTHON_PLUGIN);
   });
 });
 

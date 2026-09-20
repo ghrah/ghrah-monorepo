@@ -573,11 +573,15 @@ name = "ghrah-protocol"
 version = "0.2.0a0"
 source = { editable = "ghrah-protocol" }
 dependencies = [
+    { name = "ghrah-plugin" },
     { name = "pydantic" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.0" }]
+requires-dist = [
+    { name = "ghrah-plugin", editable = "ghrah-plugin" },
+    { name = "pydantic", specifier = ">=2.0" },
+]
 
 [[package]]
 name = "ghrah-subject"

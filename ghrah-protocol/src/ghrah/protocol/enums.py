@@ -138,6 +138,13 @@ class CommandType(StrEnum):
     TASK_LIST = "task_list"
     TASK_GET = "task_get"
     TASK_DELETE = "task_delete"
+    # ─── Task 归因切面（Observer/Core → Subject；完成声明/验收/claims 查询）───
+    TASK_SUBMIT_COMPLETION = "task_submit_completion"
+    TASK_VERIFY = "task_verify"
+    TASK_LIST_CLAIMS = "task_list_claims"
+
+    # ─── Plugin 类（Observer → Subject；协商：L1 通用命令，不挂域前缀）───
+    PLUGIN_NEGOTIATE = "plugin_negotiate"
 
     # ─── Project 管理类（Observer → Subject，15 个）───
     PROJECT_CREATE = "project_create"
@@ -230,6 +237,11 @@ class EventType(StrEnum):
     TASK_BLOCKED = "task_blocked"
     TASK_DELETED = "task_deleted"
 
+    # ─── Task 归因事件（Subject → Observer；claim 附带，completed = 验收通过）───
+    TASK_DELIVERED = "task_delivered"
+    TASK_VERIFIED = "task_verified"
+    TASK_REJECTED = "task_rejected"
+
     # ─── Project 事件（Subject → Observer，11 个）───
     PROJECT_CREATED = "project_created"
     PROJECT_UPDATED = "project_updated"
@@ -257,13 +269,20 @@ class EventType(StrEnum):
     SUBJECT_RECONCILED = "subject_reconciled"
     RECONCILE_FAILED = "reconcile_failed"
 
+    # ─── Plugin 事件（Subject → Observer；协商与崩溃可见性）───
+    PLUGIN_ENABLED = "plugin_enabled"
+    PLUGIN_DISABLED = "plugin_disabled"
+    PLUGIN_NEGOTIATED = "plugin_negotiated"
+    PLUGIN_CRASHED = "plugin_crashed"
+
 
 class TaskStatus(StrEnum):
-    """Task lifecycle state."""
+    """Task lifecycle state（归因状态机：delivered = 已交付待验收，completed = 验收通过）。"""
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     BLOCKED = "blocked"
+    DELIVERED = "delivered"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELED = "canceled"
@@ -309,6 +328,13 @@ class RecoveryAction(StrEnum):
 
 class RoomSubjectType(StrEnum):
     """Room 成员/作者类型。"""
+
+    AGENT = "agent"
+    HUMAN = "human"
+
+
+class ClaimantType(StrEnum):
+    """Task 归因切面：完成声明的 claimant 类型（human|agent）。"""
 
     AGENT = "agent"
     HUMAN = "human"

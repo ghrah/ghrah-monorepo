@@ -71,6 +71,14 @@ export enum CommandType {
   TASK_GET = "task_get",
   TASK_DELETE = "task_delete",
 
+  // Task 归因切面（完成声明/验收/claims 查询）
+  TASK_SUBMIT_COMPLETION = "task_submit_completion",
+  TASK_VERIFY = "task_verify",
+  TASK_LIST_CLAIMS = "task_list_claims",
+
+  // Plugin 协商（L1 通用命令，不挂域前缀）
+  PLUGIN_NEGOTIATE = "plugin_negotiate",
+
   PROJECT_CREATE = "project_create",
   PROJECT_UPDATE = "project_update",
   PROJECT_LIST = "project_list",
@@ -150,6 +158,11 @@ export enum EventType {
   TASK_BLOCKED = "task_blocked",
   TASK_DELETED = "task_deleted",
 
+  // Task 归因事件（claim 附带，completed = 验收通过）
+  TASK_DELIVERED = "task_delivered",
+  TASK_VERIFIED = "task_verified",
+  TASK_REJECTED = "task_rejected",
+
   PROJECT_CREATED = "project_created",
   PROJECT_UPDATED = "project_updated",
   PROJECT_ARCHIVED = "project_archived",
@@ -184,6 +197,12 @@ export enum EventType {
 
   SUBJECT_RECONCILED = "subject_reconciled",
   RECONCILE_FAILED = "reconcile_failed",
+
+  // Plugin 事件（协商与崩溃可见性）
+  PLUGIN_ENABLED = "plugin_enabled",
+  PLUGIN_DISABLED = "plugin_disabled",
+  PLUGIN_NEGOTIATED = "plugin_negotiated",
+  PLUGIN_CRASHED = "plugin_crashed",
 }
 
 export enum SystemType {
@@ -287,7 +306,12 @@ export const TASK_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.TASK_LIST,
   CommandType.TASK_GET,
   CommandType.TASK_DELETE,
+  CommandType.TASK_SUBMIT_COMPLETION,
+  CommandType.TASK_VERIFY,
+  CommandType.TASK_LIST_CLAIMS,
 ]);
+
+export const PLUGIN_COMMANDS: ReadonlySet<string> = new Set([CommandType.PLUGIN_NEGOTIATE]);
 
 export const PROJECT_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.PROJECT_CREATE,

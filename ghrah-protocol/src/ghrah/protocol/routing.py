@@ -157,6 +157,16 @@ TASK_COMMANDS: frozenset[str] = frozenset(
         CommandType.TASK_LIST.value,
         CommandType.TASK_GET.value,
         CommandType.TASK_DELETE.value,
+        CommandType.TASK_SUBMIT_COMPLETION.value,
+        CommandType.TASK_VERIFY.value,
+        CommandType.TASK_LIST_CLAIMS.value,
+    }
+)
+
+
+PLUGIN_COMMANDS: frozenset[str] = frozenset(
+    {
+        CommandType.PLUGIN_NEGOTIATE.value,
     }
 )
 

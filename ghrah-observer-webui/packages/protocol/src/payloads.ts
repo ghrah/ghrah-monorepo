@@ -1,6 +1,7 @@
 export * from "./payloads/agent.js";
 export * from "./payloads/manifest.js";
 export * from "./payloads/persist.js";
+export * from "./payloads/plugin.js";
 export * from "./payloads/project.js";
 export * from "./payloads/room.js";
 export * from "./payloads/session.js";

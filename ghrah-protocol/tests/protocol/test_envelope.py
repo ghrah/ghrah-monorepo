@@ -26,6 +26,8 @@ from ghrah.protocol.types import (
     CORE_COMMANDS,
     EVENT_PAYLOAD_MAP,
     PAYLOAD_MAP,
+    PLUGIN_COMMANDS,
+    TASK_COMMANDS,
     AbilityResultPayload,
     AgentCompactContextPayload,
     AgentResetPayload,
@@ -41,8 +43,16 @@ from ghrah.protocol.types import (
     HealthStatusPayload,
     HITLResolvedPayload,
     HITLResponsePayload,
+    PluginCrashedPayload,
+    PluginLifecyclePayload,
+    PluginNegotiatedPayload,
+    PluginNegotiatePayload,
     SpawnAgentPayload,
     SystemType,
+    TaskClaimEventPayload,
+    TaskClaimListPayload,
+    TaskSubmitCompletionPayload,
+    TaskVerifyPayload,
     create_command_result,
     create_error,
     create_event,
@@ -378,6 +388,35 @@ class TestPayloadMap:
     def test_map_values_are_basemodel_subclasses(self):
         for cls in PAYLOAD_MAP.values():
             assert issubclass(cls, BaseModel)
+
+    def test_plugin_negotiate_registered(self):
+        """plugin_negotiate 命令 + payload 双登记，归入 PLUGIN_COMMANDS。"""
+        assert COMMAND_PAYLOAD_MAP[CommandType.PLUGIN_NEGOTIATE] is PluginNegotiatePayload
+        assert CommandType.PLUGIN_NEGOTIATE.value in PLUGIN_COMMANDS
+
+    def test_plugin_events_registered(self):
+        """plugin_* 4 事件登记（enabled/disabled 共用 lifecycle，crashed 独立）。"""
+        assert EVENT_PAYLOAD_MAP[EventType.PLUGIN_ENABLED] is PluginLifecyclePayload
+        assert EVENT_PAYLOAD_MAP[EventType.PLUGIN_DISABLED] is PluginLifecyclePayload
+        assert EVENT_PAYLOAD_MAP[EventType.PLUGIN_NEGOTIATED] is PluginNegotiatedPayload
+        assert EVENT_PAYLOAD_MAP[EventType.PLUGIN_CRASHED] is PluginCrashedPayload
+
+    def test_task_attribution_commands_registered(self):
+        """task 归因 3 命令登记，归入 TASK_COMMANDS。"""
+        assert (
+            COMMAND_PAYLOAD_MAP[CommandType.TASK_SUBMIT_COMPLETION] is TaskSubmitCompletionPayload
+        )
+        assert COMMAND_PAYLOAD_MAP[CommandType.TASK_VERIFY] is TaskVerifyPayload
+        assert COMMAND_PAYLOAD_MAP[CommandType.TASK_LIST_CLAIMS] is TaskClaimListPayload
+        assert CommandType.TASK_SUBMIT_COMPLETION.value in TASK_COMMANDS
+        assert CommandType.TASK_VERIFY.value in TASK_COMMANDS
+        assert CommandType.TASK_LIST_CLAIMS.value in TASK_COMMANDS
+
+    def test_task_attribution_events_registered(self):
+        """task 归因 3 事件登记，共用 TaskClaimEventPayload。"""
+        assert EVENT_PAYLOAD_MAP[EventType.TASK_DELIVERED] is TaskClaimEventPayload
+        assert EVENT_PAYLOAD_MAP[EventType.TASK_VERIFIED] is TaskClaimEventPayload
+        assert EVENT_PAYLOAD_MAP[EventType.TASK_REJECTED] is TaskClaimEventPayload
 
 
 class TestCompactContextContracts:
