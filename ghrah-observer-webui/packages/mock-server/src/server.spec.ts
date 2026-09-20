@@ -792,6 +792,186 @@ describe("mock-server 协议层", () => {
     }
   }, 10_000);
 
+  it("ActionChain v2 不变量：多 Root 不连边、fork 共享祖先、创建不隐式激活", async () => {
+    const client = await makeClient();
+    const listener = await makeClient();
+    try {
+      const project = await request(client, CommandType.PROJECT_CREATE, {
+        name: "chain-invariants",
+      });
+      const projectId = (project.data as { project: { project_id: string } }).project.project_id;
+      await request(client, CommandType.SPAWN_AGENT, {
+        project_id: projectId,
+        config: { name: "coder", agent_id: "invariants-agent-id" },
+      });
+      const scope = { project_id: projectId, agent_id: "invariants-agent-id", agent_name: "coder" };
+
+      // 两个独立 Root Session（spawn 默认 + 显式创建）
+      const listed = await request(client, CommandType.SESSION_LIST, scope);
+      const [first] = (listed.data as { sessions: { session_id: string; root_node_id: string }[] })
+        .sessions;
+      const created = await request(client, CommandType.SESSION_CREATE, {
+        ...scope,
+        name: "worklog-2",
+      });
+      const second = created.data as {
+        session_id: string;
+        root_node_id: string;
+        active_branch_id: string;
+      };
+
+      // ── 不变量 3：创建不隐式激活 ──
+      // session_create 后 active 指针仍指向 first；branch_create 也不改 active 指针
+      const branchCreated = await request(client, CommandType.BRANCH_CREATE, {
+        ...scope,
+        session_id: second.session_id,
+        name: "retry-1",
+        from_node_id: second.root_node_id,
+      });
+      const retry1 = branchCreated.data as { branch_id: string };
+      const branchCreated2 = await request(client, CommandType.BRANCH_CREATE, {
+        ...scope,
+        session_id: second.session_id,
+        name: "retry-2",
+        from_node_id: second.root_node_id,
+        metadata: { is_rollback: true, error: "upstream api timeout" },
+      });
+      const retry2 = branchCreated2.data as { branch_id: string };
+
+      const relisted = await request(client, CommandType.SESSION_LIST, scope);
+      expect((relisted.data as { active_session_id: string }).active_session_id).toBe(
+        first.session_id,
+      );
+      const branchesListed = await request(client, CommandType.BRANCH_LIST, {
+        ...scope,
+        session_id: second.session_id,
+      });
+      expect((branchesListed.data as { active_branch_id: string }).active_branch_id).toBe(
+        second.active_branch_id,
+      );
+      // 创建零激活事件（显式 activate 才发 SESSION_ACTIVATED/BRANCH_ACTIVATED）
+      const sessionActivated = collect(listener, EventType.SESSION_ACTIVATED);
+      const branchActivated = collect(listener, EventType.BRANCH_ACTIVATED);
+      await request(client, CommandType.SESSION_ACTIVATE, {
+        ...scope,
+        session_id: second.session_id,
+      });
+      await request(client, CommandType.BRANCH_ACTIVATE, {
+        ...scope,
+        session_id: second.session_id,
+        branch_id: retry1.branch_id,
+      });
+      await waitUntil(() => branchActivated.length > 0);
+      expect(sessionActivated).toHaveLength(1);
+      expect((sessionActivated[0].payload as { session_id: string }).session_id).toBe(
+        second.session_id,
+      );
+
+      // ── 不变量 1：多 Root 不连边（跨 Session parent 拒绝） ──
+      const crossSession = await request(client, CommandType.BRANCH_CREATE, {
+        ...scope,
+        session_id: second.session_id,
+        name: "cross-session-fork",
+        from_node_id: first.root_node_id,
+      });
+      expect(crossSession.success).toBe(false);
+      expect(crossSession.error).toContain("fork node not found");
+      // 同 Session 内所有可回溯链的根都是本 Session Root（无跨 Session 边）
+      for (const branchId of [second.active_branch_id, retry1.branch_id, retry2.branch_id]) {
+        const history = await request(client, CommandType.GET_CHAIN_HISTORY, {
+          ...scope,
+          session_id: second.session_id,
+          branch_id: branchId,
+          limit: -1,
+        });
+        const nodes = (history.data as { nodes: { id: string; session_id: string }[] }).nodes;
+        expect(nodes.map((n) => n.id)).toContain(second.root_node_id);
+        expect(nodes.every((n) => n.session_id === second.session_id)).toBe(true);
+      }
+
+      // ── 不变量 2：同 Session fork 共享祖先（两条 Branch 从分叉点回溯祖先集一致） ──
+      const anc = async (branchId: string): Promise<Set<string>> => {
+        const history = await request(client, CommandType.GET_CHAIN_HISTORY, {
+          ...scope,
+          session_id: second.session_id,
+          branch_id: branchId,
+          limit: -1,
+        });
+        return new Set((history.data as { nodes: { id: string }[] }).nodes.map((n) => n.id));
+      };
+      const ancestors1 = await anc(retry1.branch_id);
+      const ancestors2 = await anc(retry2.branch_id);
+      // 两 Branch 同分叉于 Root：祖先集完全一致
+      expect([...ancestors1]).toEqual([...ancestors2]);
+      expect(ancestors1.has(second.root_node_id)).toBe(true);
+    } finally {
+      await client.disconnect();
+      await listener.disconnect();
+    }
+  }, 10_000);
+
+  it("AGENT_RESET：新 Session 激活、旧 Session 保留、回执三件套", async () => {
+    const client = await makeClient();
+    const listener = await makeClient();
+    try {
+      const project = await request(client, CommandType.PROJECT_CREATE, {
+        name: "reset-project",
+      });
+      const projectId = (project.data as { project: { project_id: string } }).project.project_id;
+      await request(client, CommandType.SPAWN_AGENT, {
+        project_id: projectId,
+        config: { name: "planner", agent_id: "reset-agent-id" },
+      });
+      const scope = { project_id: projectId, agent_id: "reset-agent-id", agent_name: "planner" };
+      const before = await request(client, CommandType.SESSION_LIST, scope);
+      const oldSessions = (before.data as { sessions: { session_id: string }[] }).sessions;
+      const oldActive = (before.data as { active_session_id: string }).active_session_id;
+
+      const sessionCreated = collect(listener, EventType.SESSION_CREATED);
+      const sessionActivated = collect(listener, EventType.SESSION_ACTIVATED);
+      const result = await request(client, CommandType.AGENT_RESET, {
+        project_id: projectId,
+        agent_id: "reset-agent-id",
+      });
+      expect(result.success).toBe(true);
+      const data = result.data as {
+        session_id: string;
+        branch_id: string;
+        root_node_id: string;
+      };
+      expect(data.session_id).toBeTruthy();
+      expect(data.branch_id).toBeTruthy();
+      expect(data.root_node_id).toBeTruthy();
+
+      // J3：旧 Session 全保留（数量只增），active 迁移到新 Session
+      const after = await request(client, CommandType.SESSION_LIST, scope);
+      const sessions = (after.data as { sessions: { session_id: string }[] }).sessions;
+      expect(sessions.map((s) => s.session_id)).toEqual(
+        expect.arrayContaining(oldSessions.map((s) => s.session_id)),
+      );
+      expect((after.data as { active_session_id: string }).active_session_id).toBe(data.session_id);
+      expect(data.session_id).not.toBe(oldActive);
+
+      // 事件面：session_created + session_activated（payload.session.session_id 与回执一致）
+      await waitUntil(() => sessionActivated.length > 0);
+      expect(sessionCreated).toHaveLength(1);
+      expect(
+        (sessionCreated[0].payload as { session: { session_id: string } }).session.session_id,
+      ).toBe(data.session_id);
+
+      // 未知 agent 拒绝
+      const unknown = await request(client, CommandType.AGENT_RESET, {
+        project_id: projectId,
+        agent_id: "no-such-agent",
+      });
+      expect(unknown.success).toBe(false);
+      expect(unknown.error).toContain("agent not found");
+    } finally {
+      await client.disconnect();
+      await listener.disconnect();
+    }
+  }, 10_000);
+
   it("链路模拟：CONTEXT_USAGE_UPDATED pre/post 双相位广播与 agent 归因", async () => {
     const chainServer = new MockServer({
       port: 0,

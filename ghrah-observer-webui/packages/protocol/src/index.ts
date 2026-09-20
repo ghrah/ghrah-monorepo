@@ -57,6 +57,7 @@ export {
   AgentErrorPayloadSchema,
   type AgentResponsePayload,
   AgentResponsePayloadSchema,
+  AgentResetPayloadSchema,
   type AgentSpawnedPayload,
   AgentSpawnedPayloadSchema,
   type AgentSpec,

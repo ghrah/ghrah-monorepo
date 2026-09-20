@@ -32,6 +32,15 @@ function roomId(state: MockState, name: string): string {
   return room.room_id;
 }
 
+/** 取 agent 当前激活的 Session（ActionChain 演示数据注入用）。 */
+function currentSession(state: MockState, agentId: string) {
+  const actionState = [...state.actionStates.values()].find((s) => s.agentId === agentId);
+  if (!actionState) throw new Error(`demo scenario: action state not found: ${agentId}`);
+  const session = actionState.sessions.get(actionState.activeSessionId);
+  if (!session) throw new Error(`demo scenario: no active session for ${agentId}`);
+  return session;
+}
+
 export const demoScenario: Scenario = {
   name: "demo",
   description: "MVP 演示：4 agent + 1 project + 4 room，architect 跨 3 room，含一次 HITL",
@@ -225,6 +234,30 @@ export const demoScenario: Scenario = {
           { room: "backend" },
           projectId(state),
         );
+      },
+    ],
+
+    // ── ActionChain 演示（任务 4.1）：architect 当前 Session 补 main + 两次失败重试 Branch ──
+    // 经命令路径注入（branch_create 不隐式激活，符合 S3 锁定的解耦不变量）。
+    [
+      13800,
+      ({ state, apply }) => {
+        const session = currentSession(state, AGENT_IDS.architect);
+        const scope = {
+          project_id: projectId(state),
+          agent_id: AGENT_IDS.architect,
+          agent_name: "architect",
+          session_id: session.session_id,
+        };
+        const failures = ["config parse error", "upstream api timeout"];
+        for (const [index, error] of failures.entries()) {
+          apply(CommandType.BRANCH_CREATE, {
+            ...scope,
+            name: `retry-${index + 1}`,
+            from_node_id: session.root_node_id,
+            metadata: { is_rollback: true, error },
+          });
+        }
       },
     ],
   ],

@@ -3,6 +3,7 @@ import {
   type ActionNode,
   AgentCompactContextPayloadSchema,
   type AgentConfigPayload,
+  AgentResetPayloadSchema,
   BranchActivatePayloadSchema,
   BranchArchivePayloadSchema,
   BranchCreatePayloadSchema,
@@ -265,6 +266,8 @@ export class MockState {
         return this._parse(AgentCompactContextPayloadSchema, rawPayload, (p) =>
           this._agentCompactContext(p),
         );
+      case CommandType.AGENT_RESET:
+        return this._parse(AgentResetPayloadSchema, rawPayload, (p) => this._agentReset(p));
       case CommandType.LIST_AGENTS:
         return this._parse(ListAgentsPayloadSchema, rawPayload, (p) =>
           this._listAgents(p.project_id),
@@ -884,6 +887,40 @@ export class MockState {
       iteration: session.iteration_count,
     });
     return ok({ executed: true, node_id: node.id, trigger_source: "manual" });
+  }
+
+  /** agent_reset：新起默认 Session/main Branch 并激活（J3 语义：旧 Session 全保留）。 */
+  private _agentReset(p: { project_id: string; agent_id: string }): CommandOutcome {
+    const key = agentKey(p.project_id, p.agent_id);
+    const agent = this.agents.get(key);
+    if (!agent || agent.runtimeState !== "running") {
+      return fail(`agent not found: ${p.agent_id}`);
+    }
+    const state = this.actionStates.get(key);
+    if (!state) return fail("agent context not found");
+    const previousSessionId = state.activeSessionId;
+    const session = this._newSession(state, agent.name, {});
+    state.activeSessionId = session.session_id;
+    this.emit(EventType.SESSION_CREATED, {
+      project_id: p.project_id,
+      agent_id: p.agent_id,
+      cluster_id: state.clusterId,
+      agent_name: agent.name,
+      session,
+    });
+    this.emit(EventType.SESSION_ACTIVATED, {
+      project_id: p.project_id,
+      agent_id: p.agent_id,
+      cluster_id: state.clusterId,
+      agent_name: agent.name,
+      session,
+    });
+    return ok({
+      session_id: session.session_id,
+      branch_id: session.active_branch_id,
+      root_node_id: session.root_node_id,
+      previous_session_id: previousSessionId,
+    });
   }
 
   private _getAgentInfo(p: { project_id: string; agent_id: string; name: string }): CommandOutcome {
