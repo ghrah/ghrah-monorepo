@@ -22,6 +22,7 @@ from ghrah.subject.config import (
     HITLPolicyConfig,
     ManifestConfig,
     PersistenceConfig,
+    PluginTrustConfig,
     SandboxUnitConfig,
     SubjectConfig,
     TransportKindConfig,
@@ -359,3 +360,27 @@ class TestFromEnv:
         assert SubjectConfig.from_env().hitl_policy.environment_injection is True
         monkeypatch.setenv("GHRAH_SUBJECT_ENVIRONMENT_INJECTION", "false")
         assert SubjectConfig.from_env().hitl_policy.environment_injection is False
+
+    def test_plugin_trust_default_empty(self) -> None:
+        """plugin_trust slice：默认空清单（零隐式，发现 ≠ 信任）。"""
+        config = SubjectConfig()
+        assert config.plugin_trust.discoverable == []
+        assert config.plugin_trust.trust_set == frozenset()
+
+    def test_from_env_plugin_trust(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_PLUGIN_TRUST", "task-commit-attribution, demo-plugin")
+        config = SubjectConfig.from_env()
+        assert config.plugin_trust.discoverable == [
+            "task-commit-attribution",
+            "demo-plugin",
+        ]
+
+    def test_from_env_plugin_trust_default_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("GHRAH_SUBJECT_PLUGIN_TRUST", raising=False)
+        assert SubjectConfig.from_env().plugin_trust.discoverable == []
+
+    def test_plugin_trust_slice_explicit(self) -> None:
+        config = SubjectConfig(
+            plugin_trust_slice=PluginTrustConfig(discoverable=["a", "b"]),
+        )
+        assert config.plugin_trust.trust_set == frozenset({"a", "b"})

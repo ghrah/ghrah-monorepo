@@ -224,6 +224,26 @@ class RoomFilterConfig:
 
 
 @dataclass
+class PluginTrustConfig:
+    """插件信任边界切片（双层权威的 Subject 层，§7.2）。
+
+    信任闸：entry_points 可被加载的 plugin_id 白名单（发现 ≠ 启用 ≠ 信任）。
+    S0 供 ``subject plugin verify`` 默认模式；挂载期强制执行归 S2。
+
+    Attributes:
+        discoverable: 信任清单（plugin_id；env GHRAH_SUBJECT_PLUGIN_TRUST 逗号分隔）
+    """
+
+    discoverable: list[str] = field(default_factory=list)
+
+    @property
+    def trust_set(self) -> frozenset[str]:
+        """信任集合（去重、保序无关）。"""
+
+        return frozenset(self.discoverable)
+
+
+@dataclass
 class SubjectConfig:
     """Subject 运行时配置（各 Unit 配置切片的容器）。
 
@@ -264,6 +284,7 @@ class SubjectConfig:
     project_slice: InitVar[ProjectConfig | None] = None
     recovery_slice: InitVar[RecoveryConfig | None] = None
     room_filter_slice: InitVar[RoomFilterConfig | None] = None
+    plugin_trust_slice: InitVar[PluginTrustConfig | None] = None
 
     # 非 slice 的新字段（有默认值，可直接构造）。
     transport: TransportKindConfig = field(default_factory=TransportKindConfig)
@@ -281,6 +302,7 @@ class SubjectConfig:
     _project: ProjectConfig = field(init=False)
     _recovery: RecoveryConfig = field(init=False)
     _room_filter: RoomFilterConfig = field(init=False)
+    _plugin_trust: PluginTrustConfig = field(init=False)
 
     def __post_init__(
         self,
@@ -291,6 +313,7 @@ class SubjectConfig:
         project_slice: ProjectConfig | None,
         recovery_slice: RecoveryConfig | None,
         room_filter_slice: RoomFilterConfig | None,
+        plugin_trust_slice: PluginTrustConfig | None,
     ) -> None:
         self._persistence = persistence_slice or PersistenceConfig(db_path=self.db_path)
         self._sandbox = sandbox_slice or SandboxUnitConfig(
@@ -310,6 +333,7 @@ class SubjectConfig:
         )
         self._recovery = recovery_slice or RecoveryConfig()
         self._room_filter = room_filter_slice or RoomFilterConfig()
+        self._plugin_trust = plugin_trust_slice or PluginTrustConfig()
 
     # ── 只读 slice property（非 Optional，mypy strict 友好）──
 
@@ -351,6 +375,10 @@ class SubjectConfig:
     def room_filter(self) -> RoomFilterConfig:
         return self._room_filter
 
+    @property
+    def plugin_trust(self) -> PluginTrustConfig:
+        return self._plugin_trust
+
     @classmethod
     def from_env(cls) -> SubjectConfig:
         """从环境变量创建配置。
@@ -373,6 +401,7 @@ class SubjectConfig:
         - GHRAH_SUBJECT_RECOVERY_ON_UNKNOWN_WORKSPACE（resume|pause|drop）
         - GHRAH_SUBJECT_RECOVERY_RECONCILE_ON_START
         - GHRAH_SUBJECT_RECOVERY_BOOTSTRAP_DEFAULT_PROJECT
+        - GHRAH_SUBJECT_PLUGIN_TRUST（逗号分隔，插件信任清单 plugin_id）
         - GHRAH_SUBJECT_ROOM_FILTER_ENABLED
         - GHRAH_SUBJECT_ROOM_FILTER_ABILITIES（逗号分隔白名单能力名）
         - GHRAH_SUBJECT_SAFE_EXTRA_COMMANDS（逗号/分号/空白分隔，追加基础命令 safe 白名单）
@@ -524,6 +553,15 @@ class SubjectConfig:
             ),
         )
 
+        # plugin_trust slice（D4：S0 供 verify 默认模式；挂载期强制执行归 S2）
+        plugin_trust_slice = PluginTrustConfig(
+            discoverable=[
+                p.strip()
+                for p in os.environ.get("GHRAH_SUBJECT_PLUGIN_TRUST", "").split(",")
+                if p.strip()
+            ],
+        )
+
         return cls(
             workspace_root=workspace_root,
             db_path=os.environ.get(
@@ -545,6 +583,7 @@ class SubjectConfig:
             project_slice=project_slice,
             recovery_slice=recovery_slice,
             room_filter_slice=room_filter_slice,
+            plugin_trust_slice=plugin_trust_slice,
         )
 
 

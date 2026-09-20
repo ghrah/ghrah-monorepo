@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON_PACKAGES = ("ghrah-core", "ghrah-protocol", "ghrah-subject")
+PYTHON_PACKAGES = ("ghrah-core", "ghrah-plugin", "ghrah-protocol", "ghrah-subject")
 NPM_PACKAGES = {
     "@ghrah/protocol": ROOT / "ghrah-observer-webui" / "packages" / "protocol",
     "@ghrah/observer-core": ROOT / "ghrah-observer-webui" / "packages" / "observer-core",

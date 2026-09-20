@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TARGETS = {
     "py/ghrah-core": ("python", ROOT / "ghrah-core" / "pyproject.toml"),
+    "py/ghrah-plugin": ("python", ROOT / "ghrah-plugin" / "pyproject.toml"),
     "py/ghrah-protocol": ("python", ROOT / "ghrah-protocol" / "pyproject.toml"),
     "py/ghrah-subject": ("python", ROOT / "ghrah-subject" / "pyproject.toml"),
     "npm/ghrah-protocol": (

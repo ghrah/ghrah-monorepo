@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "ghrah-core",
+    "ghrah-plugin",
     "ghrah-protocol",
     "ghrah-subject",
     "aiohttp>=3.13.5",
@@ -14,12 +15,14 @@ dependencies = [
 [tool.uv.workspace]
 members = [
     "ghrah-core",
+    "ghrah-plugin",
     "ghrah-protocol",
     "ghrah-subject",
 ]
 
 [tool.uv.sources]
 ghrah-core = { workspace = true }
+ghrah-plugin = { workspace = true }
 ghrah-protocol = { workspace = true }
 ghrah-subject = { workspace = true }
 

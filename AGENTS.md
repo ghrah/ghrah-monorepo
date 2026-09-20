@@ -5,6 +5,7 @@
 ## 仓库结构
 
 - `ghrah-core/` — Python 核心包（PyPI: ghrah-core）
+- `ghrah-plugin/` — Python 插件基础设施包（PyPI: ghrah-plugin；plugin spec 契约/发现/注册/协商/离线验证）
 - `ghrah-protocol/` — Python 协议包（PyPI: ghrah-protocol）
 - `ghrah-subject/` — Python subject 包（PyPI: ghrah-subject）
 - `ghrah-observer-webui/` — TS 观察端（pnpm workspace: packages/* + vscode-extension）
@@ -87,7 +88,7 @@ pnpm lint
 
 ## 提交约定
 
-- Conventional Commits，中文描述：`feat(subject): …` / `fix(core)!…`（破坏性加 `!`）；范围用包短名（core/protocol/subject/observer/webui/ci/docs）。
+- Conventional Commits，中文描述：`feat(subject): …` / `fix(core)!…`（破坏性加 `!`）；范围用包短名（core/plugin/protocol/subject/observer/webui/ci/docs）。
 
 ## plans 目录约定
 
