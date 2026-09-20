@@ -60,6 +60,7 @@ class CommandType(StrEnum):
     DELEGATE = "delegate"
     GET_AGENT_INFO = "get_agent_info"
     AGENT_COMPACT_CONTEXT = "agent_compact_context"
+    AGENT_RESET = "agent_reset"
 
     # ─── Supervisor 类（Observer → Subject → Core）───
     INIT_CLUSTER = "init_cluster"

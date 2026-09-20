@@ -37,6 +37,7 @@ from ghrah.protocol.types import (
     AGENT_SCOPED_EVENT_TYPES,
     AbilityResultPayload,
     AgentCompactContextPayload,
+    AgentResetPayload,
     BranchActivatePayload,
     BranchArchivePayload,
     BranchCreatePayload,
@@ -236,6 +237,7 @@ _COMMANDS: frozenset[str] = frozenset(
         CommandType.GET_AGENT_INFO.value,
         CommandType.EXECUTE_ABILITY.value,
         CommandType.AGENT_COMPACT_CONTEXT.value,
+        CommandType.AGENT_RESET.value,
         CommandType.HITL_RESPONSE.value,
         CommandType.SESSION_CREATE.value,
         CommandType.SESSION_ACTIVATE.value,
@@ -583,6 +585,7 @@ class CoreUnit:
             CommandType.DELEGATE.value: self._handle_delegate,
             CommandType.GET_AGENT_INFO.value: self._handle_get_agent_info,
             CommandType.AGENT_COMPACT_CONTEXT.value: self._handle_agent_compact_context,
+            CommandType.AGENT_RESET.value: self._handle_agent_reset,
             CommandType.EXECUTE_ABILITY.value: self._handle_execute_ability,
             CommandType.HITL_RESPONSE.value: self._handle_hitl_response,
             CommandType.SESSION_CREATE.value: self._handle_session_create,
@@ -1224,6 +1227,34 @@ class CoreUnit:
         agent_handle = await supervisor.get_agent_handle(cp.agent_name)
         result = await agent_handle.request_compact()
         return self._ok(result)
+
+    async def _handle_agent_reset(self, payload: dict[str, Any], cmd_ctx: Any) -> dict[str, Any]:
+        """agent_reset — 重置 Agent：新起默认 Session/main Branch 并激活。
+
+        以稳定 ``project_id + agent_id`` 寻址（registry.get_info_by_id），
+        不经可重名的局部 name。语义（J3/J5）：
+
+        - 就地重置：旧 Session 保留、lifecycle 不动、历史可读；
+        - 立即持久化：reset 返回时新 Session/Branch/Root 与 active 指针
+          已增量写入 sqlite（不依赖下一次迭代 commit）；
+        - 驱动循环进行中显式拒绝（回执 error，不碰运气）；
+        - 实体广播复用既有 session_created/session_activated 事件，
+          回执 data 仅携带即时反馈（session_id/branch_id/root_node_id）。
+        """
+        supervisor = self._require_supervisor()
+        rp = AgentResetPayload.model_validate(payload)
+        self._validate_project(rp.project_id)
+        if not rp.agent_id:
+            raise ValueError("agent_id required")
+        info = supervisor._registry.get_info_by_id(rp.agent_id)
+        data = await supervisor.reset_agent(info.name)
+        return self._ok(
+            {
+                "session_id": data["session_id"],
+                "branch_id": data["active_branch_id"],
+                "root_node_id": data["root_node_id"],
+            }
+        )
 
     # ----------------------------------------------------------------
     # execute_ability（本地执行 + ability_result 事件）

@@ -1603,11 +1603,25 @@ class ActorAgent:
         """
         self._context_manager.set_state(key, value)
 
-    async def reset(self) -> None:
-        """重置 Agent 状态（清空对话历史，保留 LLM 客户端和 abilities）。
+    async def reset(self) -> dict[str, Any]:
+        """重置 Agent 状态（清空对话历史，保留 LLM 客户端/abilities/持久化后端）。
 
-        重建 ContextManager 而非清空列表。
+        就地重置 ContextManager（新起默认 Session/main Branch 并激活），
+        而非经 factory 重建：旧 Session 全部保留（可继续查看/激活）、
+        sqlite 后端与连接复用、增量持久化在返回前完成。新 Session 的
+        实体广播经既有 session_created/session_activated 事件路径。
+
+        Returns:
+            新激活 Session 的稳定 wire 信息（``_session_info`` 形态）。
+
+        Raises:
+            RuntimeError: 驱动循环进行中（迭代事务未提交前禁止切换运行 Head）。
         """
+        if self._drive_active:
+            raise RuntimeError(
+                f"Cannot reset agent '{self.config.name}' while its drive loop is active"
+            )
+
         self._message_history.clear()
 
         # 清空消息队列
@@ -1618,13 +1632,8 @@ class ActorAgent:
         self._iteration_state.max_iterations = self.config.max_iterations
         self._iteration_state.reset()
 
-        # 重建 ContextManager（通过注入的 factory 回调）
-        self._context_manager = self._context_manager_factory()
-
-        # 新 ContextManager 的 llm_summary 策略未持有 LLM；LLM 已缓存时
-        # 重新回填，避免 reset 后摘要静默退化为截断
-        if self._llm is not None:
-            self._inject_llm_into_summary_strategy(self._llm)
+        # 就地重置 ContextManager：新默认 Session 激活 + 立即增量落库
+        session = await self._context_manager.reset()
 
         # 重新写入所有 ability 的默认状态（一次性收集，避免多次 update_state）
         default_states: dict[str, dict[str, Any]] = {}
@@ -1636,7 +1645,15 @@ class ActorAgent:
         if default_states:
             self._context_manager.update_state(default_states)
 
+        info = self._session_info(session)
+        await self._event_publisher.publish(
+            SessionCreatedEvent(agent_name=self.config.name, session=info)
+        )
+        await self._event_publisher.publish(
+            SessionActivatedEvent(agent_name=self.config.name, session=info)
+        )
         logger.info(f"ActorAgent[{self.config.name}] reset")
+        return info
 
     async def send(self, target: str, content: str) -> AgentMessage:
         """向其他 Agent 发送消息。

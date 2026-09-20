@@ -65,6 +65,7 @@ CORE_COMMANDS: frozenset[str] = frozenset(
         CommandType.DELEGATE.value,
         CommandType.GET_AGENT_INFO.value,
         CommandType.AGENT_COMPACT_CONTEXT.value,
+        CommandType.AGENT_RESET.value,
         CommandType.INIT_CLUSTER.value,
         CommandType.SHUTDOWN_CLUSTER.value,
         CommandType.CLUSTER_STATUS.value,

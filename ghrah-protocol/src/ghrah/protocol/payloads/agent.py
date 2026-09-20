@@ -48,6 +48,17 @@ class TerminateAgentPayload(BaseModel):
     name: str
 
 
+class AgentResetPayload(BaseModel):
+    """agent_reset 命令载荷。
+
+    以稳定 ``project_id + agent_id`` 寻址（与 TerminateAgentPayload 同型；
+    不用可跨项目重名的局部 name 作路由键）。
+    """
+
+    project_id: str
+    agent_id: str
+
+
 class SendMessagePayload(BaseModel):
     """send_message 命令载荷。"""
 

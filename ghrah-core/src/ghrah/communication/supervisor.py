@@ -640,6 +640,25 @@ class SupervisorActor:
         handle = await self.get_agent_handle(agent_name)
         return await handle.activate_session(session_id)
 
+    async def reset_agent(self, agent_name: str) -> dict[str, Any]:
+        """重置指定 Agent：新起默认 Session/main Branch 并激活。
+
+        就地重置（保留旧 Session、持久化后端与已恢复历史）；新 Session
+        实体经既有 session_created/session_activated 事件广播。
+
+        Args:
+            agent_name: Agent 名称
+
+        Returns:
+            新激活 session 的信息字典（session_id/root_node_id/active_branch_id 等）
+
+        Raises:
+            AgentNotFoundError: Agent 未注册
+            RuntimeError: Agent 驱动循环进行中（拒绝并发 reset）
+        """
+        handle = await self.get_agent_handle(agent_name)
+        return await handle.reset()
+
     async def list_sessions(self, agent_name: str) -> dict[str, Any]:
         """列出指定 Agent 的所有 session。
 

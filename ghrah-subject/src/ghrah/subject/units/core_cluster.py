@@ -49,6 +49,7 @@ _PROJECT_AGENT_COMMANDS = frozenset(
         "delegate",
         "get_agent_info",
         "agent_compact_context",
+        "agent_reset",
         "session_create",
         "session_activate",
         "session_list",
@@ -69,6 +70,9 @@ _TARGET_FIELDS = {
     "unregister_ability": "agent_name",
     "get_agent_info": "name",
     "agent_compact_context": "agent_name",
+    # agent_reset 以 project_id + agent_id 稳定寻址（AgentResetPayload 无 name
+    # 字段）；目标字段置空串 = 仅按 agent_id 解析，不校验可重名 name。
+    "agent_reset": "",
     "session_create": "agent_name",
     "session_activate": "agent_name",
     "session_list": "agent_name",
@@ -92,6 +96,7 @@ _RUNTIME_REVIVING_COMMANDS = frozenset(
         "register_ability",
         "unregister_ability",
         "agent_compact_context",
+        "agent_reset",
         "session_create",
         "session_activate",
         "session_archive",
@@ -210,7 +215,9 @@ class CoreClusterRegistryUnit(SubjectUnit):
             core_payload = dict(payload)
             core_payload["project_id"] = project["project_id"]
             core_payload["agent_id"] = agent["agent_id"]
-            core_payload[_TARGET_FIELDS[command]] = agent["name"]
+            target_field = _TARGET_FIELDS[command]
+            if target_field:
+                core_payload[target_field] = agent["name"]
             result = await handle.dispatch(command, core_payload)
             if result.get("success") and isinstance(result.get("data"), dict):
                 result["data"].update(

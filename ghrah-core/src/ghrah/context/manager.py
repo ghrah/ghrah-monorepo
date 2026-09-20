@@ -412,6 +412,54 @@ class ContextManager:
                 label=f"activate session {session_id}",
             )
 
+    async def reset(self) -> ActionSession:
+        """重置运行上下文：新起默认 Session/main Branch 并激活（就地，不换后端）。
+
+        旧 Session 全部保留（lifecycle 不动、不归档、不删除）；同一次
+        增量变更集内只写新 Session/Branch/Root 与 active 指针（既有实体
+        零冗余写），并返回前等待后台持久化完成——返回即已落库（J4）。
+
+        Returns:
+            新激活的默认 Session（展示名按 Agent 内序号顺延，如 "Session 2"）。
+
+        Raises:
+            RuntimeError: 迭代进行中（禁止在迭代事务中切换运行 Head）。
+        """
+        self._ensure_not_in_iteration("reset the agent")
+        effective_messages: list[Any] = []
+        if self._system_prompt:
+            if self._message_factory is None:
+                raise ValueError("message_factory is required when system_prompt is provided")
+            effective_messages.append(
+                self._message_factory.create_message(role="system", text=self._system_prompt)
+            )
+        runtime = SessionRuntime.create(
+            agent_name=self._agent_name,
+            name=self._next_session_name(),
+            system_prompt=self._system_prompt,
+            agent_state={},
+            messages=effective_messages,
+        )
+        self._session_runtimes[runtime.session.session_id] = runtime
+        self._active_session_id = runtime.session.session_id
+        self._restore_active_context()
+        self._pending_compaction = []
+        self._compact_requested = False
+        self._compact_skip_until_reanchor = False
+        if self._auto_persist and self._persistence is not None:
+            self._schedule_changes(
+                ContextChanges(
+                    agent_name=self._agent_name,
+                    sessions=(runtime.session,),
+                    branches=tuple(runtime.branches.values()),
+                    nodes=(runtime.active_head,),
+                    active_session_id=self._active_session_id,
+                ),
+                label=f"reset session {runtime.session.session_id}",
+            )
+            await self.wait_for_persist()
+        return runtime.session
+
     def get_session(self, session_id: str) -> ActionSession:
         """获取指定 ID 的 session。
 

@@ -747,6 +747,134 @@ class TestAgentCompactContextRouting:
         return ctx, unit, registry, created
 
 
+class TestAgentResetRouting:
+    """agent_reset 命令路由（ActionChain 阶段 4 / S1 转发面）。"""
+
+    async def test_route_included_in_unit_meta(self, tmp_path: Path) -> None:
+        """路由集合注册：未知命令拒绝守卫放行 agent_reset。"""
+        unit = CoreClusterRegistryUnit(_config(tmp_path))
+        assert "agent_reset" in unit.meta.routes.commands
+
+    async def test_stopped_project_rejects_reset_without_mount(self, tmp_path: Path) -> None:
+        """非 ACTIVE Project 拒绝且不惰性挂载（与 send_message 同语义）。"""
+        ctx, unit, registry, created = await self._boot_with_project(
+            tmp_path, project=self._project("stopped")
+        )
+        try:
+            result = await unit.handle_command(
+                "agent_reset",
+                {"project_id": PROJECT_ID, "agent_id": "agent-1"},
+                CommandContext.internal(),
+            )
+            assert result["success"] is False
+            assert result["error"] == "project_not_active"
+            assert created == []
+            assert not registry.has_cluster("c1")
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+    async def test_active_project_routes_to_core_without_name_injection(
+        self, tmp_path: Path
+    ) -> None:
+        """ACTIVE Project：agent 解析 → cluster ensure → 命令透传 CoreUnit。
+
+        agent_reset 以 project_id + agent_id 稳定寻址：透传载荷不注入
+        可重名 name 字段；成功回执附带 identity 四件套。
+        """
+        ctx, unit, registry, created = await self._boot_with_project(
+            tmp_path, project=self._project("active")
+        )
+        try:
+            result = await unit.handle_command(
+                "agent_reset",
+                {"project_id": PROJECT_ID, "agent_id": "agent-1"},
+                CommandContext.internal(),
+            )
+            assert result["success"], result.get("error")
+            data = result["data"]
+            assert data["project_id"] == PROJECT_ID
+            assert data["agent_id"] == "agent-1"
+            assert data["agent_name"] == "coder"
+            assert data["cluster_id"] == "c1"
+
+            assert registry.has_cluster("c1")
+            command, sent = created[0].commands[0]
+            assert command == "agent_reset"
+            assert sent["project_id"] == PROJECT_ID
+            assert sent["agent_id"] == "agent-1"
+            # 不注入 name 类字段（AgentResetPayload 无 name）
+            assert "agent_name" not in sent
+            assert "name" not in sent
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+    async def test_unknown_agent_rejected(self, tmp_path: Path) -> None:
+        """agent 不在 Project agents 中 → agent 解析错误。"""
+        ctx, unit, registry, created = await self._boot_with_project(
+            tmp_path, project=self._project("active")
+        )
+        try:
+            result = await unit.handle_command(
+                "agent_reset",
+                {"project_id": PROJECT_ID, "agent_id": "agent-x"},
+                CommandContext.internal(),
+            )
+            assert result["success"] is False
+            assert "agent not found" in str(result["error"])
+            assert created == []
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+    async def test_missing_agent_id_rejected(self, tmp_path: Path) -> None:
+        """无 agent_id → 解析拒绝。"""
+        ctx, unit, registry, created = await self._boot_with_project(
+            tmp_path, project=self._project("active")
+        )
+        try:
+            result = await unit.handle_command(
+                "agent_reset",
+                {"project_id": PROJECT_ID},
+                CommandContext.internal(),
+            )
+            assert result["success"] is False
+            assert result["error"] == "agent_id required"
+            assert created == []
+        finally:
+            await registry.stop()
+            await ctx.__aexit__(None, None, None)
+
+    @staticmethod
+    def _project(status: str) -> dict[str, Any]:
+        return {
+            "project_id": PROJECT_ID,
+            "version": 3,
+            "status": status,
+            "archived_at": None,
+            "deleted_at": None,
+            "cluster_ids": ["c1"],
+            "project_root_locator": PROJECT_ROOT,
+            "agents": [
+                {
+                    "agent_id": "agent-1",
+                    "name": "coder",
+                    "cluster_id": "c1",
+                    "system_prompt": "",
+                    "abilities": ["conversation"],
+                }
+            ],
+        }
+
+    async def _boot_with_project(
+        self, tmp_path: Path, *, project: dict[str, Any]
+    ) -> tuple[Context, Any, CoreClusterRegistry, list[_FakeCoreUnit]]:
+        ctx, unit, registry, created = await _boot(tmp_path)
+        ctx.provide("project_manager", _ProjectManagerStub(project))
+        return ctx, unit, registry, created
+
+
 class TestRealCoreUnitMultiCluster:
     """回归：多集群 = 多真实 CoreUnit 实例共存。
 

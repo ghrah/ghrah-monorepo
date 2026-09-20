@@ -28,6 +28,7 @@ from ghrah.protocol.types import (
     PAYLOAD_MAP,
     AbilityResultPayload,
     AgentCompactContextPayload,
+    AgentResetPayload,
     AgentResponsePayload,
     AgentSpawnedPayload,
     CommandResultPayload,
@@ -443,6 +444,42 @@ class TestCompactContextContracts:
         assert narrowed.real_cache_read_tokens is None
         assert narrowed.real_cache_write_tokens is None
         assert narrowed.compaction["needs_compaction"] is False
+
+
+class TestAgentResetContracts:
+    """agent_reset 命令契约（ActionChain 阶段 4 / S1）。"""
+
+    def test_agent_reset_registered_in_core_commands(self):
+        """命令 + payload 双登记，且归入 CORE_COMMANDS（Observer → Subject → Core 转发类）。"""
+        assert COMMAND_PAYLOAD_MAP[CommandType.AGENT_RESET] is AgentResetPayload
+        assert CommandType.AGENT_RESET.value in CORE_COMMANDS
+
+    def test_agent_reset_payload_requires_stable_scope(self):
+        """缺 project_id / agent_id 快速失败（稳定路由键必填）。"""
+        with pytest.raises(ValidationError):
+            AgentResetPayload.model_validate({"project_id": "p1"})
+        with pytest.raises(ValidationError):
+            AgentResetPayload.model_validate({"agent_id": "a1"})
+        with pytest.raises(ValidationError):
+            AgentResetPayload.model_validate({})
+
+    def test_agent_reset_payload_dumps_exact_fields(self):
+        """载荷恰含 project_id/agent_id（不携带可重名 name）。"""
+        payload = AgentResetPayload.model_validate({"project_id": "p1", "agent_id": "a1"})
+        assert payload.model_dump() == {"project_id": "p1", "agent_id": "a1"}
+
+    def test_agent_reset_envelope_round_trip(self):
+        """命令载荷经 envelope_from_dict 收窄往返不丢字段。"""
+        env = envelope_from_dict(
+            {
+                "type": "agent_reset",
+                "payload": {"project_id": "p1", "agent_id": "a1"},
+            }
+        )
+        assert isinstance(env.payload, AgentResetPayload)
+        narrowed = expect_payload(env, AgentResetPayload)
+        assert narrowed.project_id == "p1"
+        assert narrowed.agent_id == "a1"
 
 
 # ─── S1.1 验收：known_type / as_*_type 辅助 ───
