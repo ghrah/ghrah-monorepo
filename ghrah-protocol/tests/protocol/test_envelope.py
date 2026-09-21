@@ -4,7 +4,7 @@
 
 """Envelope（非泛型信封）与反序列化入口测试。
 
-覆盖 Stage 1 (S1.1) 验收点：
+覆盖以下验收点：
 - 裸 Envelope() + dict payload 不崩（Claim1 修复）。
 - Envelope 持有 BaseModel 子类 payload 时 model_dump() 不丢字段（Claim3）。
 - envelope_from_dict 收窄已知 type 为模型实例；未知 type 回退裸 dict。
@@ -63,7 +63,7 @@ from ghrah.protocol.types import (
     payload_agent_name,
 )
 
-# ─── S1.1 验收：Envelope 裸构造 / 序列化 ───
+# ─── 验收：Envelope 裸构造 / 序列化 ───
 
 
 class TestEnvelopeBareConstruct:
@@ -102,7 +102,7 @@ class TestEnvelopeBareConstruct:
         assert data["timestamp"] >= before - 1
 
 
-# ─── S1.1 验收：wire format 字节级一致性 ───
+# ─── 验收：wire format 字节级一致性 ───
 
 
 class TestWireFormatCompat:
@@ -169,7 +169,7 @@ class TestWireFormatCompat:
         assert dumped["payload"]["expected_version"] == 3
 
 
-# ─── S1.1 验收：未知 type 兜底 ───
+# ─── 验收：未知 type 兜底 ───
 
 
 class TestUnknownTypeFallback:
@@ -194,7 +194,7 @@ class TestUnknownTypeFallback:
         assert env.known_type() is False
 
 
-# ─── S1.1 验收：expect_payload ───
+# ─── 验收：expect_payload ───
 
 
 class TestExpectPayload:
@@ -244,7 +244,7 @@ class TestExpectPayload:
         assert payload.tool_args == {"path": "/tmp/x"}
 
 
-# ─── S1.1 验收：type/payload mismatch 不被类型系统阻止（设计意图固化）───
+# ─── 验收：type/payload mismatch 不被类型系统阻止（设计意图固化）───
 
 
 class TestTypePayloadMismatch:
@@ -270,7 +270,7 @@ class TestTypePayloadMismatch:
             expect_payload(env, SpawnAgentPayload)
 
 
-# ─── S1.1 验收：Message 别名 ───
+# ─── 验收：Message 别名 ───
 
 
 class TestMessageAlias:
@@ -288,7 +288,7 @@ class TestMessageAlias:
             Message[SpawnAgentPayload]  # type: ignore[index]
 
 
-# ─── S1.1 验收：工厂函数 payload 存模型实例 ───
+# ─── 验收：工厂函数 payload 存模型实例 ───
 
 
 class TestFactoryFunctions:
@@ -333,7 +333,7 @@ class TestFactoryFunctions:
         assert ping.payload == {}
 
 
-# ─── S1.1 验收：PAYLOAD_MAP 注册表 ───
+# ─── 验收：PAYLOAD_MAP 注册表 ───
 
 
 class TestPayloadMap:
@@ -381,7 +381,7 @@ class TestPayloadMap:
         assert SystemType.COMMAND_RESULT.value not in PAYLOAD_MAP
 
     def test_persist_commands_not_in_map(self):
-        """persist_* 不登记（schema 与 wire 不符，Stage 2 补齐）。"""
+        """persist_* 不登记（schema 与 wire 不符，留待后续补齐）。"""
         assert CommandType.PERSIST_SAVE_NODE.value not in PAYLOAD_MAP
         assert CommandType.PERSIST_SAVE_MESSAGES.value not in PAYLOAD_MAP
 
@@ -486,7 +486,7 @@ class TestCompactContextContracts:
 
 
 class TestAgentResetContracts:
-    """agent_reset 命令契约（ActionChain 阶段 4 / S1）。"""
+    """agent_reset 命令契约。"""
 
     def test_agent_reset_registered_in_core_commands(self):
         """命令 + payload 双登记，且归入 CORE_COMMANDS（Observer → Subject → Core 转发类）。"""
@@ -521,7 +521,7 @@ class TestAgentResetContracts:
         assert narrowed.agent_id == "a1"
 
 
-# ─── S1.1 验收：known_type / as_*_type 辅助 ───
+# ─── 验收：known_type / as_*_type 辅助 ───
 
 
 class TestEnvelopeTypeHelpers:
@@ -546,7 +546,7 @@ class TestEnvelopeTypeHelpers:
         assert Envelope(type="spawn_agent").as_system_type() is None
 
 
-# ─── S1.2.1 验收：HITLResponsePayload 定位键 fail-closed ───
+# ─── 验收：HITLResponsePayload 定位键 fail-closed ───
 
 
 class TestHITLResponsePayloadSchema:
@@ -637,7 +637,7 @@ class TestHITLResolvedPayload:
         assert EventType.HITL_RESOLVED.value in AGENT_SCOPED_EVENT_TYPES
 
 
-# ─── S1.2.4 验收：payload_agent_name helper ───
+# ─── 验收：payload_agent_name helper ───
 
 
 class TestPayloadAgentName:
@@ -670,7 +670,7 @@ class TestPayloadAgentName:
         assert payload_agent_name(42) is None
 
 
-# ─── S1.1 验收：消费侧回归测试 —— type/payload mismatch 静默 vs 抛错 ───
+# ─── 验收：消费侧回归测试 —— type/payload mismatch 静默 vs 抛错 ───
 
 
 class TestRegressionMismatchExposure:

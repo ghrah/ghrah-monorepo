@@ -2,20 +2,20 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""plugin spec：插件声明式契约（SSOT 在本包，A7/A9）。
+"""plugin spec：插件声明式契约（SSOT 在本包）。
 
-术语裁决（A7）：叫 **plugin spec**，禁叫 "plugin manifest"（Core 已占用 manifest 词）。
-spec 是不可变契约（A14）：由插件包作者提供，用户/发行版不改写；
+术语：叫 **plugin spec**，不叫 "plugin manifest"（Core 已占用 manifest 词）。
+spec 是不可变契约：由插件包作者提供，用户/发行版不改写；
 实例配置（instances drop-in）与 allowlist 是可写策略层，不在本模块。
 
-裁决落位：
-- A3：schema 禁依赖语义字段（``extra="forbid"`` 天然拒绝 ``depends_on`` /
+契约要点：
+- schema 禁依赖语义字段（``extra="forbid"`` 天然拒绝 ``depends_on`` /
   ``requires.plugins`` 等）；``after`` 是排序声明非依赖，显式合法。
-- A13：``after`` 仅声明装配顺序，被引用插件缺失不阻塞挂载。
-- R1：每扩展点超时预算（``timeout_ms`` / ``on_timeout``）。
-- R2：capability 分层命名 ``prefix:name``；``core:`` 前缀由注册表统一注册，
+- ``after`` 仅声明装配顺序，被引用插件缺失不阻塞挂载。
+- 每扩展点超时预算（``timeout_ms`` / ``on_timeout``）。
+- capability 分层命名 ``prefix:name``；``core:`` 前缀由注册表统一注册，
   插件 provides 侧禁止使用；裸字符串无前缀被拒。
-- R4：``schema_version`` + 幂等迁移函数链（v1 基线，零迁移函数，机制先行）。
+- ``schema_version`` + 幂等迁移函数链（v1 基线，零迁移函数，机制先行）。
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ class ProvidesSpec(BaseModel):
         checkers: checker 扩展点名（如 ``commit_in_repo``）。
         evidence_kinds: evidence 种类名（如 ``git_commit``）。
         commands: 命令名。
-        capabilities: 通用 capability（``prefix:name`` 分层格式，R2）。
+        capabilities: 通用 capability（``prefix:name`` 分层格式）。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -71,7 +71,7 @@ class ProvidesSpec(BaseModel):
 
 
 class RequiresSpec(BaseModel):
-    """插件对外部环境的依赖声明（不含插件间依赖，A3）。
+    """插件对外部环境的依赖声明（不含插件间依赖）。
 
     Attributes:
         core_version: ghrah-core 版本约束（PEP 440 specifier）。
@@ -100,19 +100,19 @@ class RequiresSpec(BaseModel):
 
 
 class PluginSpec(BaseModel):
-    """plugin spec：插件声明式契约（不可变，A14）。
+    """plugin spec：插件声明式契约（不可变）。
 
     Attributes:
-        schema_version: spec schema 版本（R4 迁移链锚点）。
+        schema_version: spec schema 版本（迁移链锚点）。
         plugin_id: 插件身份标识（kebab-case）。
-        version: 插件版本（三段数字核心；协商时仅做相等比较，D6）。
+        version: 插件版本（三段数字核心；协商时仅做相等比较）。
         prefix: 自定义 capability 命名空间（如 ``"jira:"``；缺省用 plugin_id）。
         provides: 对外提供的能力声明。
         requires: 对外部环境的依赖声明。
         multi_instance: 是否允许多实例装配。
-        timeout_ms: 扩展点超时预算（R1，默认 5s）。
-        on_timeout: 超时裁决策略（R1，默认 reject）。
-        after: 装配顺序声明（A13；排序声明非依赖，A3 显式豁免）。
+        timeout_ms: 扩展点超时预算（默认 5s）。
+        on_timeout: 超时裁决策略（默认 reject）。
+        after: 装配顺序声明（排序声明非依赖，显式豁免）。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -176,7 +176,7 @@ class PluginSpec(BaseModel):
         for capability in value.capabilities:
             if _parse_capability(capability) is None:
                 raise ValueError(
-                    f"provides.capabilities entries must be 'prefix:name' (R2): {capability!r}"
+                    f"provides.capabilities entries must be 'prefix:name': {capability!r}"
                 )
         return value
 
@@ -194,24 +194,24 @@ class PluginSpec(BaseModel):
             if namespace != declared:
                 raise ValueError(
                     f"provides.capabilities namespace {namespace!r} does not match "
-                    f"declared prefix {declared!r} (R2)"
+                    f"declared prefix {declared!r}"
                 )
         for capability in self.requires.capabilities:
             if _parse_capability(capability) is None:
                 raise ValueError(
-                    f"requires.capabilities entries must be 'prefix:name' (R2): {capability!r}"
+                    f"requires.capabilities entries must be 'prefix:name': {capability!r}"
                 )
         return self
 
 
-# MIGRATIONS：schema_version → 迁移函数链（R4）。
+# MIGRATIONS：schema_version → 迁移函数链。
 # v1 是基线版本，无历史版本需要迁移；未来 bump SPEC_SCHEMA_VERSION 时
 # 在此登记 ``n -> n+1`` 的幂等迁移函数（输入/输出均为原始 dict）。
 MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
 
 
 def migrate_spec(raw: dict[str, Any]) -> dict[str, Any]:
-    """按当前 schema 版本迁移原始 spec dict（R4，幂等）。
+    """按当前 schema 版本迁移原始 spec dict（幂等）。
 
     规则：
     - ``schema_version`` 缺失 → 视为当前版（有默认值的字段由 pydantic 静默补齐）；
@@ -246,6 +246,6 @@ def migrate_spec(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def plugin_spec_json_schema() -> dict[str, Any]:
-    """生成 plugin spec 的 JSON Schema（S1/S4 TS 侧生成消费）。"""
+    """生成 plugin spec 的 JSON Schema（TS 侧生成消费）。"""
 
     return PluginSpec.model_json_schema()

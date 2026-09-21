@@ -140,7 +140,7 @@ def test_auto_session_names_are_deterministic() -> None:
 
 
 def test_auto_session_name_skips_explicitly_taken_numbers() -> None:
-    """显式占用 Session 2 后，自动命名跳过该编号不撞车（U2）。"""
+    """显式占用 Session 2 后，自动命名跳过该编号不撞车。"""
     cm = _manager()
     cm.create_session(name="Session 2", initial_state={})
     # Session 1（初始）、Session 2（显式）已占用 → 下一个自动名是 Session 3

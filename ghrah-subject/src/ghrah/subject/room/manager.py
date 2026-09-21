@@ -145,7 +145,7 @@ class RoomManager:
             project = await self._project_get(project_id)
             if project is None:
                 return None, _err(f"project not found: {project_id}")
-            # deleted_at is accepted only as the A7 legacy archive marker.
+            # deleted_at is accepted only as the legacy archive marker.
             if project.get("archived_at") or project.get("deleted_at"):
                 return project, _err("project_archived")
             return project, None

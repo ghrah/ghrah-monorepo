@@ -24,6 +24,7 @@ from ghrah.subject.runtime.service_keys import (
     DESIRED_STATE_STORE,
     MANIFEST_STORE,
     PROJECT_MANAGER,
+    PROJECT_STORE,
     TASK_MANAGER,
     TASK_STORE,
     WORKSPACE_MANAGER,
@@ -66,7 +67,7 @@ class ProjectUnit(SubjectUnit):
                     DESIRED_STATE_STORE,
                 }
             ),
-            provides=frozenset({PROJECT_MANAGER}),
+            provides=frozenset({PROJECT_MANAGER, PROJECT_STORE}),
             routes=RouteSpec(commands=PROJECT_COMMANDS),
         )
 
@@ -101,6 +102,7 @@ class ProjectUnit(SubjectUnit):
         )
         self._manager.register_scoped_resource(self._task_store)
         ctx.provide(PROJECT_MANAGER.name, self._manager)
+        ctx.provide(PROJECT_STORE.name, self._store)
 
     async def start(self) -> None:
         if self._store is not None:

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""离线验证引擎测试（A18；S0 验收标志③引擎半部）。"""
+"""离线验证引擎测试。"""
 
 from __future__ import annotations
 
@@ -122,7 +122,7 @@ def test_all_green_returns_empty() -> None:
 
 
 def test_candidate_provides_enriches_missing_detail() -> None:
-    # A3 探针：错误列候选插件（发现但未信任的 provider 提供缺失 capability）
+    # 错误列候选插件（发现但未信任的 provider 提供缺失 capability）
     specs = [_spec("consumer", requires_caps=["demo:x"])]
     findings = verify_plugins(
         specs,

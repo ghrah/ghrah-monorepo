@@ -346,7 +346,7 @@ class TestSpawnAgentAbility:
         assert ability.name == "spawn_agent"
 
     def test_bind_tool_schema_has_no_free_abilities(self) -> None:
-        """LLM 工具面无自由 abilities 参数——manifest_ref 唯一主路径（K10）。"""
+        """LLM 工具面无自由 abilities 参数——manifest_ref 唯一主路径。"""
         ability = SpawnAgentAbility()
         schema = ability.bind_tool()
         assert schema is not None

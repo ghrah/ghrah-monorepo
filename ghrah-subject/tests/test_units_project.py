@@ -2,8 +2,8 @@
 fake CoreClusterRegistry（假 CoreUnit 工厂）+ ProjectUnit/RecoveryUnit 挂载，
 验证装配、project_create 命令经 ctx.serial 路由、reconcile bootstrap。
 
-与旧基建形态的差异：mount 不自动触发 reconcile（原 engine.start 末尾触发，
-归阶段 3.4 装配层）；本文件显式调 ``svc.reconcile()`` 验证 bootstrap 语义。
+与旧基建形态的差异：mount 不自动触发 reconcile（reconcile 由装配层末尾触发）；
+本文件显式调 ``svc.reconcile()`` 验证 bootstrap 语义。
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ class TestUnitsAssembly:
     async def test_reconcile_bootstrap_creates_default_project(self, tmp_path: Path) -> None:
         async with _boot(tmp_path) as (ctx, _, _):
             svc = ctx.get(RECONCILIATION_SERVICE.name)
-            # 显式触发首启 reconcile（自动触发归阶段 3.4）：无 workspace → bootstrap
+            # 显式触发首启 reconcile（自动触发归装配层）：无 workspace → bootstrap
             report = await svc.reconcile()
             assert report.success
             assert report.bootstrap is True
@@ -163,5 +163,5 @@ class TestUnitsAssembly:
         async with _boot(tmp_path, recovery_enabled=False) as (ctx, _, _):
             svc = ctx.get(RECONCILIATION_SERVICE.name)
             status = await svc.reconcile_status()
-            # mount 不自动 reconcile（原 engine.start 触发，归阶段 3.4）→ 无痕迹
+            # mount 不自动 reconcile（reconcile 由装配层触发）→ 无痕迹
             assert status is None

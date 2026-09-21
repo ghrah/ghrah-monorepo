@@ -94,7 +94,7 @@ class CommandType(StrEnum):
     WORKSPACE_ROLLBACK = "workspace_rollback"
     WORKSPACE_DIFF = "workspace_diff"
     WORKSPACE_STATUS = "workspace_status"
-    # workspace 一等资源命令（workspace_id 键控；W6）
+    # workspace 一等资源命令（workspace_id 键控）
     WORKSPACE_REGISTER = "workspace_register"
     WORKSPACE_GET = "workspace_get"
     WORKSPACE_LIST = "workspace_list"
@@ -143,7 +143,7 @@ class CommandType(StrEnum):
     TASK_VERIFY = "task_verify"
     TASK_LIST_CLAIMS = "task_list_claims"
 
-    # ─── Plugin 类（Observer → Subject；协商：L1 通用命令，不挂域前缀）───
+    # ─── Plugin 类（Observer → Subject；协商：通用命令，不挂域前缀）───
     PLUGIN_NEGOTIATE = "plugin_negotiate"
 
     # ─── Project 管理类（Observer → Subject，15 个）───

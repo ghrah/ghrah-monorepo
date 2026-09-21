@@ -1232,7 +1232,7 @@ class CoreUnit:
         """agent_reset — 重置 Agent：新起默认 Session/main Branch 并激活。
 
         以稳定 ``project_id + agent_id`` 寻址（registry.get_info_by_id），
-        不经可重名的局部 name。语义（J3/J5）：
+        不经可重名的局部 name。语义：
 
         - 就地重置：旧 Session 保留、lifecycle 不动、历史可读；
         - 立即持久化：reset 返回时新 Session/Branch/Root 与 active 指针

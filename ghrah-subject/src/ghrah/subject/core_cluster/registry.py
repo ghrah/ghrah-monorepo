@@ -349,7 +349,7 @@ def default_core_unit_factory(
             persistence_factory=persistence_factory,
             manifest_store=manifest_store,
             llm_factory=llm_factory,
-            # 部署方显式声明（C2 fail-closed 兼容通道）：空配置 → None →
+            # 部署方显式声明（fail-closed 兼容通道）：空配置 → None →
             # 无 abilities 快速 spawn 在 core 侧 raise 指路 manifest_ref。
             default_abilities=tuple(config.default_spawn_abilities) or None,
         )

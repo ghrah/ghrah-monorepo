@@ -8,7 +8,7 @@
 aiosqlite 连接管理范式。``save`` 时由 ``projects`` 派生 ``agents``（跨 project
 汇总去重），简化调用方（ProjectUnit 仅需传 projects）。
 
-写入触发（父计划 §3.3）：ProjectUnit 每次成功变更命令后调 ``save`` 全量快照。
+写入触发：ProjectUnit 每次成功变更命令后调 ``save`` 全量快照。
 RecoveryUnit 启动时从 ProjectStore 重建；本缓存不参与反向恢复覆盖。
 """
 

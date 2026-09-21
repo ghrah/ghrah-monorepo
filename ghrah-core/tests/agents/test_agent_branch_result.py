@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Agent 侧 session/branch 回执权威指针测试（S7 P1-4）。
+"""Agent 侧 session/branch 回执权威指针测试。
 
 锁定 ``list_branches_result`` 的域不变量语义：``active_branch_id`` 是每个
 Session 的必填属性，非活跃 Session 也直读其自身指针，不因运行态

@@ -2,11 +2,11 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""S1 wire 快照双向校验（Python 侧半部）。
+"""wire 快照双向校验（Python 侧半部）。
 
 TS 侧由 protocol-align.spec.ts 用 Zod 解析同一批快照；本测试做镜像校验：
 model_validate 快照 JSON 成功 + dump 幂等 + key 容差规则（与 TS 对齐规则同源）。
-只覆盖 S1 新增快照，不回溯存量（最小改动）。
+只覆盖本批新增快照，不回溯存量（最小改动）。
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ SNAPSHOTS_DIR = (
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
-# S1 新增快照：名称 → Pydantic 模型（与 TS PAYLOAD_SCHEMA_MAP 同步维护）
+# 本批新增快照：名称 → Pydantic 模型（与 TS PAYLOAD_SCHEMA_MAP 同步维护）
 S1_SNAPSHOTS: dict[str, type[BaseModel]] = {
     "PluginNegotiatePayload": PluginNegotiatePayload,
     "PluginNegotiateResultPayload": PluginNegotiateResultPayload,
@@ -96,6 +96,6 @@ def test_snapshot_roundtrip(name: str, model: type[BaseModel]) -> None:
 
 
 def test_s1_snapshot_files_exist() -> None:
-    """S1 全部 14 个快照文件在 TS 目录存在（防生成脚本产物漏提交）。"""
+    """本批全部 14 个快照文件在 TS 目录存在（防生成脚本产物漏提交）。"""
     for name in S1_SNAPSHOTS:
         assert (SNAPSHOTS_DIR / f"{name}.json").exists(), f"missing snapshot: {name}"

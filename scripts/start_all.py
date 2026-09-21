@@ -4,7 +4,7 @@
 
 """ghrah 全栈一键启动脚本（单进程架构）。
 
-拓扑（C5 单进程化后，Core 不再独立进程/端口）::
+拓扑（单进程化后，Core 不再独立进程/端口）::
 
     ghrah-subject (uvicorn, :4112) ← 内嵌 Core（Ouroboros 装配，CoreUnit 懒挂载）
     Observer WebUI (vite dev server, :5173) --WS--> ws://localhost:4112/ws

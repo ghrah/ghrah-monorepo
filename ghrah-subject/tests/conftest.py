@@ -35,8 +35,7 @@ import tempfile
 # pytest 会话临时目录（系统 temp 随平台策略清理；project_id 为 UUID，并发会话无冲突）。
 # tempfile.gettempdir()：POSIX 上即 /tmp（与旧字面量逐字节一致，零回归）；
 # Windows 上为 %LOCALAPPDATA%\Temp 绝对路径——硬编码 "/tmp" 在 Windows 语义下
-# is_absolute()=False，会被 canonical_file_locator 拒绝（计划 1787705011169 T7
-# 已清理过同类硬编码，勿重新引入）。
+# is_absolute()=False，会被 canonical_file_locator 拒绝（勿重新引入同类硬编码）。
 _TEST_PROJECTS_TEMPLATE = os.path.join(tempfile.gettempdir(), "ghrah-test-projects", "{project_id}")
 
 # 第 1 层：from_env() 路径。注意 test_config_split 显式 delenv 后断言

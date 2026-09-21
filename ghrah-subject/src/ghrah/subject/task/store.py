@@ -98,7 +98,7 @@ async def _ensure_compat_columns(db: aiosqlite.Connection) -> None:
     """安全地为旧库补 project_id 列与索引（仅当列不存在时添加）。
 
     CREATE TABLE IF NOT EXISTS 对已存在 DB 不补列，故需显式 ALTER 迁移。
-    旧行 project_id 落 '' sentinel，待 S4.6 reconcile bootstrap 认领。
+    旧行 project_id 落 '' sentinel，待 reconcile bootstrap 认领。
     """
     cursor = await db.execute("PRAGMA table_info(subject_tasks)")
     columns = {row[1] for row in await cursor.fetchall()}
@@ -358,7 +358,7 @@ class TaskStore:
         """批量改 project_id：``UPDATE ... SET project_id=new_id, version=version+1,
         updated_at=now WHERE project_id=old_id``，返回受影响行数。
 
-        供 S4.6 reconcile bootstrap 把 sentinel task（``project_id=''``）认领到
+        供 reconcile bootstrap 把 sentinel task（``project_id=''``）认领到
         default project。默认迁移全部（含终态 + 软删），可经 ``include_terminal``
         / ``include_deleted`` 收窄。乐观锁 ``version`` 递增以保留变更痕迹。
 

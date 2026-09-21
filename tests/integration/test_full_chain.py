@@ -26,7 +26,7 @@ import asyncio
 
 
 class TestSubjectEngineInterface:
-    """验证 SubjectEngine 的目标接口（S2.4 后 SubjectService 退场）。
+    """验证 SubjectEngine 的目标接口（SubjectService 已退场）。
 
     这些测试定义了 SubjectEngine 应该具备的公开 API，
     驱动 ghrah-subject/src/ghrah/subject/runtime/engine.py 的实现。
@@ -686,9 +686,9 @@ class TestDataFlowPaths:
 
 
 class TestSubjectEngineDispatch:
-    """验证 SubjectEngine 的命令/事件分发逻辑（S2.4 后经 dispatcher 路由到 Unit）。
+    """验证 SubjectEngine 的命令/事件分发逻辑（经 dispatcher 路由到 Unit）。
 
-    S2.4 后 SubjectService 退场，命令统一经 engine.dispatch_observer_command
+    SubjectService 已退场，命令统一经 engine.dispatch_observer_command
     路由到各 Unit 的 handle_command；事件经内部 SubjectEventBus 订阅。
     """
 

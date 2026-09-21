@@ -4,7 +4,7 @@
 
 """第三方 Subject Unit 发现与 allowlist 启用验收（Ouroboros 形态）。
 
-验证三段（定位文档 §原则9 语义保留）：
+验证三段（第三方默认不启用、allowlist 显式列出才挂载）：
 1. ``discover()`` 经 entry_points group 发现候选（不启用）。
 2. 默认 allowlist 空 → ``mount_third_party_units`` 挂载零 unit。
 3. allowlist 启用 → ``ctx.plugin(mount_unit(unit))`` 挂载 + 命令经
@@ -101,3 +101,28 @@ async def test_allowlisted_but_not_discovered_warns_and_skips(tmp_path: Path) ->
     async with Context() as ctx:
         fibers = await mount_third_party_units(ctx, config, discovered={})
         assert fibers == {}
+
+
+def test_discovery_channels_do_not_cross_groups(monkeypatch) -> None:
+    """两组发现通道（ghrah.plugins / ghrah.subject.units）互不串组。"""
+    from ghrah.plugin.loader import LoadedEntry, discover_plugins
+    from ghrah.plugin.spec import PluginSpec
+
+    from ghrah.subject.runtime import third_party
+
+    def fake_base(group: str):
+        assert group in {"ghrah.plugins", "ghrah.subject.units"}
+        if group == "ghrah.plugins":
+            return (
+                [LoadedEntry(name="spec-plugin", value=PluginSpec(plugin_id="p", version="0.1.0"))],
+                [],
+            )
+        return ([LoadedEntry(name="unit-entry", value=object())], [])
+
+    monkeypatch.setattr("ghrah.plugin.loader.iter_entry_point_values", fake_base)
+    monkeypatch.setattr("ghrah.subject.runtime.third_party.iter_entry_point_values", fake_base)
+    plugins, issues = discover_plugins()
+    assert [d.spec.plugin_id for d in plugins] == ["p"]
+    assert issues == []
+    units = third_party.discover()
+    assert set(units) == {"unit-entry"}

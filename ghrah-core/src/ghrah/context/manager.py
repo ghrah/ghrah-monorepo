@@ -417,7 +417,7 @@ class ContextManager:
 
         旧 Session 全部保留（lifecycle 不动、不归档、不删除）；同一次
         增量变更集内只写新 Session/Branch/Root 与 active 指针（既有实体
-        零冗余写），并返回前等待后台持久化完成——返回即已落库（J4）。
+        零冗余写），并返回前等待后台持久化完成——返回即已落库。
 
         Returns:
             新激活的默认 Session（展示名按 Agent 内序号顺延，如 "Session 2"）。

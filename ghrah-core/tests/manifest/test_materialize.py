@@ -194,7 +194,7 @@ class TestInstantiateResolvedAbilities:
 
 
 class TestGenericHITLWiring:
-    """通用 HITL 接线（K12）：非 FS/非 command ability 的 require_hitl 声明
+    """通用 HITL 接线：非 FS/非 command ability 的 require_hitl 声明
     必须经 _HITLRequiredAbility 包装实际挂接 PRE_EXECUTE hook——
     现状兜底分支裸实例化会静默忽略该声明（纸面门禁）。"""
 
@@ -349,7 +349,7 @@ abilities:
         )
         assert result["success"], result.get("error")
 
-        # C1 断言：get_agent_info 返回 manifest 全部能力 + agent_config_name
+        # 断言：get_agent_info 返回 manifest 全部能力 + agent_config_name
         info = await unit.handle_command(
             "get_agent_info",
             {"project_id": "default", "agent_id": "planner-1", "name": "planner-1"},

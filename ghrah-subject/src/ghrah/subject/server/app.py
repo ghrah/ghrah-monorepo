@@ -1,7 +1,7 @@
 """FastAPI 应用入口（Ouroboros 形态薄 facade）。
 
 Observer FastAPI app 由 ``WebSocketObserverEndpointUnit`` 在装配期间创建
-并持有（amendment A6：Unit owns app）。``create_app(config, *, ctx)`` 仅
+并持有（Unit owns app）。``create_app(config, *, ctx)`` 仅
 作为经 ctx 取回该 app 的薄 facade。
 
 生命周期：先 ``assemble_subject(ctx, config, profile="full")``（Unit
@@ -29,7 +29,7 @@ def create_app(
     *,
     ctx: Context,
 ) -> FastAPI:
-    """返回 ctx 中 observer unit 持有的 FastAPI app（Unit owns app, A6）。
+    """返回 ctx 中 observer unit 持有的 FastAPI app（Unit owns app）。
 
     Args:
         config: 保留用于签名兼容；Unit 的 ws_path/event_replay_capacity

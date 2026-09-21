@@ -132,7 +132,7 @@ async def test_core_lifecycle_events_drive_workspace_create_destroy(
 
 
 async def test_workspace_register_get_list_commands(tmp_path: Path) -> None:
-    """workspace_register/get/list 3 新命令（W6）。"""
+    """workspace_register/get/list 3 新命令。"""
 
     config = _config(tmp_path)
 

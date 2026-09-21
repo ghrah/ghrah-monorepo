@@ -2,10 +2,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""RoomFilterUnit 单测（E1：显式 Filter 契约）。
+"""RoomFilterUnit 单测（显式 Filter 契约）。
 
 - 白名单 + room 上下文 + success → room_send 落账；
-- 无 room 上下文不落（G3 负例）；send 跳过防双记；
+- 无 room 上下文不落；send 跳过防双记；
 - 非白名单/失败结果不落；同节点事件重放去重。
 """
 
@@ -93,7 +93,7 @@ async def test_whitelist_hit_with_room_context_appends() -> None:
 
 
 async def test_no_room_context_not_appended() -> None:
-    """G3 负例：无 room 上下文（metadata.room_id 缺失）→ 不落。"""
+    """无 room 上下文（metadata.room_id 缺失）→ 不落。"""
     unit, manager = await _unit()
     await unit._on_chain_updated({"agent_name": "planner", "node": _node(room_id=None)})
     assert manager.sends == []

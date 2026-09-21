@@ -197,10 +197,10 @@ class Envelope(BaseModel):
 #
 # 仅登记 schema 正确且当前有消费方的 payload。
 # - persist_*（13 个）不登记：PersistSavePayload 等 schema 与实际 wire shape 不符，
-#   留待 Stage 2（Subject 插件化）补齐真实 payload。此处 payload 保持裸 dict 透传。
+#   留待 Subject 插件化阶段补齐真实 payload。此处 payload 保持裸 dict 透传。
 # - command_result / error / ping / pong 不登记：welcome 包手写 payload 与
-#   CommandResultPayload schema 不符（见 S1.2.5）。此处 payload 保持裸 dict。
-# - plugin_* / task 归因切面例外：契约先行（类型期即登记，消费方在 S2-S4 接线），  ← S1 插件期起
+#   CommandResultPayload schema 不符。此处 payload 保持裸 dict。
+# - plugin_* / task 归因切面例外：契约先行（类型期即登记，消费方后续接线），
 #   schema 与 wire 已定且经双侧一致性测试覆盖，非"schema 与 wire 不符"的欠账。
 
 

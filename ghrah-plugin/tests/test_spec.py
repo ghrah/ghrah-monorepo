@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""PluginSpec 校验测试（R1/R2/R4/A3/A13）。"""
+"""PluginSpec 校验测试（超时/命名/迁移/依赖字段边界）。"""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def test_full_spec_roundtrip() -> None:
     assert PluginSpec.model_validate(dumped) == spec
 
 
-# ── R2：capability 分层命名 ──
+# ── capability 分层命名 ──
 
 
 def test_bare_capability_rejected() -> None:
@@ -94,7 +94,7 @@ def test_declared_prefix_namespace_accepted() -> None:
     assert spec.provides.capabilities == ["demo:attr/x"]
 
 
-# ── A3：禁依赖语义字段，after 显式豁免 ──
+# ── 禁依赖语义字段，after 显式豁免 ──
 
 
 def test_dependency_semantics_fields_rejected() -> None:
@@ -145,7 +145,7 @@ def test_bad_on_timeout_rejected() -> None:
         PluginSpec.model_validate(_raw_spec(on_timeout="ignore"))
 
 
-# ── R4：迁移链 ──
+# ── 迁移链 ──
 
 
 def test_migrate_missing_version_treated_as_current() -> None:
@@ -178,5 +178,5 @@ def test_json_schema_generation_smoke() -> None:
     assert schema.get("title") == "PluginSpec"
     for key in ("plugin_id", "version", "provides", "requires", "multi_instance", "after"):
         assert key in schema["properties"]
-    # extra=forbid 体现在 JSON Schema（A3 的机器可读面）
+    # extra=forbid 体现在 JSON Schema（机器可读面）
     assert schema.get("additionalProperties") is False

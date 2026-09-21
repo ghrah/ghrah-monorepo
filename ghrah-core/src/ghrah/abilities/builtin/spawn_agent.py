@@ -4,7 +4,7 @@
 
 """SpawnAgentAbility：以 manifest 实例化的方式动态创建新的平级 Agent。
 
-能力面治理（K10）：LLM 工具面不提供自由 ``abilities`` 参数——新 agent
+能力面治理：LLM 工具面不提供自由 ``abilities`` 参数——新 agent
 的能力集由 manifest 完全冻结，不继承也不由 spawner 现场拼装。程序化
 路径 ``supervisor.spawn_agent(config, abilities=[...])`` 仍可用
 （代码级显式，不经 LLM）。

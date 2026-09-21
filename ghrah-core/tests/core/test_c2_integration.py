@@ -2,9 +2,9 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""C2 收口集成测试：manifest 冻结 + HITL 门 + 集群可见性全链。
+"""集成测试：manifest 冻结 + HITL 门 + 集群可见性全链。
 
-覆盖（计划第 29 条冒烟的场景化回归）：
+覆盖冒烟场景：
 1. manifest_ref spawn 父 agent（能力面由 manifest 冻结）
 2. spawn_agent ability 经 materialize 通用分支携带 PRE_EXECUTE HITL hook
    （require_hitl: true 真实生效，非纸面门禁）
@@ -121,7 +121,7 @@ async def test_manifest_spawn_hitl_gate_full_chain() -> None:
     )
     assert spawn["success"], spawn.get("error")
 
-    # 2. spawn_agent ability 携带 PRE_EXECUTE HITL hook（K12 生效）
+    # 2. spawn_agent ability 携带 PRE_EXECUTE HITL hook（通用 HITL 接线生效）
     handle = await unit.supervisor.get_agent_handle("orch")
     hitl_hooks = [
         h

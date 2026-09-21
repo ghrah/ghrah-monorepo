@@ -1,4 +1,4 @@
-"""SubjectConfig 配置拆分测试（S2.0）。
+"""SubjectConfig 配置拆分测试。
 
 覆盖：
 - flat 字段向后兼容（旧构造调用零改动）
@@ -165,7 +165,7 @@ class TestSliceNonOptional:
 
 
 class TestTransportKind:
-    """transport kind 配置（§7.7）。"""
+    """transport kind 配置。"""
 
     def test_default_transport(self) -> None:
         config = SubjectConfig()
@@ -181,7 +181,7 @@ class TestTransportKind:
 
 
 class TestEnabledThirdPartyUnits:
-    """enabled_third_party_units allowlist（§7.6）。"""
+    """enabled_third_party_units allowlist。"""
 
     def test_default_empty_allowlist(self) -> None:
         config = SubjectConfig()

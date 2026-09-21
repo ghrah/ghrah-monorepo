@@ -6,8 +6,8 @@
 
 - 透传 15 个 ``project_*`` 命令（乐观锁 + 状态流转 + workspace 挂载禁嵌套 +
   path_grants 不重叠 + 实例 manifest 协调）。
-- ``bootstrap_default_project`` / ``adopt_existing_agents``：S4.6 reconcile
-  首启 bootstrap 专用（决策 2），经 CoreClusterRegistry + WorkspaceManager
+- ``bootstrap_default_project`` / ``adopt_existing_agents``：reconcile
+  首启 bootstrap 专用，经 CoreClusterRegistry + WorkspaceManager
   建 default cluster + default workspace + 从 Core list_agents 归入现有 agent。
 
 依赖经构造注入：``cluster_registry`` 为 ``CoreClusterRegistryService``（Protocol），
@@ -993,7 +993,7 @@ class ProjectManager:
         await self._emit(event_type, updated)
         return _ok({"project": updated.to_wire()})
 
-    # ─── bootstrap 高层方法（决策 2，供 S4.6 reconcile） ───
+    # ─── bootstrap 高层方法（供 reconcile 首启） ───
 
     async def bootstrap_default_project(self) -> ProjectRecord:
         async with self._create_lock:

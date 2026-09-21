@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Ouroboros 装配增长网（阶段 2）：mount_builtin_units 工厂集成测试。
+"""Ouroboros 装配增长网：mount_builtin_units 工厂集成测试。
 
 随迁移逐 unit 增长：每迁移一个 unit，工厂追加挂载 + 本文件加断言行。
 统一 ``asyncio.wait_for`` 超时保护——inject 名单错导致 PENDING 时表现为

@@ -1362,7 +1362,7 @@ class TestMessageQueue:
     async def test_reset_clears_iteration_state(self) -> None:
         """reset() 应重置驱动循环状态（iteration/last_action_result/pending_route）。
 
-        回归测试：S1.3 将驱动循环状态从 ContextManager 迁出到
+        回归测试：驱动循环状态从 ContextManager 迁出到
         ActorAgent._iteration_state 后，reset() 仅重建 ContextManager 不再
         隐式清掉这些字段，必须在 reset() 中显式重置，否则状态泄漏到下一轮
         （例如 list_sessions() 的 iteration_count 报告旧值）。

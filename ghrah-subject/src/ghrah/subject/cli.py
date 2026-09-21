@@ -4,7 +4,7 @@
 
 """``subject`` CLI 入口（argparse，仓内无框架先例不引入 click/typer）。
 
-首个子命令链 ``subject plugin verify [--all]``（A18 离线验证，
+首个子命令链 ``subject plugin verify [--all]``（离线验证，
 systemd-analyze verify 同构）：不启动 Subject 即可检查 spec 语法、
 capability 闭环、版本冲突、owner 撞名。
 
@@ -54,7 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _core_version() -> str | None:
-    """读 ghrah-core dist 元数据（不 import ghrah 域代码，不违 A9）。"""
+    """读 ghrah-core dist 元数据（不 import ghrah 域代码，保持离线）。"""
 
     try:
         return version("ghrah-core")
@@ -102,6 +102,19 @@ def _verify_plugins_command(*, check_all: bool) -> int:
             for spec in untrusted
             for capability in spec.provides.capabilities
         ],
+    )
+    # spec-only 插件（无可挂载 unit 工厂）→ warning（可协商不可挂载）
+    selected_ids = {spec.plugin_id for spec in selected}
+    spec_only = [item for item in discovered if item.spec.plugin_id in selected_ids]
+    findings.extend(
+        Finding(
+            severity="warning",
+            plugin_id=item.spec.plugin_id,
+            kind="spec_only",
+            message="no unit factory detected (spec-only: negotiable but not mountable)",
+        )
+        for item in spec_only
+        if item.unit_factory is None
     )
 
     if not selected and not load_issues and not findings:

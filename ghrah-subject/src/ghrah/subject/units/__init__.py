@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ouroboros import Context, Fiber  # type: ignore[import-untyped]
 
     from ghrah.subject.config import SubjectConfig
+    from ghrah.subject.runtime.route_registry import UnitRouteRegistry
     from ghrah.subject.unit.base import SubjectUnit
 
 __all__ = ["mount_builtin_units"]
@@ -23,6 +24,7 @@ async def mount_builtin_units(
     *,
     profile: str = "coexistence",
     core_cluster_unit: SubjectUnit | None = None,
+    route_registry: UnitRouteRegistry | None = None,
 ) -> dict[str, Fiber]:
     """Mount built-in units as Ouroboros plugins.
 
@@ -40,6 +42,9 @@ async def mount_builtin_units(
     None = 默认 CoreClusterRegistryUnit(config)）。程序化注入接缝——
     典型用途为携带 ``llm_factory`` 的等价配置实例（测试/嵌入方），不影响
     生产默认路径。
+
+    ``route_registry``：owner 表登记面（builtin 非互斥，仅记名）；插件
+    挂载路径据此互斥裁决。
     """
 
     if profile not in {"coexistence", "full"}:
@@ -83,14 +88,14 @@ async def mount_builtin_units(
                 RecoveryUnit(config),
             ]
         )
-        # Room Filter（E1）：requires ROOM_MANAGER（RoomUnit 之后挂载）；
+        # Room Filter：requires ROOM_MANAGER（RoomUnit 之后挂载）；
         # enabled=False 时完全不挂载（零隐式行为，配置切片控制）
         if config.room_filter.enabled:
             units.append(RoomFilterUnit(config))
 
     fibers: dict[str, Fiber] = {}
     for unit in units:
-        fiber = ctx.plugin(mount_unit(unit))
+        fiber = ctx.plugin(mount_unit(unit, route_registry=route_registry))
         await wait_active(fiber, timeout=10.0)
         fibers[unit.meta.name] = fiber
     return fibers

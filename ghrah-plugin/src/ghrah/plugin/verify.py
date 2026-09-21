@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""离线验证引擎（A18，systemd-analyze verify 同构）。
+"""离线验证引擎（systemd-analyze verify 同构）。
 
 纯函数：输入 specs + 发现问题 + core 版本，输出 findings 清单。
 CLI（``subject plugin verify``）只是薄适配；发行版 CI 可直接复用引擎。
@@ -55,7 +55,7 @@ def check_capability_closure(
     requires: list[str],
     provides: list[tuple[str | None, str]],
 ) -> tuple[list[str], dict[str, list[str]]]:
-    """capability 闭环检查（D5 SSOT：negotiator 复用同函数）。
+    """capability 闭环检查（negotiator 与本引擎复用同一函数）。
 
     Args:
         requires: 全部插件的 requires.capabilities 并集。
@@ -139,7 +139,7 @@ def verify_plugins(
             )
         )
 
-    # capability 闭环：requires 并集 − provides 并集（A3 探针：错误列候选插件）。
+    # capability 闭环：requires 并集 − provides 并集（错误时列候选插件）。
     requires = [capability for spec in specs for capability in spec.requires.capabilities]
     provides = [
         (spec.plugin_id, capability) for spec in specs for capability in spec.provides.capabilities
@@ -173,7 +173,7 @@ def verify_plugins(
 
     findings.extend(_core_version_findings(specs, core_version))
 
-    # owner 撞名（A1 离线前置形态）：provides.commands 跨插件重名。
+    # owner 撞名（离线前置形态）：provides.commands 跨插件重名。
     command_owners: dict[str, str] = {}
     for spec in specs:
         for command in spec.provides.commands:
@@ -184,7 +184,7 @@ def verify_plugins(
                         severity="error",
                         plugin_id=spec.plugin_id,
                         kind="command_conflict",
-                        message=f"command {command!r} already provided by {owner!r} (A1)",
+                        message=f"command {command!r} already provided by {owner!r}",
                     )
                 )
             else:

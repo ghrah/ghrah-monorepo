@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""注册表测试：capability 求解 + after 稳定排序（A3/A13 S0 半部）。"""
+"""注册表测试：capability 求解 + after 稳定排序。"""
 
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ def test_specs_snapshot_readonly() -> None:
     assert "injected" not in registry.specs
 
 
-# ── A13：after 稳定排序 ──
+# ── after 稳定排序 ──
 
 
 def test_sort_respects_after_declaration() -> None:
@@ -84,7 +84,7 @@ def test_sort_respects_after_declaration() -> None:
 
 
 def test_sort_missing_reference_falls_back_to_list_order() -> None:
-    # A3 豁免：被引用插件缺失不阻塞，声明退化为无效果
+    # 豁免：被引用插件缺失不阻塞，声明退化为无效果
     orphan = _spec("orphan", after=["ghost"])
     other = _spec("other")
     result = sort_for_mount([orphan, other])

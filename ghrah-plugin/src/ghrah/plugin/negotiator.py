@@ -2,10 +2,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""协商纯函数（S0 定义在本包；S1 包装进 protocol payload，A9）。
+"""协商纯函数。
 
 输入 Python 侧注册表快照 + TS 侧上报清单，输出协商结果；
-零 IO、零状态——连接级与变更级两条触发路径共用（A10）。
+零 IO、零状态——连接级与变更级两条触发路径共用。
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ class VersionConflict(BaseModel):
 
 
 class NegotiationResult(BaseModel):
-    """协商结果（父计划 §2.1 negotiator 响应结构）。"""
+    """协商结果（matcher 响应结构）。"""
 
     matched: list[MatchedPlugin] = Field(default_factory=list)
     python_only: list[PythonHalfInfo] = Field(default_factory=list)
@@ -95,11 +95,11 @@ def python_half_from_spec(
 def negotiate(python: list[PythonHalfInfo], ts: list[TsHalfReport]) -> NegotiationResult:
     """对照双侧清单得出协商结果（纯函数）。
 
-    - matched：双侧在场且 version 相等（D6：仅相等比较）；
+    - matched：双侧在场且 version 相等（仅相等比较）；
     - python_only / ts_only：单侧在场；
     - version_conflicts：双侧在场但版本不等；
     - missing_capabilities：Python 侧 requires 并集 − 双侧 provides 并集
-      （复用 verify 闭环函数，D5）。
+      （复用 verify 的 capability 闭环函数）。
     """
 
     py_by_id = {item.plugin_id: item for item in python}

@@ -13,6 +13,7 @@ from ghrah.subject.project.models import (
     IsolationSpec,
     PathGrant,
     ProjectRecord,
+    ProjectRuntimeConfig,
     RecoverySpec,
     WorkspaceMount,
     can_transition,
@@ -187,6 +188,39 @@ class TestProjectRecord:
     def test_recovery_coerce_from_str(self) -> None:
         record = ProjectRecord(project_id="p1", name="P1", recovery="drop")
         assert record.recovery.on_restart is RecoveryAction.DROP
+
+    def test_config_defaults_to_none(self) -> None:
+        record = ProjectRecord(project_id="p1", name="P1")
+        assert record.config is None
+
+    def test_config_model_roundtrip(self) -> None:
+        from ghrah.plugin.assembly import PluginAssembly, PluginInstanceConfig
+
+        record = ProjectRecord(
+            project_id="p1",
+            name="P1",
+            config=ProjectRuntimeConfig(
+                plugins=PluginAssembly(
+                    enabled=["a"],
+                    instances={"a": {"i": PluginInstanceConfig(enabled=False)}},
+                )
+            ),
+        )
+        restored = ProjectRecord.model_validate(record.model_dump())
+        assert restored.config is not None
+        assert restored.config.plugins.enabled == ["a"]
+        assert restored.config.plugins.instances["a"]["i"].enabled is False
+        assert restored == record
+
+    def test_to_wire_excludes_config(self) -> None:
+        from ghrah.plugin.assembly import PluginAssembly
+
+        record = ProjectRecord(
+            project_id="p1",
+            name="P1",
+            config=ProjectRuntimeConfig(plugins=PluginAssembly(enabled=["a"])),
+        )
+        assert "config" not in record.to_wire()
 
     def test_dt_coerce_from_iso(self) -> None:
         record = ProjectRecord(

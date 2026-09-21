@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""插件发现测试（D1 entry_point 导入式；发现 ≠ 启用）。
+"""插件发现测试（entry_point 导入式；发现 ≠ 启用）。
 
 entry point value 是 ``module:attr`` 字符串，经真实 import 机制加载
 （测试目标模块：tests/loader_targets.py）。
@@ -20,6 +20,10 @@ _TARGETS_MODULE = "loader_targets"
 
 def _ep(name: str, attr: str) -> EntryPoint:
     return EntryPoint(name=name, value=f"{_TARGETS_MODULE}:{attr}", group="ghrah.plugins")
+
+
+def _module_ep(name: str) -> EntryPoint:
+    return EntryPoint(name=name, value=_TARGETS_MODULE, group="ghrah.plugins")
 
 
 class _FakeEntryPoints:
@@ -49,6 +53,33 @@ def test_non_spec_target_becomes_issue(monkeypatch: Any) -> None:
     assert discovered == []
     assert len(issues) == 1
     assert "not a PluginSpec" in issues[0].error
+
+
+def test_plain_spec_is_spec_only(monkeypatch: Any) -> None:
+    """普通 PluginSpec 实例无可挂载工厂 → unit_factory 为 None。"""
+    _patch(monkeypatch, [_ep("plugin-a", "spec_a")])
+    discovered, issues = discover_plugins()
+    assert issues == []
+    assert discovered[0].spec.plugin_id == "plugin-a"
+    assert discovered[0].unit_factory is None
+
+
+def test_module_target_exposing_spec_and_unit_factory(monkeypatch: Any) -> None:
+    """模块形态 entry point：模块暴露 spec + ``create_unit`` → 可挂载。"""
+    _patch(monkeypatch, [_module_ep("plugin-module")])
+    discovered, issues = discover_plugins()
+    assert issues == []
+    assert [d.spec.plugin_id for d in discovered] == ["plugin-module"]
+    assert callable(discovered[0].unit_factory)
+
+
+def test_spec_subclass_unit_factory_detected(monkeypatch: Any) -> None:
+    """PluginSpec 子类以类属性声明 ``unit_factory`` → 可挂载。"""
+    _patch(monkeypatch, [_ep("plugin-sub", "sub_spec")])
+    discovered, issues = discover_plugins()
+    assert issues == []
+    assert discovered[0].spec.plugin_id == "plugin-sub"
+    assert callable(discovered[0].unit_factory)
 
 
 def test_load_exception_becomes_issue(monkeypatch: Any) -> None:

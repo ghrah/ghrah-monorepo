@@ -58,7 +58,7 @@ def test_project_lifecycle_axes_and_legacy_deleted_record_input() -> None:
         name="legacy",
         deleted_at="2026-08-27T00:00:00Z",
     )
-    # A7 migration input remains readable. Stage C migrates deleted_at -> archived_at.
+    # legacy deleted_at input remains readable; migration maps it to archived_at.
     assert legacy.deleted_at is not None
     assert legacy.archived_at is None
     assert legacy.status.value == "active"

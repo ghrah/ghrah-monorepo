@@ -329,7 +329,7 @@ class TestCoreClusterRegistryUnit:
             await ctx.__aexit__(None, None, None)
 
     async def test_concurrent_ensure_mounts_single_instance(self, tmp_path: Path) -> None:
-        """回归 H2：并发 ensure 同一 cluster 只挂载一个 CoreUnit 实例。"""
+        """回归：并发 ensure 同一 cluster 只挂载一个 CoreUnit 实例。"""
         import asyncio
 
         ctx, _, registry, created = await _boot(tmp_path)
@@ -349,7 +349,7 @@ class TestCoreClusterRegistryUnit:
             await ctx.__aexit__(None, None, None)
 
     async def test_mount_failure_recycled_and_retry_succeeds(self, tmp_path: Path) -> None:
-        """回归 H2/H3：挂载失败回收 fiber、返回稳定错误码，重试可成功。"""
+        """回归：挂载失败回收 fiber、返回稳定错误码，重试可成功。"""
         created: list[_FlakyStartCoreUnit] = []
         fail = {"on": True}
 
@@ -392,7 +392,7 @@ class _ProjectManagerStub:
 
 
 class TestProjectRuntimeStateGuards:
-    """H4 回归：非 ACTIVE Project 拒绝会复活 cluster 的命令；读/终止免挂载。"""
+    """回归：非 ACTIVE Project 拒绝会复活 cluster 的命令；读/终止免挂载。"""
 
     @staticmethod
     def _project(status: str) -> dict[str, Any]:
@@ -748,7 +748,7 @@ class TestAgentCompactContextRouting:
 
 
 class TestAgentResetRouting:
-    """agent_reset 命令路由（ActionChain 阶段 4 / S1 转发面）。"""
+    """agent_reset 命令路由（转发面）。"""
 
     async def test_route_included_in_unit_meta(self, tmp_path: Path) -> None:
         """路由集合注册：未知命令拒绝守卫放行 agent_reset。"""
@@ -892,7 +892,7 @@ class TestRealCoreUnitMultiCluster:
                 CoreUnitConfig(
                     cluster_id=cluster_id,
                     project_id=project_id,
-                    # C2 fail-closed：无 abilities spawn 须显式声明默认集
+                    # fail-closed：无 abilities spawn 须显式声明默认集
                     default_abilities=("conversation", "end_task"),
                 )
             )

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""协商纯函数测试（S0 验收标志②：三种错位响应正确）。"""
+"""协商纯函数测试（三种错位响应正确）。"""
 
 from __future__ import annotations
 

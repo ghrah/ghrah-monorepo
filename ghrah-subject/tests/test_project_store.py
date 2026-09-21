@@ -6,11 +6,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from ghrah.plugin.assembly import PluginAssembly, PluginInstanceConfig
 from ghrah.protocol.types import ProjectStatus, RecoveryAction
 
 from ghrah.subject.project.models import (
     AgentSpec,
     ProjectRecord,
+    ProjectRuntimeConfig,
     RecoverySpec,
     WorkspaceMount,
     make_project_record,
@@ -106,13 +108,38 @@ class TestCrudAndRoundtrip:
                 version = db.execute(
                     "SELECT version FROM subject_schema_versions WHERE component = 'project_store'"
                 ).fetchone()
-            assert {"description", "project_root_locator", "archived_at"} <= columns
-            assert version == (3,)
+            assert {"description", "project_root_locator", "archived_at", "config"} <= columns
+            assert version == (4,)
         finally:
             await migrated.stop()
 
     async def test_get_missing_returns_none(self, store: ProjectStore) -> None:
         assert await store.get("nonexistent") is None
+
+    async def test_config_plugins_roundtrip(self, store: ProjectStore) -> None:
+        """``ProjectRecord.config.plugins`` 随 JSON 列持久化往返。"""
+        record = make_project_record(name="P1")
+        record.config = ProjectRuntimeConfig(
+            plugins=PluginAssembly(
+                enabled=["plugin-a"],
+                instances={"plugin-a": {"i1": PluginInstanceConfig(enabled=False)}},
+            )
+        )
+        await store.upsert(record)
+        got = await store.get(record.project_id)
+        assert got is not None
+        assert got.config is not None
+        assert got.config.plugins.enabled == ["plugin-a"]
+        assert got.config.plugins.instances["plugin-a"]["i1"].enabled is False
+        # 内部装配语义不进 wire
+        assert "config" not in got.to_wire()
+
+    async def test_config_absent_reads_as_none(self, store: ProjectStore) -> None:
+        record = make_project_record(name="P1")
+        await store.upsert(record)
+        got = await store.get(record.project_id)
+        assert got is not None
+        assert got.config is None
 
     async def test_json_columns_roundtrip(self, store: ProjectStore) -> None:
         record = make_project_record(name="P1")
@@ -254,7 +281,7 @@ class TestArchiveRestoreHardDelete:
         await legacy.upsert(record)
         await legacy.stop()
 
-        # Simulate a pre-C1 schema version so startup executes the data migration.
+        # Simulate an older schema version so startup executes the data migration.
         with sqlite3.connect(db_path) as db:
             db.execute(
                 "UPDATE subject_schema_versions SET version = 2 WHERE component = 'project_store'"

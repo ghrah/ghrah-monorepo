@@ -629,7 +629,7 @@ class TestProjectAddRemoveAgent:
     async def test_remove_agent_terminate_failure_keeps_definition(
         self, store: ProjectStore, tmp_path: Path
     ) -> None:
-        """回归 H1：terminate 失败 → 定义保留、无 removed 事件、稳定错误码。"""
+        """回归：terminate 失败 → 定义保留、无 removed 事件、稳定错误码。"""
         events: list[tuple[str, dict[str, Any]]] = []
         transport = _FakeClusterTransport()
         mgr = _make_manager(

@@ -88,7 +88,7 @@ class ProjectInfoPayload(BaseModel):
     created_at: str = ""
     updated_at: str = ""
     archived_at: str | None = None
-    # 仅用于 A7 旧软删数据迁移；新生命周期不再写入该字段。
+    # 仅用于旧软删（deleted_at）数据迁移；新生命周期不再写入该字段。
     deleted_at: str | None = None
 
 
@@ -140,7 +140,7 @@ class ProjectListPayload(BaseModel):
 
     status: ProjectStatus | None = None
     archived: bool | None = False
-    # A7 兼容读取旧 deleted_at 记录；迁移完成后删除。
+    # 兼容读取旧 deleted_at 记录；迁移完成后删除。
     include_deleted: bool = False
 
 

@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from ghrah.plugin.assembly import PluginAssembly
 from ghrah.protocol.types import ProjectStatus, RecoveryAction
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
@@ -27,6 +28,7 @@ __all__ = [
     "IsolationSpec",
     "PathGrant",
     "ProjectRecord",
+    "ProjectRuntimeConfig",
     "ProjectStatus",
     "RecoveryAction",
     "RecoverySpec",
@@ -197,6 +199,19 @@ def normalize_status(value: str | ProjectStatus) -> ProjectStatus:
     return ProjectStatus(value)
 
 
+class ProjectRuntimeConfig(BaseModel):
+    """Project 运行期配置（内部装配语义，不进 wire）。
+
+    与 ``ghrah.subject.config.ProjectConfig``（Unit 配置切片 dataclass）
+    分属两层：此处是 ProjectRecord 持久化的 per-project 配置权威，
+    ``plugins`` 是插件装配清单。
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    plugins: PluginAssembly = Field(default_factory=PluginAssembly)
+
+
 class ProjectRecord(BaseModel):
     """Subject 内部 project 记录（对齐 protocol ``ProjectInfoPayload``）。
 
@@ -207,6 +222,7 @@ class ProjectRecord(BaseModel):
     - 时间戳内部用 ``datetime(UTC)``，序列化为 ISO str。
     - ``recovery`` 内部用 ``RecoverySpec``，序列化为 ``RecoveryAction.value``。
     - ``archived_at`` 是资源可用性轴；``deleted_at`` 仅保留旧数据兼容读取。
+    - ``config`` 是内部装配语义（plugins 装配清单），``to_wire()`` 不输出。
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -223,6 +239,7 @@ class ProjectRecord(BaseModel):
     isolation: IsolationSpec = Field(default_factory=IsolationSpec)
     status: ProjectStatus = ProjectStatus.ACTIVE
     recovery: RecoverySpec = Field(default_factory=RecoverySpec)
+    config: ProjectRuntimeConfig | None = None
 
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -264,9 +281,9 @@ class ProjectRecord(BaseModel):
         recovery 为 ``RecoveryAction.value`` 字符串，时间戳 ISO str，含
         version/archived_at/deleted_at/cluster_ids/workspaces/agents/task_ids。
         ``isolation`` 已纳入 ``ProjectInfoPayload``，Observer 可对运行时实际返回的
-        隔离配置进行强类型读取。
+        隔离配置进行强类型读取。``config``（内部装配语义）不进 wire。
         """
-        return self.model_dump(mode="json")
+        return self.model_dump(mode="json", exclude={"config"})
 
 
 def make_project_record(

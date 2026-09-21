@@ -37,6 +37,7 @@ __all__ = [
     "OBSERVER_ENDPOINT",
     "OBSERVER_EVENT_BUS",
     "PROJECT_MANAGER",
+    "PROJECT_STORE",
     "RECONCILIATION_SERVICE",
     "ROOM_MANAGER",
     "ROOM_STORE",
@@ -225,6 +226,7 @@ TASK_MANAGER = SubjectServiceKey[TaskManagerService]("task_manager")
 TASK_STORE = SubjectServiceKey[TaskStore]("task_store", TaskStore)
 CORE_CLUSTER_REGISTRY = SubjectServiceKey[CoreClusterRegistryService]("core_cluster_registry")
 PROJECT_MANAGER = SubjectServiceKey[ProjectManagerService]("project_manager")
+PROJECT_STORE = SubjectServiceKey["ProjectStore"]("project_store")
 ROOM_MANAGER = SubjectServiceKey[RoomManagerService]("room_manager")
 ROOM_STORE = SubjectServiceKey["RoomStore"]("room_store")
 

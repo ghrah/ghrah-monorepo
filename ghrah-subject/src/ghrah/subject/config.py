@@ -2,7 +2,7 @@
 
 管理 Subject 的运行时配置，包括工作区路径、数据库路径、权限策略和 Core 连接。
 
-S2.0 配置拆分：把上帝配置对象拆为各 Unit 独立配置切片，`from_env()` 向后兼容。
+配置拆分：把上帝配置对象拆为各 Unit 独立配置切片，`from_env()` 向后兼容。
 旧 flat 字段（workspace_root/db_path/manifest_root/hitl_policy/core/log_level）保留为兼容真相，
 新 slice（persistence/sandbox/manifest/hitl）由 flat 字段派生或可显式传入。
 """
@@ -157,10 +157,10 @@ class ManifestConfig:
     manifest_root: str = os.path.expanduser("~/.ghrah/manifests")
 
 
-# §7.7 transport kind 配置（Stage 2 仅实现 websocket，预留 ipc/grpc）
+# transport kind 配置（当前仅实现 websocket，预留 ipc/grpc）
 @dataclass
 class TransportKindConfig:
-    """transport kind 配置（Stage 2 仅实现 websocket，预留 ipc/grpc/http）。
+    """transport kind 配置（当前仅实现 websocket，预留 ipc/grpc/http）。
 
     Attributes:
         core: core 传输层类型，websocket | ipc | grpc
@@ -197,7 +197,7 @@ class RecoveryConfig:
         subject_id: 对账归属的 subject 标识（默认 "default"）
         on_unknown_workspace: reconcile 遇到孤立 workspace 时的默认策略
         reconcile_on_start: 启动时是否自动对账（enabled 之外的独立开关）
-        bootstrap_default_project: 首启自动建 default project（决策 6）
+        bootstrap_default_project: 首启自动建 default project
     """
 
     enabled: bool = True
@@ -209,10 +209,10 @@ class RecoveryConfig:
 
 @dataclass
 class RoomFilterConfig:
-    """Room Filter Unit 配置切片（E1：能力结果 → RoomLog 显式 Filter）。
+    """Room Filter Unit 配置切片（能力结果 → RoomLog 显式 Filter）。
 
-    白名单配置驱动（用户裁决：零隐式行为——非白名单/无 room 上下文的
-    能力结果一律不落 Room；manifest ``chat_visible`` 元数据扩展属 E2）。
+    白名单配置驱动（零隐式行为——非白名单/无 room 上下文的
+    能力结果一律不落 Room；manifest ``chat_visible`` 元数据扩展留待后续）。
 
     Attributes:
         enabled: 是否挂载 Filter Unit（False = 完全无过滤行为）
@@ -225,10 +225,10 @@ class RoomFilterConfig:
 
 @dataclass
 class PluginTrustConfig:
-    """插件信任边界切片（双层权威的 Subject 层，§7.2）。
+    """插件信任边界切片（双层权威的 Subject 层）。
 
     信任闸：entry_points 可被加载的 plugin_id 白名单（发现 ≠ 启用 ≠ 信任）。
-    S0 供 ``subject plugin verify`` 默认模式；挂载期强制执行归 S2。
+    供 ``subject plugin verify`` 默认模式与装配链挂载期强制执行。
 
     Attributes:
         discoverable: 信任清单（plugin_id；env GHRAH_SUBJECT_PLUGIN_TRUST 逗号分隔）
@@ -265,7 +265,7 @@ class SubjectConfig:
         core: Core 传输层配置
         log_level: 日志级别
         transport: transport kind 配置（websocket/ipc/grpc）
-        enabled_third_party_units: 第三方 Unit allowlist（§7.6）
+        enabled_third_party_units: 第三方 Unit allowlist
     """
 
     # 旧 flat 字段保留，避免破坏 scripts/start_all.py / conftest.py / 外部构造代码。
@@ -289,7 +289,7 @@ class SubjectConfig:
     # 非 slice 的新字段（有默认值，可直接构造）。
     transport: TransportKindConfig = field(default_factory=TransportKindConfig)
     enabled_third_party_units: list[str] = field(default_factory=list)
-    # spawn 默认能力集——部署方的显式声明（C2 fail-closed 兼容通道）：
+    # spawn 默认能力集——部署方的显式声明（fail-closed 兼容通道）：
     # Observer 无 abilities 快速 spawn 经 CoreUnitConfig.default_abilities
     # 注入此集；置空列表 = 关闭快速 spawn（必须 manifest_ref/显式 abilities）。
     default_spawn_abilities: list[str] = field(default_factory=lambda: ["conversation", "end_task"])
@@ -553,7 +553,7 @@ class SubjectConfig:
             ),
         )
 
-        # plugin_trust slice（D4：S0 供 verify 默认模式；挂载期强制执行归 S2）
+        # plugin_trust slice（供 verify 默认模式与装配链挂载期强制执行）
         plugin_trust_slice = PluginTrustConfig(
             discoverable=[
                 p.strip()

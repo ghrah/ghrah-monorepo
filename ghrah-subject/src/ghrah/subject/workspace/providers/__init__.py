@@ -2,6 +2,6 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""内置 workspace provider（W2 git / W3 plain 待补）。"""
+"""内置 workspace provider（git / plain 待补）。"""
 
 from __future__ import annotations

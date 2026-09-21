@@ -205,7 +205,7 @@ class TaskProvenancePayload(BaseModel):
 
 
 class TaskClaimPayload(BaseModel):
-    """claim（完成声明）载荷，G1 归因的核心载体。"""
+    """claim（完成声明）载荷，归因的核心载体。"""
 
     claim_id: str
     task_id: str

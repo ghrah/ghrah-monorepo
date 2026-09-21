@@ -219,7 +219,7 @@ class WorkspaceStore:
             return [_row_to_record(r) for r in rows]
 
     async def list_all_active(self) -> WorkspaceRecordList:
-        """返回所有未软删记录（W5 manager start 重建内存索引用）。"""
+        """返回所有未软删记录（manager start 重建内存索引用）。"""
         return await self.list(include_deleted=False)
 
 

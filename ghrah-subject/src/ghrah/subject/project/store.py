@@ -5,10 +5,9 @@
 """ProjectStore：SQLite 持久化 subject_projects 元数据表。
 
 独立 aiosqlite 连接到主库（``ctx.config.persistence.db_path``，由调用方传入）。
-``subject_projects`` 存全局 project 注册表（决策 14：per-project 业务 DB 由
-本 store 不连接 Project Root 内业务 DB。JSON 列保存
-复数资源（cluster_ids/workspaces/agents/task_ids/isolation）；``recovery`` 存
-单值字符串（``RecoveryAction.value``，利于 SQL 过滤）。
+``subject_projects`` 存全局 project 注册表；本 store 不连接 Project Root 内业务 DB。
+JSON 列保存复数资源（cluster_ids/workspaces/agents/task_ids/isolation/config）；
+``recovery`` 存单值字符串（``RecoveryAction.value``，利于 SQL 过滤）。
 
 模式镜像 ``ghrah.subject.task.store.TaskStore``：乐观锁 + 显式归档 + 幂等 DDL。
 """
@@ -71,7 +70,8 @@ CREATE TABLE IF NOT EXISTS subject_projects (
     updated_at            TEXT NOT NULL,
     version               INTEGER NOT NULL DEFAULT 1,
     archived_at           TEXT,
-    deleted_at            TEXT
+    deleted_at            TEXT,
+    config                TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_subject_projects_status  ON subject_projects(status);
 CREATE INDEX IF NOT EXISTS idx_subject_projects_deleted ON subject_projects(deleted_at);
@@ -95,16 +95,18 @@ _COLUMNS = (
     "version",
     "archived_at",
     "deleted_at",
+    "config",
 )
 # JSON 列：复数资源与结构化字段经 json.dumps/json.loads 往返。
 # recovery 不在此列（单值字符串列）。
-_JSON_COLUMNS = ("cluster_ids", "workspaces", "agents", "task_ids", "isolation")
+_JSON_COLUMNS = ("cluster_ids", "workspaces", "agents", "task_ids", "isolation", "config")
 _SCHEMA_COMPONENT = "project_store"
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 _MIGRATION_COLUMNS: dict[int, tuple[str, str]] = {
     1: ("description", "TEXT NOT NULL DEFAULT ''"),
     2: ("project_root_locator", "TEXT NOT NULL DEFAULT ''"),
     3: ("archived_at", "TEXT"),
+    4: ("config", "TEXT"),
 }
 
 
@@ -191,7 +193,7 @@ class ProjectStore:
                 "ON CONFLICT(component) DO UPDATE SET version = excluded.version",
                 (_SCHEMA_COMPONENT, version),
             )
-        # A7/C1：旧 soft-delete 即归档。迁移后新代码只写 archived_at；清空
+        # 旧 soft-delete 即归档。迁移后新代码只写 archived_at；清空
         # deleted_at，避免同一记录同时落入“旧删除”和“新归档”两套过滤轴。
         await db.execute(
             "UPDATE subject_projects SET archived_at = deleted_at, deleted_at = NULL, "

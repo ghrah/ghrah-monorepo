@@ -1104,7 +1104,7 @@ class TestHITLRuntimeOverride:
 
 
 class TestForkContextContinuity:
-    """Fork 场景验证（补遗 §四）：换实现不丢上下文。"""
+    """Fork 场景验证：换实现不丢上下文。"""
 
     async def test_per_agent_backend_swap_and_rebase_context(self, tmp_path: Any) -> None:
         """换持久化后端 = 新 spawn 注入新 factory；Fork = 上下文继承（正交）。"""

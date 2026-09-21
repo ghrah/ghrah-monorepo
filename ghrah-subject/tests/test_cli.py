@@ -4,7 +4,7 @@
 
 """``subject plugin verify`` CLI 测试（进程内 main()，零 Subject runtime）。
 
-S0 验收标志③：--all 模式无 Subject 进程检出 capability 闭环失败。
+--all 模式：无 Subject 进程即可检出 capability 闭环失败。
 """
 
 from __future__ import annotations
@@ -140,7 +140,7 @@ def test_empty_trust_hint(
 def test_candidate_provides_enrichment_in_trusted_mode(
     capsys: pytest.CaptureFixture[str], monkeypatch: Any, _no_env: None
 ) -> None:
-    # A3 探针：错误列候选插件（未信任的 provider 能补缺口，verify 提示候选）
+    # 错误列候选插件（未信任的 provider 能补缺口，verify 提示候选）
     _patch_discovery(
         monkeypatch,
         [

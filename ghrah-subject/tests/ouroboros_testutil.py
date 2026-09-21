@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Ouroboros 测试助手（阶段 2 各 test_units_* 共用）。
+"""Ouroboros 测试助手（各 test_units_* 共用）。
 
 ``wait_active`` 实现移至 ``runtime/ouroboros_bridge.py``（工厂
 ``mount_builtin_units`` 复用同款 ACTIVE 语义），本模块再导出以保持各测试

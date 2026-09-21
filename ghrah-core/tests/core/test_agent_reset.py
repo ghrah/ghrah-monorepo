@@ -2,15 +2,15 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""agent_reset 命令（ActionChain 阶段 4 / S1）。
+"""agent_reset 命令。
 
 覆盖：
 - 回执字段与稳定路由（project_id + agent_id）；
-- 旧 Session 保留、lifecycle 不动（J3）；
-- 立即持久化（reset 返回即落库）+ 增量不变量（只写新实体与 active 指针，J4/P0.6）；
+- 旧 Session 保留、lifecycle 不动；
+- 立即持久化（reset 返回即落库）+ 增量不变量（只写新实体与 active 指针）；
 - Core 重启恢复一致（active Session/Branch/Root/Head 与旧 Session 可读）；
-- 驱动循环中显式拒绝（J5）；
-- session_created/session_activated 既有事件路径广播（J2）。
+- 驱动循环中显式拒绝；
+- session_created/session_activated 既有事件路径广播。
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ class TestAgentResetReceipt:
 
 
 class TestAgentResetSemantics:
-    """J3：旧 Session 保留 + J2：既有事件路径。"""
+    """旧 Session 保留 + 既有事件路径。"""
 
     async def test_old_sessions_preserved_and_lifecycle_untouched(self, tmp_path: Path) -> None:
         ctx = FakeCtx()
@@ -189,7 +189,7 @@ class TestAgentResetSemantics:
 
 
 class TestAgentResetPersistence:
-    """J4：立即持久化 + 增量不变量 + 重启恢复。"""
+    """立即持久化 + 增量不变量 + 重启恢复。"""
 
     async def test_reset_persisted_before_receipt_returns(self, tmp_path: Path) -> None:
         """reset 返回时数据已在库（重启口径验证）。"""
@@ -335,7 +335,7 @@ class TestAgentResetPersistence:
 
 
 class TestAgentResetConcurrency:
-    """J5：驱动循环中显式拒绝。"""
+    """驱动循环中显式拒绝。"""
 
     async def test_reset_rejected_while_drive_loop_active(self, tmp_path: Path) -> None:
         config = _make_unit(tmp_path, FakeCtx())

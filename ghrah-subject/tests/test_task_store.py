@@ -519,7 +519,7 @@ class TestProjectIdMigration:
             await s2.stop()
 
 
-# ─── reassign_project_id（S0 补丁，S4.6 reconcile bootstrap 用） ───
+# ─── reassign_project_id（reconcile bootstrap 用） ───
 
 
 class TestReassignProjectId:

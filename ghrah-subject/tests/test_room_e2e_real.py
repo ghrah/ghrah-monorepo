@@ -317,7 +317,7 @@ class TestRoomRealEndToEnd:
             assert received.content == "你好"
             assert received.sender == "human:yuki"
 
-            # E0 贯通断言：投递 metadata（room_id）随 AgentMessage 到达 agent
+            # 贯通断言：投递 metadata（room_id）随 AgentMessage 到达 agent
             # （receive 侧合入 ChatMessage metadata → 链节点 messages_delta）
             assert received.metadata.get("room_id") == room["room_id"]
 
@@ -337,7 +337,7 @@ class TestRoomRealEndToEnd:
             assert len(actor._message_history) == 1
 
     async def test_room_filter_appends_conversation_reply(self, tmp_path: Path) -> None:
-        """E1/G1（合成事件）：白名单 conversation 结果 + room 上下文 → 落 RoomLog。
+        """合成事件：白名单 conversation 结果 + room 上下文 → 落 RoomLog。
 
         真实 LLM 不参与：以真实序列化形状的合成 action_chain_updated 事件
         驱动（事件订阅/Filter/room_send 校验/落账/广播全链路真实执行）。
@@ -414,10 +414,10 @@ class TestRoomRealEndToEnd:
             assert entry["author_type"] == "agent"
             assert entry["data"]["message"] == "收到，开始规划"
             assert entry["data"]["via"] == "chain_filter"
-            # WS 投影：room_log_appended(agent) 已广播（G1 断言面）
+            # WS 投影：room_log_appended(agent) 已广播（断言面）
             assert events[0][1]["entry"]["id"] == entry["id"]
 
-            # G3 负例：无 room 上下文（metadata.room_id 缺失）→ 不落
+            # 负例：无 room 上下文（metadata.room_id 缺失）→ 不落
             ctx.emit(
                 "core:action_chain_updated",
                 {

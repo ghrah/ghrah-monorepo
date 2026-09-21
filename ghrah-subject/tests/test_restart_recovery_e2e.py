@@ -251,7 +251,7 @@ async def test_restart_migrates_unique_legacy_name_snapshot_to_stable_uuid(
     tmp_path: Path,
 ) -> None:
     """旧 ProjectSpec/name-key DB 在 reconcile 前备份、重键并恢复。"""
-    pytest.skip("P0 v2 schema deliberately does not migrate pre-production databases")
+    pytest.skip("v2 schema deliberately does not migrate pre-production databases")
     config = _config(tmp_path)
     project_id = ""
     cluster_id = ""

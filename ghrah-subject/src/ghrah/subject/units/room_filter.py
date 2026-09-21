@@ -2,15 +2,15 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""Room Filter built-in Subject unit（E1：能力结果 → RoomLog 显式 Filter）。
+"""Room Filter built-in Subject unit（能力结果 → RoomLog 显式 Filter）。
 
-用户裁决：**零隐式行为**——白名单（配置驱动）之外 / 无 room 上下文的
+白名单配置驱动：**零隐式行为**——白名单（配置驱动）之外 / 无 room 上下文的
 能力结果一律不落 Room。
 
 数据流（主源 ``core:action_chain_updated``，驱动循环每迭代每节点发布
 全量序列化 node）：
 
-1. H1 投递（RoomUnit deliver）带 ``metadata.room_id`` → CoreUnit
+1. 投递（RoomUnit deliver）带 ``metadata.room_id`` → CoreUnit
    ``send_message`` → ``AgentMessage.metadata`` → receive 侧合入用户
    ChatMessage → ``commit_iteration`` 落入链节点 ``messages_delta``；
 2. 本 unit 订阅 ``core:action_chain_updated``，对 node 内命中白名单且
@@ -107,7 +107,7 @@ class RoomFilterUnit(SubjectUnit):
 
         room_id = self._resolve_room_id(node)
         if room_id is None:
-            # 无 room 上下文 → 不落（显式 Filter 契约，负例 G3）
+            # 无 room 上下文 → 不落（显式 Filter 契约）
             return
 
         action_results = node.get("action_results") or []
@@ -136,7 +136,7 @@ class RoomFilterUnit(SubjectUnit):
     def _resolve_room_id(node: dict[str, Any]) -> str | None:
         """从 node.messages_delta 显式解析 room 上下文。
 
-        H1 投递的用户消息携带 ``metadata.room_id``（receive 侧合入）。一次
+        投递的用户消息携带 ``metadata.room_id``（receive 侧合入）。一次
         receive 若经历多轮 tool call，后续节点没有 user delta，因此 Core 还会
         把同一归属写入 ``node.metadata.delivery_context``。
         两处均缺失 → None（不落账）。

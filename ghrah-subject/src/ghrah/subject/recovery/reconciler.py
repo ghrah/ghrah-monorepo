@@ -130,7 +130,7 @@ class ReconciliationService:
         self._last_report: ReconcileReport | None = None
 
     async def reconcile(self) -> ReconcileReport:
-        """执行全栈 reconcile（父计划 §3.3 流程）。幂等可重复。不 raise。"""
+        """执行全栈 reconcile。幂等可重复。不 raise。"""
         report = ReconcileReport(subject_id=self._subject_id)
         try:
             await self._desired_store.start()
@@ -168,7 +168,7 @@ class ReconciliationService:
         raw_projects = (result.get("data") or {}).get("projects", [])
         return [ProjectRecord.model_validate(project) for project in raw_projects]
 
-    # ─── bootstrap（首启，决策 2/6） ───
+    # ─── bootstrap（首启） ───
 
     async def _bootstrap(self, report: ReconcileReport) -> None:
         """首启 bootstrap：建 default project + 迁移 sentinel task + 归入现有 agent。
@@ -207,7 +207,7 @@ class ReconciliationService:
             DesiredStateRecord(subject_id=self._subject_id, projects=projects)
         )
 
-    # ─── 单 project reconcile（父计划 §3.3 步骤 1-2） ───
+    # ─── 单 project reconcile ───
 
     async def _reconcile_project(self, project: ProjectRecord, report: ReconcileReport) -> None:
         """对账单个 project：workspace / cluster / 实例 manifest / agent。"""
@@ -333,7 +333,7 @@ class ReconciliationService:
                         }
                     )
                     continue
-                # 实例 manifest 校验（决策 5：MVP 仅 os.path.exists，缺失 warning 不渲染）
+                # 实例 manifest 校验（当前仅 os.path.exists，缺失 warning 不渲染）
                 if agent.instance_manifest_path:
                     if not os.path.exists(agent.instance_manifest_path):
                         logger.warning(

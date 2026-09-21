@@ -2,10 +2,10 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""S1 wire 快照生成：Python model_dump 产物落盘 TS __snapshots__ 目录（仓内手贴惯例的脚本化）。
+"""wire 快照生成：Python model_dump 产物落盘 TS __snapshots__ 目录（仓内手贴惯例的脚本化）。
 
-用法（根目录）：uv run python plans/../ghrah-protocol/tests/protocol/gen_s1_snapshots.py
-仅生成 S1 新增快照；生成后双侧同 commit（TS protocol-align 消费）。
+用法（根目录）：uv run python ghrah-protocol/tests/protocol/gen_s1_snapshots.py
+仅生成本批新增快照；生成后双侧同 commit（TS protocol-align 消费）。
 """
 
 from __future__ import annotations

@@ -4,7 +4,7 @@
 
 """插件挂载/装配错误类型。
 
-S0 仅定义形态（供 verify 输出与测试消费）；S2 owner 表挂载期爆炸复用。
+供 verify 输出、owner 表挂载期爆炸与装配链拒绝路径复用。
 """
 
 from __future__ import annotations

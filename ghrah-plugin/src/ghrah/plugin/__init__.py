@@ -2,12 +2,13 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""插件基础设施（L2）。
+"""插件基础设施。
 
 零 ghrah 域包依赖：本包与 pydantic/packaging 同级，是插件契约（plugin spec）
-的唯一权威（SSOT）。发现 ≠ 启用；挂载与信任闸强制执行归 ghrah-subject（S2）。
+的唯一权威（SSOT）。发现 ≠ 启用；挂载与信任闸强制执行归 ghrah-subject。
 """
 
+from ghrah.plugin.assembly import PluginAssembly, PluginInstanceConfig, validate_assembly
 from ghrah.plugin.errors import CapabilityMissingError, PluginMountError
 from ghrah.plugin.loader import DiscoveredPlugin, LoadIssue, discover_plugins
 from ghrah.plugin.negotiator import (
@@ -26,6 +27,8 @@ __all__ = [
     "Finding",
     "LoadIssue",
     "NegotiationResult",
+    "PluginAssembly",
+    "PluginInstanceConfig",
     "PluginMountError",
     "PluginRegistry",
     "PluginSpec",
@@ -35,5 +38,6 @@ __all__ = [
     "migrate_spec",
     "negotiate",
     "plugin_spec_json_schema",
+    "validate_assembly",
     "verify_plugins",
 ]
