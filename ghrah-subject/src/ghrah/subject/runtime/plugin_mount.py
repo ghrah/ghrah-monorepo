@@ -33,6 +33,8 @@ from ghrah.subject.runtime.plugin_session import PluginSession
 from ghrah.subject.unit.base import SubjectUnit
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from ghrah.plugin.loader import DiscoveredPlugin
     from ouroboros import Context, Fiber
 
@@ -40,6 +42,7 @@ if TYPE_CHECKING:
     from ghrah.subject.runtime.route_registry import UnitRouteRegistry
 
 __all__ = [
+    "CheckerSink",
     "PluginMountOutcome",
     "PluginMountReport",
     "PluginSessionState",
@@ -47,6 +50,13 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# checker 装配 sink：(plugin_id, {checker_name: checker}) → 由装配层注入注册/注销。
+# 崩溃/卸载路径回调空 dict 注销（防死插件残留，否则归因失真）。
+if TYPE_CHECKING:
+    CheckerSink = Callable[[str, dict[str, Any]], Awaitable[None]]
+else:
+    CheckerSink = Any
 
 
 @dataclass
@@ -131,6 +141,7 @@ async def mount_enabled_plugins(
     state: PluginSessionState,
     session: PluginSession,
     project_statuses: dict[str, str] | None = None,
+    on_checkers: CheckerSink | None = None,
 ) -> PluginMountReport:
     """启动期装配已启用插件（信任闸 → 聚合 → 排序 → 校验 → 挂载）。
 
@@ -143,6 +154,7 @@ async def mount_enabled_plugins(
         state: 协商会话状态（成功挂载登记）。
         session: 协商 unit（崩溃/挂载后广播回调）。
         project_statuses: project_id → status（ACTIVE 之外不装配）。
+        on_checkers: checker 装配 sink（挂载成功 → 注册；崩溃/卸载 → 空 dict 注销）。
     """
 
     report = PluginMountReport()
@@ -196,6 +208,7 @@ async def mount_enabled_plugins(
             fibers=fibers,
             state=state,
             session=session,
+            on_checkers=on_checkers,
         )
         report.outcomes.append(outcome)
         if outcome.status == "mounted":
@@ -217,8 +230,9 @@ async def _mount_one(
     fibers: dict[str, Fiber],
     state: PluginSessionState,
     session: PluginSession,
+    on_checkers: CheckerSink | None = None,
 ) -> PluginMountOutcome:
-    """单插件挂载：形状校验 → multi_instance 拒挂 → 工厂探测 → 挂载。"""
+    """单插件挂载：形状校验 → multi_instance 拒挂 → 工厂探测 → 挂载 → checker 注册。"""
 
     # 形状校验（只看本插件相关条目）
     scoped = PluginAssembly(
@@ -256,6 +270,7 @@ async def _mount_one(
         route_registry=route_registry,
         state=state,
         session=session,
+        on_checkers=on_checkers,
     )
     try:
         await mount_dynamic_unit(
@@ -272,7 +287,44 @@ async def _mount_one(
         logger.warning("Plugin '%s' mount failed: %s", plugin_id, exc)
         return PluginMountOutcome(plugin_id, "mount_failed", str(exc))
     state.specs[plugin_id] = spec
+    await _register_plugin_checkers(plugin_id, spec, entry, on_checkers)
     return PluginMountOutcome(plugin_id, "mounted")
+
+
+async def _register_plugin_checkers(
+    plugin_id: str,
+    spec: PluginSpec,
+    entry: DiscoveredPlugin,
+    on_checkers: CheckerSink | None,
+) -> None:
+    """挂载成功后按 ``spec.provides.checkers`` 逐个经工厂构造并回调注册。
+
+    工厂缺失或构造失败：该 checker 不注册（内核 submit 按缺口记录候选），
+    其余 checker 不受影响；sink 不在场（unit 未挂载）→ 日志降级跳过。
+    """
+
+    if on_checkers is None or not spec.provides.checkers:
+        return
+    registered: dict[str, Any] = {}
+    if entry.checker_factory is None:
+        logger.info(
+            "Plugin '%s' declares checkers %s but exposes no checker factory.",
+            plugin_id,
+            spec.provides.checkers,
+        )
+    else:
+        for name in spec.provides.checkers:
+            try:
+                registered[name] = entry.checker_factory(name)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Plugin '%s' checker factory failed for '%s'; skipped.",
+                    plugin_id,
+                    name,
+                )
+    if registered:
+        logger.info("Plugin '%s' registered checkers: %s", plugin_id, sorted(registered))
+    await on_checkers(plugin_id, registered)
 
 
 def _make_crash_handler(
@@ -282,15 +334,25 @@ def _make_crash_handler(
     route_registry: UnitRouteRegistry,
     state: PluginSessionState,
     session: PluginSession,
+    on_checkers: CheckerSink | None = None,
 ) -> PluginCrashCallback:
-    """崩溃路径：failed 标记 + 自动 unmount + owner 清理 + 双广播。"""
+    """崩溃路径：failed 标记 + 自动 unmount + owner 清理 + checker 注销 + 双广播。"""
 
     async def on_crash(crashed_id: str, command: str, error: str) -> None:
         logger.warning(
             "Plugin '%s' crashed in command '%s': %s — unmounting.", crashed_id, command, error
         )
         await unmount_unit(fibers, crashed_id, route_registry=route_registry)
-        state.specs.pop(crashed_id, None)
+        crashed_spec = state.specs.pop(crashed_id, None)
+        if on_checkers is not None:
+            # 空 dict = 注销语义：sink 以挂载期记录的 checker 名为准清理
+            if crashed_spec is not None:
+                await on_checkers(
+                    crashed_id,
+                    {name: None for name in crashed_spec.provides.checkers},  # type: ignore[dict-item]
+                )
+            else:
+                await on_checkers(crashed_id, {})
         from ghrah.protocol.payloads.plugin import PluginCrashedPayload
 
         await session.publish_event(

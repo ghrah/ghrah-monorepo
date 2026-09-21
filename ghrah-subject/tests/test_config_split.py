@@ -384,3 +384,22 @@ class TestFromEnv:
             plugin_trust_slice=PluginTrustConfig(discoverable=["a", "b"]),
         )
         assert config.plugin_trust.trust_set == frozenset({"a", "b"})
+
+    def test_taskstore_defaults(self) -> None:
+        """taskstore slice：默认启用 + 默认路径（零隐式，enabled=False 不挂载 unit）。"""
+        config = SubjectConfig()
+        assert config.taskstore.enabled is True
+        assert config.taskstore.db_path.endswith("taskstore.sqlite3")
+
+    def test_from_env_taskstore(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("GHRAH_SUBJECT_TASKSTORE_ENABLED", "false")
+        monkeypatch.setenv("GHRAH_SUBJECT_TASKSTORE_DB", "/tmp/ts/x.sqlite3")
+        config = SubjectConfig.from_env()
+        assert config.taskstore.enabled is False
+        assert config.taskstore.db_path == "/tmp/ts/x.sqlite3"
+
+    def test_from_env_taskstore_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("GHRAH_SUBJECT_TASKSTORE_ENABLED", raising=False)
+        monkeypatch.delenv("GHRAH_SUBJECT_TASKSTORE_DB", raising=False)
+        config = SubjectConfig.from_env()
+        assert config.taskstore.enabled is True

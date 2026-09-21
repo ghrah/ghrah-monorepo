@@ -71,10 +71,11 @@ export enum CommandType {
   TASK_GET = "task_get",
   TASK_DELETE = "task_delete",
 
-  // Task 归因切面（完成声明/验收/claims 查询）
+  // Task 归因切面（完成声明/验收/claims 查询/全量快照）
   TASK_SUBMIT_COMPLETION = "task_submit_completion",
   TASK_VERIFY = "task_verify",
   TASK_LIST_CLAIMS = "task_list_claims",
+  TASK_DUMP = "task_dump",
 
   // Plugin 协商（L1 通用命令，不挂域前缀）
   PLUGIN_NEGOTIATE = "plugin_negotiate",
@@ -306,9 +307,13 @@ export const TASK_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.TASK_LIST,
   CommandType.TASK_GET,
   CommandType.TASK_DELETE,
+]);
+
+export const TASK_ATTRIBUTION_COMMANDS: ReadonlySet<string> = new Set([
   CommandType.TASK_SUBMIT_COMPLETION,
   CommandType.TASK_VERIFY,
   CommandType.TASK_LIST_CLAIMS,
+  CommandType.TASK_DUMP,
 ]);
 
 export const PLUGIN_COMMANDS: ReadonlySet<string> = new Set([CommandType.PLUGIN_NEGOTIATE]);

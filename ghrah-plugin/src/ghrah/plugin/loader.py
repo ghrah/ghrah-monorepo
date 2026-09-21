@@ -46,12 +46,15 @@ class DiscoveredPlugin:
         dist_name: 来源发行版名（未知为 None）。
         unit_factory: 可选宿主侧 unit 工厂（发现期 duck-typing 探测结果；
             None = spec-only，可协商不可挂载）。探测归宿主装配链。
+        checker_factory: 可选 checker 工厂（发现期 duck-typing 探测结果；
+            签名 ``(name: str) -> Checker``，None = 不供 checker）。
     """
 
     spec: PluginSpec
     entry_point_name: str
     dist_name: str | None = None
     unit_factory: Callable[[], Any] | None = None
+    checker_factory: Callable[[str], Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -166,6 +169,28 @@ def _detect_unit_factory(spec: PluginSpec, loaded: Any) -> Callable[[], Any] | N
     return None
 
 
+def _detect_checker_factory(spec: PluginSpec, loaded: Any) -> Callable[[str], Any] | None:
+    """checker 工厂 duck-typing 探测（发现期，签名 ``(name: str) -> Checker``）。
+
+    约定（优先级降序，同 unit 工厂范式）：
+    1. ``PluginSpec`` 子类以类属性/字段声明 ``checker_factory``；
+    2. entry point 加载结果（模块/对象）暴露 ``checker_factory``；
+    3. entry point 加载结果（模块/对象）暴露 ``create_checker``。
+
+    探测不到 → None（该插件不供 checker；spec 声明的 ``provides.checkers``
+    由装配链记为候选缺失）。
+    """
+
+    for candidate in (
+        getattr(spec, "checker_factory", None),
+        getattr(loaded, "checker_factory", None),
+        getattr(loaded, "create_checker", None),
+    ):
+        if callable(candidate):
+            return candidate
+    return None
+
+
 def discover_plugins(
     group: str = PLUGIN_ENTRY_POINT_GROUP,
 ) -> tuple[list[DiscoveredPlugin], list[LoadIssue]]:
@@ -209,6 +234,7 @@ def discover_plugins(
                 entry_point_name=entry.name,
                 dist_name=entry.dist_name,
                 unit_factory=_detect_unit_factory(spec, entry.value),
+                checker_factory=_detect_checker_factory(spec, entry.value),
             )
         )
     return discovered, issues

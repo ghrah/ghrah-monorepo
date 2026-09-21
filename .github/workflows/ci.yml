@@ -18,7 +18,7 @@ jobs:
       - run: uv run ruff format --check .
       # mypy 门禁当前仅 protocol（零错误基线）；core/subject 存量 strict 债务见 plans/todo/mypy-strict-debt.md
       - run: cd ghrah-protocol && MYPYPATH=src uv run mypy --explicit-package-bases -p ghrah.protocol
-      - run: uv run pytest ghrah-plugin ghrah-protocol ghrah-core ghrah-subject
+      - run: uv run pytest ghrah-plugin ghrah-protocol ghrah-core ghrah-subject ghrah-taskstore
 
   web:
     runs-on: ubuntu-latest

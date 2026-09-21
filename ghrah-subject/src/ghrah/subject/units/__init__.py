@@ -56,6 +56,7 @@ async def mount_builtin_units(
     from ghrah.subject.units.recovery import DesiredStateUnit
     from ghrah.subject.units.sandbox import SandboxUnit
     from ghrah.subject.units.task import TaskUnit
+    from ghrah.subject.units.taskstore import TaskStoreUnit
     from ghrah.subject.units.workspace import WorkspaceUnit
 
     units: list[SubjectUnit] = [
@@ -63,9 +64,16 @@ async def mount_builtin_units(
         ManifestStoreUnit(config),
         LedgerUnit(config),
         WorkspaceUnit(config),
-        TaskUnit(config),
-        DesiredStateUnit(config),
     ]
+
+    # 任务归因内核 unit：enabled=False 时完全不挂载（零隐式；归因命令回落
+    # Unknown command）；置于 TaskUnit 之前（builtin 链挂载序 = serial 序，
+    # TaskStoreUnit 先注册归因命令）、插件装配之前——checker 服务在插件
+    # 接线时已就绪。
+    if config.taskstore.enabled:
+        units.append(TaskStoreUnit(config))
+
+    units.extend([TaskUnit(config), DesiredStateUnit(config)])
 
     if profile == "full":
         from ghrah.subject.units.core_cluster import CoreClusterRegistryUnit

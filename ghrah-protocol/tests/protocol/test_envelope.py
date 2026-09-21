@@ -27,6 +27,7 @@ from ghrah.protocol.types import (
     EVENT_PAYLOAD_MAP,
     PAYLOAD_MAP,
     PLUGIN_COMMANDS,
+    TASK_ATTRIBUTION_COMMANDS,
     TASK_COMMANDS,
     AbilityResultPayload,
     AgentCompactContextPayload,
@@ -51,6 +52,7 @@ from ghrah.protocol.types import (
     SystemType,
     TaskClaimEventPayload,
     TaskClaimListPayload,
+    TaskDumpPayload,
     TaskSubmitCompletionPayload,
     TaskVerifyPayload,
     create_command_result,
@@ -402,15 +404,23 @@ class TestPayloadMap:
         assert EVENT_PAYLOAD_MAP[EventType.PLUGIN_CRASHED] is PluginCrashedPayload
 
     def test_task_attribution_commands_registered(self):
-        """task 归因 3 命令登记，归入 TASK_COMMANDS。"""
+        """task 归因 4 命令登记，归入 TASK_ATTRIBUTION_COMMANDS（不占 TASK_COMMANDS）。"""
         assert (
             COMMAND_PAYLOAD_MAP[CommandType.TASK_SUBMIT_COMPLETION] is TaskSubmitCompletionPayload
         )
         assert COMMAND_PAYLOAD_MAP[CommandType.TASK_VERIFY] is TaskVerifyPayload
         assert COMMAND_PAYLOAD_MAP[CommandType.TASK_LIST_CLAIMS] is TaskClaimListPayload
-        assert CommandType.TASK_SUBMIT_COMPLETION.value in TASK_COMMANDS
-        assert CommandType.TASK_VERIFY.value in TASK_COMMANDS
-        assert CommandType.TASK_LIST_CLAIMS.value in TASK_COMMANDS
+        assert COMMAND_PAYLOAD_MAP[CommandType.TASK_DUMP] is TaskDumpPayload
+        assert CommandType.TASK_SUBMIT_COMPLETION.value in TASK_ATTRIBUTION_COMMANDS
+        assert CommandType.TASK_VERIFY.value in TASK_ATTRIBUTION_COMMANDS
+        assert CommandType.TASK_LIST_CLAIMS.value in TASK_ATTRIBUTION_COMMANDS
+        assert CommandType.TASK_DUMP.value in TASK_ATTRIBUTION_COMMANDS
+        # legacy 11 命令照常；归因 4 命令已从 TASK_COMMANDS 移除
+        assert len(TASK_COMMANDS) == 11
+        assert CommandType.TASK_SUBMIT_COMPLETION.value not in TASK_COMMANDS
+        assert CommandType.TASK_VERIFY.value not in TASK_COMMANDS
+        assert CommandType.TASK_LIST_CLAIMS.value not in TASK_COMMANDS
+        assert CommandType.TASK_DUMP.value not in TASK_COMMANDS
 
     def test_task_attribution_events_registered(self):
         """task 归因 3 事件登记，共用 TaskClaimEventPayload。"""

@@ -37,6 +37,7 @@ async def test_coexistence_assembly_all_fibers_active(tmp_path: Path) -> None:
             "manifest_store",
             "ledger",
             "workspace",
+            "taskstore",
             "task",
             "desired_state",
         }
@@ -53,6 +54,8 @@ async def test_coexistence_assembly_all_fibers_active(tmp_path: Path) -> None:
         assert ctx.get("workspace_manager") is not None
         assert ctx.get("task_manager") is not None
         assert ctx.get("task_store") is not None
+        assert ctx.get("taskstore_service") is not None
+        assert ctx.get("taskstore_checkers") is not None
         assert ctx.get("desired_state_store") is not None
 
 
@@ -67,6 +70,7 @@ async def test_full_assembly_all_fibers_active(
             "manifest_store",
             "ledger",
             "workspace",
+            "taskstore",
             "task",
             "desired_state",
             "websocket_observer_endpoint",

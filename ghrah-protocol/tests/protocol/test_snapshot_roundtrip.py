@@ -28,6 +28,8 @@ from ghrah.protocol.types import (
     TaskClaimListPayload,
     TaskClaimListResultPayload,
     TaskClaimPayload,
+    TaskDumpPayload,
+    TaskDumpResultPayload,
     TaskEvidencePayload,
     TaskInfoPayload,
     TaskSubmitCompletionPayload,
@@ -62,6 +64,8 @@ S1_SNAPSHOTS: dict[str, type[BaseModel]] = {
     "TaskClaimEventPayload": TaskClaimEventPayload,
     "TaskVerificationGapsPayload": TaskVerificationGapsPayload,
     "TaskInfoPayload_verification": TaskInfoPayload,
+    "TaskDumpPayload": TaskDumpPayload,
+    "TaskDumpResultPayload": TaskDumpResultPayload,
 }
 
 
@@ -96,6 +100,6 @@ def test_snapshot_roundtrip(name: str, model: type[BaseModel]) -> None:
 
 
 def test_s1_snapshot_files_exist() -> None:
-    """本批全部 14 个快照文件在 TS 目录存在（防生成脚本产物漏提交）。"""
+    """本批全部 16 个快照文件在 TS 目录存在（防生成脚本产物漏提交）。"""
     for name in S1_SNAPSHOTS:
         assert (SNAPSHOTS_DIR / f"{name}.json").exists(), f"missing snapshot: {name}"

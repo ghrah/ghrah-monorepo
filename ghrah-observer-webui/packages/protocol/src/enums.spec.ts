@@ -13,6 +13,7 @@ import {
   ROOM_COMMANDS,
   SESSION_COMMANDS,
   SystemType,
+  TASK_ATTRIBUTION_COMMANDS,
   TASK_COMMANDS,
   WORKSPACE_COMMANDS,
 } from "./enums.js";
@@ -91,6 +92,7 @@ describe("CommandType", () => {
     "task_submit_completion",
     "task_verify",
     "task_list_claims",
+    "task_dump",
     "plugin_negotiate",
     "project_create",
     "project_update",
@@ -370,13 +372,29 @@ describe("TASK_COMMANDS", () => {
     "task_list",
     "task_get",
     "task_delete",
+  ]);
+
+  it("contains exactly 11 task command values", () => {
+    expect(TASK_COMMANDS).toEqual(PYTHON_TASK);
+  });
+});
+
+describe("TASK_ATTRIBUTION_COMMANDS", () => {
+  const PYTHON_ATTRIBUTION = new Set([
     "task_submit_completion",
     "task_verify",
     "task_list_claims",
+    "task_dump",
   ]);
 
-  it("contains exactly 14 task command values", () => {
-    expect(TASK_COMMANDS).toEqual(PYTHON_TASK);
+  it("contains exactly 4 task attribution command values", () => {
+    expect(TASK_ATTRIBUTION_COMMANDS).toEqual(PYTHON_ATTRIBUTION);
+  });
+
+  it("does not overlap with TASK_COMMANDS", () => {
+    for (const command of TASK_ATTRIBUTION_COMMANDS) {
+      expect(TASK_COMMANDS.has(command)).toBe(false);
+    }
   });
 });
 

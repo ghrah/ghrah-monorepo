@@ -131,3 +131,32 @@ def test_dist_name_captured_when_available(monkeypatch: Any) -> None:
     monkeypatch.setattr("ghrah.plugin.loader.entry_points", lambda: _FakeEntryPoints([_WithDist()]))
     discovered, _ = discover_plugins()
     assert discovered[0].dist_name == "some-distribution"
+
+
+# ── checker 工厂 duck-typing 探测（D5 供给侧）──
+
+
+def test_spec_subclass_checker_factory_detected(monkeypatch: Any) -> None:
+    """PluginSpec 子类以类属性声明 ``checker_factory`` → 探测命中。"""
+    _patch(monkeypatch, [_ep("checker-sub", "checker_sub_spec")])
+    discovered, issues = discover_plugins()
+    assert issues == []
+    assert discovered[0].spec.plugin_id == "plugin-checker-sub"
+    assert callable(discovered[0].checker_factory)
+
+
+def test_module_create_checker_detected(monkeypatch: Any) -> None:
+    """entry point 模块暴露 ``create_checker``（与 spec 同模块）→ 探测命中。"""
+    _patch(monkeypatch, [_module_ep("checker-mod")])
+    discovered, issues = discover_plugins()
+    assert issues == []
+    assert callable(discovered[0].checker_factory)
+    checker = discovered[0].checker_factory("commit_in_repo")
+    assert callable(checker)
+
+
+def test_no_checker_factory_detected(monkeypatch: Any) -> None:
+    """普通 spec（无工厂声明）→ checker_factory 为 None。"""
+    _patch(monkeypatch, [_ep("plugin-a", "spec_a")])
+    discovered, _ = discover_plugins()
+    assert discovered[0].checker_factory is None

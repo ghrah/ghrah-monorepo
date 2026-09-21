@@ -243,6 +243,18 @@ export const TaskVerificationGapsPayloadSchema = z.object({
   missing_approver: z.string().nullable().optional(),
 });
 
+export const TaskDumpPayloadSchema = z.object({
+  project_id: z.string().nullable().optional(),
+  include_deleted: z.boolean().optional().default(false),
+  limit: z.number().int().nullable().optional(),
+});
+
+export const TaskDumpResultPayloadSchema = z.object({
+  tasks: z.array(TaskInfoPayloadSchema).optional().default([]),
+  claims: z.array(TaskClaimPayloadSchema).optional().default([]),
+  evidence: z.array(TaskEvidencePayloadSchema).optional().default([]),
+});
+
 export type TaskStatus = z.infer<typeof TaskStatusSchema>;
 export type TaskPriority = z.infer<typeof TaskPrioritySchema>;
 export type ClaimantType = z.infer<typeof ClaimantTypeSchema>;
@@ -274,3 +286,5 @@ export type TaskClaimListResultPayload = z.infer<typeof TaskClaimListResultPaylo
 export type TaskClaimEventPayload = z.infer<typeof TaskClaimEventPayloadSchema>;
 export type TaskMissingCheckPayload = z.infer<typeof TaskMissingCheckPayloadSchema>;
 export type TaskVerificationGapsPayload = z.infer<typeof TaskVerificationGapsPayloadSchema>;
+export type TaskDumpPayload = z.infer<typeof TaskDumpPayloadSchema>;
+export type TaskDumpResultPayload = z.infer<typeof TaskDumpResultPayloadSchema>;

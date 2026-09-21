@@ -18,6 +18,7 @@ def _spec(
     *,
     capabilities: list[str] | None = None,
     commands: list[str] | None = None,
+    checkers: list[str] | None = None,
     after: list[str] | None = None,
     prefix: str | None = None,
 ) -> PluginSpec:
@@ -25,7 +26,11 @@ def _spec(
         plugin_id=plugin_id,
         version="1.0.0",
         prefix=prefix,
-        provides={"capabilities": capabilities or [], "commands": commands or []},
+        provides={
+            "capabilities": capabilities or [],
+            "commands": commands or [],
+            **({"checkers": checkers} if checkers else {}),
+        },
         after=after or [],
     )
 
@@ -147,3 +152,37 @@ def test_sort_result_deterministic(order: list[str], expected: list[str]) -> Non
     }
     result = sort_for_mount([specs[name] for name in order])
     assert [s.plugin_id for s in result] == expected
+
+
+# ── checker 派生索引（D5：独立存放，不污染 candidates_snapshot）──
+
+
+def test_resolve_checker_multiple_providers() -> None:
+    registry = PluginRegistry(
+        [
+            _spec("alpha", checkers=["commit_in_repo"]),
+            _spec("beta", checkers=["commit_in_repo", "lint_clean"]),
+        ]
+    )
+    assert registry.resolve_checker("commit_in_repo") == ["alpha", "beta"]
+    assert registry.resolve_checker("lint_clean") == ["beta"]
+
+
+def test_resolve_checker_miss_returns_empty() -> None:
+    registry = PluginRegistry([_spec("alpha", capabilities=["alpha:attr/x"])])
+    assert registry.resolve_checker("none") == []
+
+
+def test_checker_index_does_not_pollute_capability_semantics() -> None:
+    """D15：checker 命中走 resolve_checker；resolve_capability/core: 键仍恒为空。"""
+    registry = PluginRegistry([_spec("alpha", checkers=["commit_in_repo"])])
+    assert registry.resolve_capability("core:checker/commit_in_repo") == []
+    assert registry.candidates_snapshot() == {}
+    assert registry.checker_candidates_snapshot() == {"commit_in_repo": ["alpha"]}
+
+
+def test_checker_candidates_snapshot_readonly() -> None:
+    registry = PluginRegistry([_spec("alpha", checkers=["commit_in_repo"])])
+    snapshot = registry.checker_candidates_snapshot()
+    snapshot["injected"] = ["ghost"]  # type: ignore[index]
+    assert "injected" not in registry.checker_candidates_snapshot()

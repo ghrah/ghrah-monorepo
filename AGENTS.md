@@ -8,6 +8,7 @@
 - `ghrah-plugin/` — Python 插件基础设施包（PyPI: ghrah-plugin；plugin spec 契约/发现/注册/协商/离线验证）
 - `ghrah-protocol/` — Python 协议包（PyPI: ghrah-protocol）
 - `ghrah-subject/` — Python subject 包（PyPI: ghrah-subject）
+- `ghrah-taskstore/` — Python 任务归因内核包（PyPI: ghrah-taskstore；tasks/claims/evidence 三表权威 + checker 扩展点宿主）
 - `ghrah-observer-webui/` — TS 观察端（pnpm workspace: packages/* + vscode-extension）
 - `scripts/start_all.py` — 全栈一键启动入口（subject :4112 内嵌 Core + webui dev :5173）
 
@@ -88,7 +89,7 @@ pnpm lint
 
 ## 提交约定
 
-- Conventional Commits，中文描述：`feat(subject): …` / `fix(core)!…`（破坏性加 `!`）；范围用包短名（core/plugin/protocol/subject/observer/webui/ci/docs）。
+- Conventional Commits，中文描述：`feat(subject): …` / `fix(core)!…`（破坏性加 `!`）；范围用包短名（core/plugin/protocol/subject/taskstore/observer/webui/ci/docs）。
 
 ## plans 目录约定
 

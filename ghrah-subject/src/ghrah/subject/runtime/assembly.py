@@ -20,7 +20,7 @@ dispose 全部 fiber（unit.stop 逆序由 Ouroboros 负责）。
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ghrah.plugin.loader import discover_plugins
 from ouroboros import FiberState  # type: ignore[import-untyped]
@@ -114,6 +114,30 @@ async def _assemble_plugins(
 
     await mount_dynamic_unit(ctx, session, fibers, route_registry=route_registry)
 
+    # checker 装配 sink：解析 TASKSTORE_CHECKERS（unit 不在场 → 日志降级跳过）。
+    # 协议：(plugin_id, {name: checker}) 注册；值 None 或空 dict → 注销（崩溃/卸载路径）。
+    from ghrah.subject.runtime.service_keys import TASKSTORE_CHECKERS
+
+    checkers_registry = ctx.get(TASKSTORE_CHECKERS.name, strict=False)
+
+    async def on_checkers(plugin_id: str, checkers: dict[str, Any]) -> None:
+        if checkers_registry is None:
+            if checkers:
+                logger.info(
+                    "Plugin '%s' provides %d checker(s) but taskstore unit is not mounted; "
+                    "skipped.",
+                    plugin_id,
+                    len(checkers),
+                )
+            return
+        for name, checker in checkers.items():
+            if checker is None:
+                checkers_registry.unregister(name)
+                logger.info("checker '%s' unregistered (plugin '%s' down).", name, plugin_id)
+            else:
+                checkers_registry.register(name, checker)
+                logger.info("checker '%s' registered via plugin '%s'.", name, plugin_id)
+
     assemblies = []
     statuses: dict[str, str] = {}
     store = ctx.get(PROJECT_STORE.name, strict=False)
@@ -136,6 +160,7 @@ async def _assemble_plugins(
         state=state,
         session=session,
         project_statuses=statuses,
+        on_checkers=on_checkers if checkers_registry is not None else None,
     )
     failed = [o for o in report.outcomes if o.status not in ("mounted", "spec_only")]
     if failed:

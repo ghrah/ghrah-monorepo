@@ -157,9 +157,16 @@ TASK_COMMANDS: frozenset[str] = frozenset(
         CommandType.TASK_LIST.value,
         CommandType.TASK_GET.value,
         CommandType.TASK_DELETE.value,
+    }
+)
+
+
+TASK_ATTRIBUTION_COMMANDS: frozenset[str] = frozenset(
+    {
         CommandType.TASK_SUBMIT_COMPLETION.value,
         CommandType.TASK_VERIFY.value,
         CommandType.TASK_LIST_CLAIMS.value,
+        CommandType.TASK_DUMP.value,
     }
 )
 

@@ -17,16 +17,21 @@ __all__ = ["PluginRegistry"]
 class PluginRegistry:
     """已启用插件的 capability 索引。
 
-    只按 spec ``provides.capabilities`` 原文索引；``core:checker/<name>``
-    查询键的构造归 taskstore 消费侧。
+    只按 spec ``provides.capabilities`` 原文索引；checker 扩展点用**独立派生索引**
+    （由 ``provides.checkers`` 生成 ``core:checker/<name>`` 键），不污染
+    ``candidates_snapshot()`` 的原文语义——checker 命中/缺口一律走
+    ``resolve_checker``。
     """
 
     def __init__(self, specs: list[PluginSpec]) -> None:
         self._specs: dict[str, PluginSpec] = {spec.plugin_id: spec for spec in specs}
         self._capability_index: dict[str, list[str]] = {}
+        self._checker_index: dict[str, list[str]] = {}
         for spec in self._specs.values():
             for capability in spec.provides.capabilities:
                 self._capability_index.setdefault(capability, []).append(spec.plugin_id)
+            for checker in spec.provides.checkers:
+                self._checker_index.setdefault(checker, []).append(spec.plugin_id)
 
     @property
     def specs(self) -> dict[str, PluginSpec]:
@@ -39,12 +44,26 @@ class PluginRegistry:
 
         return list(self._capability_index.get(name, ()))
 
+    def resolve_checker(self, name: str) -> list[str]:
+        """求解提供某 checker 的 plugin_id 清单（未命中返回空列表）。
+
+        派生自 ``provides.checkers``（键构造 ``core:checker/<name>`` 归本注册表，
+        但独立存放；``resolve_capability("core:checker/...")`` 仍只查原文索引）。
+        """
+
+        return list(self._checker_index.get(name, ()))
+
     def candidates_snapshot(self) -> dict[str, list[str]]:
         """capability → 提供者清单快照（CapabilityMissingError.candidates 用）。"""
 
         return {
             capability: list(providers) for capability, providers in self._capability_index.items()
         }
+
+    def checker_candidates_snapshot(self) -> dict[str, list[str]]:
+        """checker 名 → 提供者清单快照（缺口清单 missing_checks.candidates 用）。"""
+
+        return {checker: list(providers) for checker, providers in self._checker_index.items()}
 
     def check_provides(self, cmd_name: str, declared_provides: list[str]) -> bool:
         """校验视图保存声明的命令是否被已启用插件 provides（权威函数）。

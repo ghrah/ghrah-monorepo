@@ -26,6 +26,8 @@ from ghrah.protocol.types import (
     TaskClaimListPayload,
     TaskClaimListResultPayload,
     TaskClaimPayload,
+    TaskDumpPayload,
+    TaskDumpResultPayload,
     TaskEvidencePayload,
     TaskInfoPayload,
     TaskMissingCheckPayload,
@@ -221,6 +223,49 @@ SAMPLES: dict[str, object] = {
                 "approver": "human",
             },
         }
+    ),
+    "TaskDumpPayload": TaskDumpPayload(project_id="proj-001", include_deleted=False, limit=100),
+    "TaskDumpResultPayload": TaskDumpResultPayload(
+        tasks=[
+            TaskInfoPayload.model_validate(
+                {
+                    "task_id": "task-001",
+                    "project_id": "proj-001",
+                    "title": "Implement login flow",
+                    "status": "delivered",
+                    "created_at": "2026-09-20T00:00:00Z",
+                    "updated_at": "2026-09-20T10:05:00Z",
+                    "verification": {"evidence_min": 1, "checks": ["commit_in_repo"]},
+                }
+            )
+        ],
+        claims=[
+            TaskClaimPayload(
+                claim_id="claim-001",
+                task_id="task-001",
+                claimant_id="agent:backend-dev",
+                state="submitted",
+                evidence=[
+                    TaskEvidencePayload(
+                        evidence_id="ev-001",
+                        kind="git_commit",
+                        ref="abc1234",
+                        created_by="agent:backend-dev",
+                        created_at="2026-09-20T10:00:00Z",
+                    )
+                ],
+                created_at="2026-09-20T10:05:00Z",
+            )
+        ],
+        evidence=[
+            TaskEvidencePayload(
+                evidence_id="ev-001",
+                kind="git_commit",
+                ref="abc1234",
+                created_by="agent:backend-dev",
+                created_at="2026-09-20T10:00:00Z",
+            )
+        ],
     ),
 }
 

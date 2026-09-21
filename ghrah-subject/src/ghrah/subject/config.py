@@ -244,6 +244,20 @@ class PluginTrustConfig:
 
 
 @dataclass
+class TaskStoreConfig:
+    """任务归因内核切片（TaskStoreUnit 配置）。
+
+    Attributes:
+        enabled: 是否挂载 TaskStoreUnit（False 时归因命令回落 Unknown command；
+            env GHRAH_SUBJECT_TASKSTORE_ENABLED）
+        db_path: 内核三表 sqlite 路径（env GHRAH_SUBJECT_TASKSTORE_DB）
+    """
+
+    enabled: bool = True
+    db_path: str = os.path.expanduser("~/.ghrah/taskstore.sqlite3")
+
+
+@dataclass
 class SubjectConfig:
     """Subject 运行时配置（各 Unit 配置切片的容器）。
 
@@ -285,6 +299,7 @@ class SubjectConfig:
     recovery_slice: InitVar[RecoveryConfig | None] = None
     room_filter_slice: InitVar[RoomFilterConfig | None] = None
     plugin_trust_slice: InitVar[PluginTrustConfig | None] = None
+    taskstore_slice: InitVar[TaskStoreConfig | None] = None
 
     # 非 slice 的新字段（有默认值，可直接构造）。
     transport: TransportKindConfig = field(default_factory=TransportKindConfig)
@@ -303,6 +318,7 @@ class SubjectConfig:
     _recovery: RecoveryConfig = field(init=False)
     _room_filter: RoomFilterConfig = field(init=False)
     _plugin_trust: PluginTrustConfig = field(init=False)
+    _taskstore: TaskStoreConfig = field(init=False)
 
     def __post_init__(
         self,
@@ -314,6 +330,7 @@ class SubjectConfig:
         recovery_slice: RecoveryConfig | None,
         room_filter_slice: RoomFilterConfig | None,
         plugin_trust_slice: PluginTrustConfig | None,
+        taskstore_slice: TaskStoreConfig | None,
     ) -> None:
         self._persistence = persistence_slice or PersistenceConfig(db_path=self.db_path)
         self._sandbox = sandbox_slice or SandboxUnitConfig(
@@ -334,6 +351,7 @@ class SubjectConfig:
         self._recovery = recovery_slice or RecoveryConfig()
         self._room_filter = room_filter_slice or RoomFilterConfig()
         self._plugin_trust = plugin_trust_slice or PluginTrustConfig()
+        self._taskstore = taskstore_slice or TaskStoreConfig()
 
     # ── 只读 slice property（非 Optional，mypy strict 友好）──
 
@@ -379,6 +397,10 @@ class SubjectConfig:
     def plugin_trust(self) -> PluginTrustConfig:
         return self._plugin_trust
 
+    @property
+    def taskstore(self) -> TaskStoreConfig:
+        return self._taskstore
+
     @classmethod
     def from_env(cls) -> SubjectConfig:
         """从环境变量创建配置。
@@ -402,6 +424,8 @@ class SubjectConfig:
         - GHRAH_SUBJECT_RECOVERY_RECONCILE_ON_START
         - GHRAH_SUBJECT_RECOVERY_BOOTSTRAP_DEFAULT_PROJECT
         - GHRAH_SUBJECT_PLUGIN_TRUST（逗号分隔，插件信任清单 plugin_id）
+        - GHRAH_SUBJECT_TASKSTORE_ENABLED（任务归因内核 unit 挂载开关）
+        - GHRAH_SUBJECT_TASKSTORE_DB（任务归因内核 sqlite 路径）
         - GHRAH_SUBJECT_ROOM_FILTER_ENABLED
         - GHRAH_SUBJECT_ROOM_FILTER_ABILITIES（逗号分隔白名单能力名）
         - GHRAH_SUBJECT_SAFE_EXTRA_COMMANDS（逗号/分号/空白分隔，追加基础命令 safe 白名单）
@@ -562,6 +586,15 @@ class SubjectConfig:
             ],
         )
 
+        # taskstore slice（任务归因内核）
+        taskstore_slice = TaskStoreConfig(
+            enabled=os.environ.get("GHRAH_SUBJECT_TASKSTORE_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            db_path=os.environ.get(
+                "GHRAH_SUBJECT_TASKSTORE_DB", os.path.expanduser("~/.ghrah/taskstore.sqlite3")
+            ),
+        )
+
         return cls(
             workspace_root=workspace_root,
             db_path=os.environ.get(
@@ -584,6 +617,7 @@ class SubjectConfig:
             recovery_slice=recovery_slice,
             room_filter_slice=room_filter_slice,
             plugin_trust_slice=plugin_trust_slice,
+            taskstore_slice=taskstore_slice,
         )
 
 

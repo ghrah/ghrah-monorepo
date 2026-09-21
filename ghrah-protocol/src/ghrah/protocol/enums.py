@@ -138,10 +138,11 @@ class CommandType(StrEnum):
     TASK_LIST = "task_list"
     TASK_GET = "task_get"
     TASK_DELETE = "task_delete"
-    # ─── Task 归因切面（Observer/Core → Subject；完成声明/验收/claims 查询）───
+    # ─── Task 归因切面（Observer/Core → Subject；完成声明/验收/claims 查询/全量快照）───
     TASK_SUBMIT_COMPLETION = "task_submit_completion"
     TASK_VERIFY = "task_verify"
     TASK_LIST_CLAIMS = "task_list_claims"
+    TASK_DUMP = "task_dump"
 
     # ─── Plugin 类（Observer → Subject；协商：通用命令，不挂域前缀）───
     PLUGIN_NEGOTIATE = "plugin_negotiate"

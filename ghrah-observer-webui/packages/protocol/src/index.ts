@@ -28,6 +28,7 @@ export {
   ROOM_COMMANDS,
   SESSION_COMMANDS,
   SystemType,
+  TASK_ATTRIBUTION_COMMANDS,
   TASK_COMMANDS,
   WORKSPACE_COMMANDS,
 } from "./enums.js";

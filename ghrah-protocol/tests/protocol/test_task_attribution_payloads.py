@@ -229,3 +229,26 @@ class TestAttributionEvents:
         )
         assert COMMAND_PAYLOAD_MAP[CommandType.TASK_VERIFY] is TaskVerifyPayload
         assert COMMAND_PAYLOAD_MAP[CommandType.TASK_LIST_CLAIMS] is TaskClaimListPayload
+
+    def test_task_dump_payload_roundtrip(self) -> None:
+        """task_dump 载荷往返：limit 仅限 tasks，claims/evidence 随所选 tasks 收敛。"""
+        from ghrah.protocol.types import COMMAND_PAYLOAD_MAP, TaskDumpPayload, TaskDumpResultPayload
+
+        query = TaskDumpPayload(project_id="p", include_deleted=False, limit=10)
+        assert query.model_dump(mode="json") == {
+            "project_id": "p",
+            "include_deleted": False,
+            "limit": 10,
+        }
+        assert TaskDumpPayload().model_dump(mode="json")["limit"] is None
+
+        result = TaskDumpResultPayload(
+            tasks=[
+                TaskInfoPayload(task_id="task-001", project_id="p", title="x", status="delivered")
+            ],
+            claims=[_claim(task_id="task-001")],
+            evidence=[],
+        )
+        wire = result.model_dump(mode="json")
+        assert wire["claims"][0]["task_id"] == "task-001"
+        assert COMMAND_PAYLOAD_MAP[CommandType.TASK_DUMP] is TaskDumpPayload

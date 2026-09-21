@@ -293,3 +293,24 @@ class TaskVerificationGapsPayload(BaseModel):
     missing_checks: list[TaskMissingCheckPayload] = Field(default_factory=list)
     failed_checks: list[TaskCheckOutcomePayload] = Field(default_factory=list)
     missing_approver: str | None = None
+
+
+class TaskDumpPayload(BaseModel):
+    """task_dump 查询载荷（归因链全量快照重建入口）。"""
+
+    project_id: str | None = None
+    include_deleted: bool = False
+    limit: int | None = None
+
+
+class TaskDumpResultPayload(BaseModel):
+    """task_dump 查询响应载荷（command_result.data）。
+
+    limit 仅限制 tasks 条数；claims 仅含所选 tasks 的 claim，evidence 仅含
+    这些 claim 的 evidence_ids 关联记录（给定 tasks 集合可完整重建归因链）。
+    claims 内嵌 evidence 与 evidence 列表并存：供单命令重建与表级保真两种消费。
+    """
+
+    tasks: list[TaskInfoPayload] = Field(default_factory=list)
+    claims: list[TaskClaimPayload] = Field(default_factory=list)
+    evidence: list[TaskEvidencePayload] = Field(default_factory=list)

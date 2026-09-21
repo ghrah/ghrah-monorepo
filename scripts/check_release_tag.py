@@ -15,6 +15,7 @@ TARGETS = {
     "py/ghrah-plugin": ("python", ROOT / "ghrah-plugin" / "pyproject.toml"),
     "py/ghrah-protocol": ("python", ROOT / "ghrah-protocol" / "pyproject.toml"),
     "py/ghrah-subject": ("python", ROOT / "ghrah-subject" / "pyproject.toml"),
+    "py/ghrah-taskstore": ("python", ROOT / "ghrah-taskstore" / "pyproject.toml"),
     "npm/ghrah-protocol": (
         "node",
         ROOT / "ghrah-observer-webui" / "packages" / "protocol" / "package.json",

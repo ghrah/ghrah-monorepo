@@ -104,6 +104,7 @@ from ghrah.protocol.payloads import (
     TaskCompletePayload,
     TaskCreatePayload,
     TaskDeletePayload,
+    TaskDumpPayload,
     TaskEventPayload,
     TaskFailPayload,
     TaskIdPayload,
@@ -254,6 +255,7 @@ COMMAND_PAYLOAD_MAP: dict[CommandType, type[BaseModel]] = {
     CommandType.TASK_SUBMIT_COMPLETION: TaskSubmitCompletionPayload,
     CommandType.TASK_VERIFY: TaskVerifyPayload,
     CommandType.TASK_LIST_CLAIMS: TaskClaimListPayload,
+    CommandType.TASK_DUMP: TaskDumpPayload,
     # Session 管理（5 个）
     CommandType.SESSION_CREATE: SessionCreatePayload,
     CommandType.SESSION_ACTIVATE: SessionActivatePayload,

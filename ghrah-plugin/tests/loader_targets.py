@@ -47,3 +47,21 @@ class _SubSpec(PluginSpec):
 
 
 sub_spec = _SubSpec(plugin_id="plugin-sub", version="1.0.0")
+
+
+# ── checker 工厂形态：模块暴露 create_checker（签名 (name) -> callable）──
+def create_checker(name: str):  # noqa: ANN201 — 探测只验 callable
+    def checker(evidence, task, config):  # noqa: ANN001, ANN202
+        return {"passed": True}
+
+    return checker
+
+
+# ── PluginSpec 子类形态：类属性声明 checker 工厂 ──
+class _CheckerSubSpec(PluginSpec):
+    @staticmethod
+    def checker_factory(name: str):  # noqa: ANN202 — 探测只验 callable
+        return lambda evidence, task, config: {"passed": True}
+
+
+checker_sub_spec = _CheckerSubSpec(plugin_id="plugin-checker-sub", version="1.0.0")
