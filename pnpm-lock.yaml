@@ -88,6 +88,9 @@ importers:
       '@ghrah/observer-core':
         specifier: workspace:*
         version: link:../observer-core
+      '@ghrah/plugin-registry':
+        specifier: workspace:*
+        version: link:../plugin-registry
       '@ghrah/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -140,6 +143,28 @@ importers:
       vue-tsc:
         specifier: ^2.2.0
         version: 2.2.0(typescript@5.7.2)
+
+  ghrah-observer-webui/packages/plugin-registry:
+    dependencies:
+      '@ghrah/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      vue:
+        specifier: ^3.5.0
+        version: 3.5.42(typescript@5.7.2)
+      zod:
+        specifier: ^3.24.0
+        version: 3.24.0
+    devDependencies:
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.26)(supports-color@7.2.0)(typescript@5.7.2)
+      typescript:
+        specifier: ^5.7.0
+        version: 5.7.2
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.7(@types/node@25.9.5)(happy-dom@20.12.0)(jiti@2.7.0)(supports-color@7.2.0)
 
   ghrah-observer-webui/packages/protocol:
     dependencies:

@@ -28,11 +28,13 @@ async def mount_builtin_units(
 ) -> dict[str, Fiber]:
     """Mount built-in units as Ouroboros plugins.
 
-    聚合裁决后收敛：coexistence = 6（sandbox/manifest_store/ledger/workspace/
-    task/desired_state——读写侧均不依赖已剔除的四件套）；full = 6 +
-    observer/core_cluster_registry/project/room/recovery = 11。**逐个挂载并等
-    ACTIVE**（对齐旧 engine 顺序 start 语义；实测并发挂载会让多个 store
-    同时打开同一 SQLite 文件触发 ``database is locked``）。
+    聚合裁决后收敛：默认配置（``taskstore`` 与 ``room_filter`` 两个可选切片
+    均启用）下 coexistence = 7（sandbox/manifest_store/ledger/workspace +
+    taskstore + task/desired_state）；full = 13（coexistence 7 +
+    websocket_observer_endpoint/core_cluster_registry/project/room/recovery +
+    room_filter）。关闭 ``config.taskstore.enabled`` / ``config.room_filter.enabled``
+    时对应 unit 不挂载。**逐个挂载并等 ACTIVE**（对齐旧 engine 顺序 start 语义；
+    实测并发挂载会让多个 store 同时打开同一 SQLite 文件触发 ``database is locked``）。
 
     RoomUnit 在 ProjectUnit 之后（requires PROJECT_MANAGER）、CoreUnit 经
     registry 懒挂载必然在后——满足「RoomUnit 先于 CoreUnit 挂载」的
@@ -66,10 +68,11 @@ async def mount_builtin_units(
         WorkspaceUnit(config),
     ]
 
-    # 任务归因内核 unit：enabled=False 时完全不挂载（零隐式；归因命令回落
-    # Unknown command）；置于 TaskUnit 之前（builtin 链挂载序 = serial 序，
-    # TaskStoreUnit 先注册归因命令）、插件装配之前——checker 服务在插件
-    # 接线时已就绪。
+    # 任务归因内核 unit（可选组件）：enabled=False 时完全不挂载（零隐式；归因
+    # 命令回落 Unknown command）。当前经 builtin 链挂载属**待纠正偏离**——目标
+    # 形态是插件（发现 + 信任闸 + Project 装配清单驱动）；此处置于 TaskUnit 之前
+    # （builtin 链挂载序 = serial 序，TaskStoreUnit 先注册归因命令）、插件装配
+    # 之前——checker 服务在插件接线时已就绪。
     if config.taskstore.enabled:
         units.append(TaskStoreUnit(config))
 

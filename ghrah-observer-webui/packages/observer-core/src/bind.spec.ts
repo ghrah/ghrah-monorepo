@@ -18,6 +18,7 @@ import { useManifestsStore } from "./stores/manifests.js";
 import { useProjectsStore } from "./stores/projects.js";
 import { useRoomsStore } from "./stores/rooms.js";
 import { useSessionsStore } from "./stores/sessions.js";
+import { usePluginsStore } from "./stores/plugins.js";
 import { useTasksStore } from "./stores/tasks.js";
 
 const WS_OPEN = 1;
@@ -138,14 +139,19 @@ describe("connectStores", () => {
 
   let skipSyncInitialState: ReturnType<typeof vi.spyOn<any, any>> | null = null;
 
-  async function connectClient(opts: { skipSync?: boolean; batcher?: FrameBatcher } = {}) {
+  async function connectClient(
+    opts: { skipSync?: boolean; batcher?: FrameBatcher; tsHalfProvider?: () => unknown[] } = {},
+  ) {
     const { skipSync = true } = opts;
     if (skipSync) {
       skipSyncInitialState = vi
         .spyOn(client as any, "_syncInitialState")
         .mockResolvedValue(undefined);
     }
-    disconnect = connectStores(client, { batcher: opts.batcher ?? createSyncBatcher() });
+    disconnect = connectStores(client, {
+      batcher: opts.batcher ?? createSyncBatcher(),
+      ...(opts.tsHalfProvider ? { tsHalfProvider: opts.tsHalfProvider as () => never[] } : {}),
+    });
     const connectPromise = client.connect();
     mockWs.onopen!();
     await connectPromise;
@@ -170,6 +176,125 @@ describe("connectStores", () => {
       client.onDisconnected(() => store.setDisconnected());
       internals(client)._notifyDisconnected();
       expect(store.state).toBe("disconnected");
+    });
+  });
+
+  describe("plugin negotiation and task attribution sync", () => {
+    const tsHalf = [{ plugin_id: "p1", version: "0.1.0", provides: [] as string[] }];
+
+    it("sends plugin_negotiate + task_dump once on connect (A10 连接半边)", async () => {
+      const negotiate = vi.spyOn(client, "pluginNegotiate").mockResolvedValue({
+        request_id: "neg",
+        success: true,
+        data: {},
+      } as never);
+      const dump = vi.spyOn(client, "taskDump").mockResolvedValue({
+        request_id: "dump",
+        success: true,
+        data: { tasks: [], claims: [], evidence: [] },
+      } as never);
+      await connectClient({ tsHalfProvider: () => tsHalf });
+      expect(negotiate).toHaveBeenCalledTimes(1);
+      expect(negotiate).toHaveBeenCalledWith(tsHalf);
+      expect(dump).toHaveBeenCalledTimes(1);
+      expect(dump).toHaveBeenCalledWith({});
+    });
+
+    it("re-sends on reconnect", async () => {
+      const negotiate = vi.spyOn(client, "pluginNegotiate").mockResolvedValue({
+        request_id: "neg",
+        success: true,
+        data: {},
+      } as never);
+      vi.spyOn(client, "taskDump").mockResolvedValue({
+        request_id: "dump",
+        success: true,
+        data: { tasks: [], claims: [], evidence: [] },
+      } as never);
+      await connectClient();
+      internals(client)._notifyReconnected();
+      expect(negotiate).toHaveBeenCalledTimes(2);
+    });
+
+    it("plugin_negotiated event triggers re-negotiation (A10 变更半边)", async () => {
+      const negotiate = vi.spyOn(client, "pluginNegotiate").mockResolvedValue({
+        request_id: "neg",
+        success: true,
+        data: {},
+      } as never);
+      vi.spyOn(client, "taskDump").mockResolvedValue({
+        request_id: "dump",
+        success: true,
+        data: { tasks: [], claims: [], evidence: [] },
+      } as never);
+      await connectClient();
+      internals(client)._dispatch(
+        EventType.PLUGIN_NEGOTIATED,
+        makeMsg(EventType.PLUGIN_NEGOTIATED, { changed: ["p1"] }),
+      );
+      expect(negotiate).toHaveBeenCalledTimes(2);
+    });
+
+    it("routes PLUGIN_NEGOTIATE result into plugins store", async () => {
+      await connectClient();
+      const result = {
+        matched: [{ plugin_id: "p1", version: "0.1.0", provides: [], instances: [] }],
+        python_only: [],
+        ts_only: [],
+        version_conflicts: [],
+        missing_capabilities: [],
+        instances: {},
+      };
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "neg",
+          success: true,
+          original_command: CommandType.PLUGIN_NEGOTIATE,
+          data: result,
+        }),
+      );
+      expect(usePluginsStore().matchedById.get("p1")?.version).toBe("0.1.0");
+    });
+
+    it("routes TASK_DUMP result into tasks store", async () => {
+      await connectClient();
+      internals(client)._dispatch(
+        SystemType.COMMAND_RESULT,
+        makeMsg(SystemType.COMMAND_RESULT, {
+          request_id: "dump",
+          success: true,
+          original_command: CommandType.TASK_DUMP,
+          data: {
+            tasks: [{ task_id: "t1", project_id: "p1", title: "x" }],
+            claims: [],
+            evidence: [],
+          },
+        }),
+      );
+      expect(useTasksStore().tasks.get("t1")?.title).toBe("x");
+    });
+
+    it("task claim events upsert claims (TASK_DELIVERED)", async () => {
+      await connectClient();
+      internals(client)._dispatch(
+        EventType.TASK_DELIVERED,
+        makeMsg(EventType.TASK_DELIVERED, {
+          task: { task_id: "t1", project_id: "p1", title: "x" },
+          claim: {
+            claim_id: "c1",
+            task_id: "t1",
+            claimant_type: "agent",
+            claimant_id: "a1",
+            state: "submitted",
+            evidence: [],
+            checks: [],
+          },
+        }),
+      );
+      const tasks = useTasksStore();
+      expect(tasks.claims.get("c1")?.state).toBe("submitted");
+      expect(tasks.tasks.get("t1")?.title).toBe("x");
     });
   });
 

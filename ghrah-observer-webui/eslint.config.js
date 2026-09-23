@@ -18,6 +18,8 @@ export default tseslint.config(
       "**/coverage/",
       "**/test-results/",
       "**/playwright-report/",
+      // 宿主装配生成物（eslint 不读 .gitignore，须显式忽略）
+      "**/public/plugins/",
     ],
   },
   eslint.configs.recommended,

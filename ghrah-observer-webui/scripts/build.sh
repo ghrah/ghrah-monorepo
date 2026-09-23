@@ -6,6 +6,9 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 echo "=== Building @ghrah/protocol ==="
 (cd "$ROOT_DIR/packages/protocol" && pnpm build)
 
+echo "=== Building @ghrah/plugin-registry ==="
+(cd "$ROOT_DIR/packages/plugin-registry" && pnpm build)
+
 echo "=== Building @ghrah/observer-core ==="
 (cd "$ROOT_DIR/packages/observer-core" && pnpm build)
 

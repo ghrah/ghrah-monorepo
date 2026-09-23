@@ -25,6 +25,7 @@ import {
 import type { AgentConfigPayload } from "@ghrah/protocol";
 import { ref, shallowRef, watch } from "vue";
 import { i18n } from "@/i18n";
+import { usePlugins } from "@/composables/usePlugins";
 
 const client = shallowRef<ObserverClient | null>(null);
 const error = ref<string | null>(null);
@@ -100,9 +101,13 @@ export function useObserver() {
     connection.setConnecting();
     error.value = null;
 
+    // 插件清单必须先于连接就绪（连接后补装不会重发协商）；失败走空清单。
+    const { loadManifest, tsHalfProvider } = usePlugins();
+    await loadManifest();
+
     try {
       const obsClient = new ObserverClient(url);
-      unbind = connectStores(obsClient);
+      unbind = connectStores(obsClient, { tsHalfProvider });
 
       await obsClient.connect();
       client.value = obsClient;

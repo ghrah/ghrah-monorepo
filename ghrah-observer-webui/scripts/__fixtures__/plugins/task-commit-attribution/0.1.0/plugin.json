@@ -1,0 +1,15 @@
+{
+  "plugin_id": "task-commit-attribution",
+  "version": "0.1.0",
+  "provides": {
+    "badge_renderers": ["git_commit"],
+    "view_renderers": [],
+    "commands": [],
+    "capabilities": []
+  },
+  "requires": {
+    "host_capability": ["node-assembler"]
+  },
+  "ui_slots": ["badge"],
+  "entry": "index.js"
+}

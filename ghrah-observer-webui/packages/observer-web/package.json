@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ../../scripts/assemble-plugins.mjs",
     "dev": "vite",
+    "prebuild": "node ../../scripts/assemble-plugins.mjs",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit",
@@ -15,6 +17,7 @@
   },
   "dependencies": {
     "@ghrah/observer-core": "workspace:*",
+    "@ghrah/plugin-registry": "workspace:*",
     "@ghrah/protocol": "workspace:*",
     "markdown-it": "^14.3.0",
     "monaco-editor": "^0.52.0",

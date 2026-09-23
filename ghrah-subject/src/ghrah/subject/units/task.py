@@ -22,6 +22,11 @@ __all__ = ["TaskUnit"]
 class TaskUnit(SubjectUnit):
     """Owns TaskStore + TaskManager and task command/event routes.
 
+    此处 ``TaskStore`` 指 legacy 任务库 ``subject_tasks``（本 unit 是其唯一写
+    权威），与**可选组件**归因内核 ``ghrah-taskstore``（TaskStoreUnit 的
+    tasks/claims/evidence 三表）是两套独立存储：两者零跨写、零投影，边界待
+    legacy 收编/迁移时收敛。
+
     A thin wrapper around :class:`TaskManager`: it wires the manager's
     ``on_event`` callback to the internal event bus so task events reach the
     observer endpoint, and registers the manager under the ``TASK_MANAGER``

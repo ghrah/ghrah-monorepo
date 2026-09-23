@@ -17,6 +17,8 @@ import {
   type HITLRequestPayload,
   HITLResponsePayloadSchema,
   ListAgentsPayloadSchema,
+  PluginNegotiatePayloadSchema,
+  type PythonHalfInfo,
   ProjectCreatePayloadSchema,
   ProjectDeletePayloadSchema,
   ProjectIdPayloadSchema,
@@ -44,7 +46,10 @@ import {
   type SessionInfoPayload,
   SessionListPayloadSchema,
   SpawnAgentPayloadSchema,
+  TaskClaimListPayloadSchema,
+  type TaskClaimPayload,
   TaskCreatePayloadSchema,
+  TaskDumpPayloadSchema,
   TaskIdPayloadSchema,
   type TaskInfoPayload,
   TaskListPayloadSchema,
@@ -127,6 +132,11 @@ export class MockState {
   readonly tasks = new Map<string, TaskInfoPayload>();
   readonly pendingHitl = new Map<string, PendingHitl>();
   readonly actionStates = new Map<string, AgentActionState>();
+  /** 场景声明的 Python 半清单（mock 协商数据源，非权威）。 */
+  pythonHalves: PythonHalfInfo[] = [];
+  /** 归因种子：claims（含内嵌 evidence 的冻结副本）与独立 evidence 表投影。 */
+  readonly claims = new Map<string, TaskClaimPayload>();
+  readonly evidence = new Map<string, TaskClaimPayload["evidence"][number]>();
 
   /** 由 server 注入：广播事件（带 seq_id 分配与订阅过滤）。 */
   emit: EmitFn = () => {};
@@ -253,6 +263,39 @@ export class MockState {
           return task ? ok({ task }) : fail(`task not found: ${p.task_id}`);
         });
 
+      // Plugin / Task 归因（mock：数据来自场景种子，协商计算镜像 Python negotiate）
+      case CommandType.PLUGIN_NEGOTIATE:
+        return this._parse(PluginNegotiatePayloadSchema, rawPayload, (p) =>
+          ok(this._negotiate(p.enabled_ts ?? [])),
+        );
+      case CommandType.TASK_DUMP:
+        return this._parse(TaskDumpPayloadSchema, rawPayload, (p) => {
+          let taskList = [...this.tasks.values()];
+          if (p.project_id != null)
+            taskList = taskList.filter((t) => t.project_id === p.project_id);
+          if (!p.include_deleted) taskList = taskList.filter((t) => t.status !== "canceled");
+          if (p.limit != null) taskList = taskList.slice(0, p.limit);
+          const taskIds = new Set(taskList.map((t) => t.task_id));
+          const claims = [...this.claims.values()].filter((c) => taskIds.has(c.task_id));
+          const evidenceIds = new Set(claims.flatMap((c) => c.evidence.map((e) => e.evidence_id)));
+          const evidence = [...this.evidence.values()].filter((e) =>
+            evidenceIds.has(e.evidence_id),
+          );
+          return ok({ tasks: taskList, claims, evidence });
+        });
+      case CommandType.TASK_LIST_CLAIMS:
+        return this._parse(TaskClaimListPayloadSchema, rawPayload, (p) => {
+          let list = [...this.claims.values()];
+          if (p.task_id != null) list = list.filter((c) => c.task_id === p.task_id);
+          if (p.claimant_id != null) list = list.filter((c) => c.claimant_id === p.claimant_id);
+          if (p.state != null) {
+            const states = Array.isArray(p.state) ? new Set(p.state) : new Set([p.state]);
+            list = list.filter((c) => states.has(c.state));
+          }
+          list = list.slice(0, p.limit);
+          return ok({ claims: list, count: list.length });
+        });
+
       // Agent / Core
       case CommandType.SPAWN_AGENT:
         return this._parse(SpawnAgentPayloadSchema, rawPayload, (p) =>
@@ -319,6 +362,59 @@ export class MockState {
       default:
         return fail(`unknown command: ${commandType}`);
     }
+  }
+
+  /**
+   * 协商计算（镜像 ghrah-plugin negotiator 的纯函数语义，mock 数据源为场景声明）：
+   * matched（双侧在场且版本相等）/ python_only / ts_only / version_conflicts /
+   * missing_capabilities（Python requires 并集 − 双侧 provides 并集）。
+   */
+  private _negotiate(
+    enabledTs: Array<{ plugin_id: string; version: string; provides?: string[] }>,
+  ) {
+    const pyById = new Map(this.pythonHalves.map((item) => [item.plugin_id, item]));
+    const tsById = new Map(enabledTs.map((item) => [item.plugin_id, item]));
+    const matched: Array<Record<string, unknown>> = [];
+    const versionConflicts: Array<Record<string, unknown>> = [];
+    for (const [pluginId, py] of pyById) {
+      const ts = tsById.get(pluginId);
+      if (!ts) continue;
+      if (ts.version === py.version) {
+        matched.push({
+          plugin_id: pluginId,
+          version: py.version,
+          provides: [...new Set([...py.provides, ...(ts.provides ?? [])])],
+          instances: py.instances ?? [],
+        });
+      } else {
+        versionConflicts.push({
+          plugin_id: pluginId,
+          python_version: py.version,
+          ts_version: ts.version,
+        });
+      }
+    }
+    const provided = new Set([
+      ...this.pythonHalves.flatMap((item) => item.provides),
+      ...enabledTs.flatMap((item) => item.provides ?? []),
+    ]);
+    const missingCapabilities = [
+      ...new Set(
+        this.pythonHalves.flatMap((item) =>
+          (item.requires_capabilities ?? []).filter((cap) => !provided.has(cap)),
+        ),
+      ),
+    ];
+    return {
+      matched,
+      python_only: this.pythonHalves.filter((item) => !tsById.has(item.plugin_id)),
+      ts_only: enabledTs.filter((item) => !pyById.has(item.plugin_id)),
+      version_conflicts: versionConflicts,
+      missing_capabilities: missingCapabilities,
+      instances: Object.fromEntries(
+        this.pythonHalves.map((item) => [item.plugin_id, item.instances ?? []]),
+      ),
+    };
   }
 
   private _parse<S extends z.ZodTypeAny>(

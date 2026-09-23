@@ -1,4 +1,9 @@
-import type { TaskInfoPayload } from "@ghrah/protocol";
+import type {
+  TaskClaimEventPayload,
+  TaskClaimPayload,
+  TaskDumpResultPayload,
+  TaskInfoPayload,
+} from "@ghrah/protocol";
 import { EventType } from "@ghrah/protocol";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -88,5 +93,136 @@ describe("useTasksStore", () => {
     ]);
     store.clearProject("p1");
     expect([...store.tasks.keys()]).toEqual(["t2"]);
+  });
+});
+
+function makeClaim(overrides: Partial<TaskClaimPayload> = {}): TaskClaimPayload {
+  return {
+    claim_id: "c1",
+    task_id: "t1",
+    claimant_type: "agent",
+    claimant_id: "a1",
+    claimant_name: "agent-1",
+    note: null,
+    evidence: [
+      {
+        evidence_id: "e1",
+        kind: "git_commit",
+        ref: "repo@abc123",
+        digest: null,
+        payload: { sha: "abc123" },
+        created_by: "a1",
+        created_at: "2026-09-21T00:00:00Z",
+      },
+    ],
+    state: "submitted",
+    checks: [{ checker: "commit-exists", passed: true, detail: null }],
+    verdict_by: null,
+    verdict_at: null,
+    verdict_reason: null,
+    provenance: { agent_id: "a1", session_id: "s1", branch_id: "b1", node_id: "n1" },
+    created_at: "2026-09-21T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeClaimEvent(task: TaskInfoPayload, claim: TaskClaimPayload): TaskClaimEventPayload {
+  return { task, claim, previous_status: "in_progress", reason: null };
+}
+
+describe("useTasksStore attribution", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it("onClaimEvent upserts task + claim with embedded evidence", () => {
+    const store = useTasksStore();
+    const claim = makeClaim();
+    store.onClaimEvent(EventType.TASK_DELIVERED, makeClaimEvent(makeTask(), claim));
+    expect(store.tasks.get("t1")).toEqual(makeTask());
+    expect(store.claims.get("c1")).toEqual(claim);
+    expect(store.evidenceForClaim("c1")).toEqual(claim.evidence);
+    expect(store.claimsByTask("t1")).toEqual([claim]);
+  });
+
+  it("upsertClaim merges task_list_claims results without touching tasks", () => {
+    const store = useTasksStore();
+    store.upsertClaim(makeClaim({ claim_id: "c2", state: "verified" }));
+    expect(store.claims.size).toBe(1);
+    expect(store.tasks.size).toBe(0);
+  });
+
+  it("replaceFromDump fully replaces claims/evidence and upserts tasks", () => {
+    const store = useTasksStore();
+    store.onClaimEvent(EventType.TASK_DELIVERED, makeClaimEvent(makeTask(), makeClaim()));
+    const dump: TaskDumpResultPayload = {
+      tasks: [makeTask({ status: "delivered" })],
+      claims: [makeClaim({ claim_id: "c9", state: "verified" })],
+      evidence: [],
+    };
+    store.replaceFromDump(dump);
+    expect(store.claims.size).toBe(1);
+    expect(store.claims.has("c1")).toBe(false);
+    expect(store.claims.get("c9")?.state).toBe("verified");
+    expect(store.tasks.get("t1")?.status).toBe("delivered");
+    // legacy task 不删除边界：dump 外的既有 task 保留
+    store.replaceFromDump({ tasks: [], claims: [], evidence: [] });
+    expect(store.tasks.size).toBe(1);
+    expect(store.claims.size).toBe(0);
+  });
+
+  it("clearProject/clearAll 同步清理 claims/evidence", () => {
+    const store = useTasksStore();
+    store.onClaimEvent(
+      EventType.TASK_DELIVERED,
+      makeClaimEvent(makeTask({ task_id: "t1", project_id: "p1" }), makeClaim()),
+    );
+    store.onClaimEvent(
+      EventType.TASK_DELIVERED,
+      makeClaimEvent(
+        makeTask({ task_id: "t2", project_id: "p2" }),
+        makeClaim({ claim_id: "c2", task_id: "t2" }),
+      ),
+    );
+    store.clearProject("p1");
+    expect(store.claims.has("c1")).toBe(false);
+    expect(store.claims.has("c2")).toBe(true);
+    store.clearAll();
+    expect(store.claims.size).toBe(0);
+    expect(store.tasks.size).toBe(0);
+  });
+
+  // 验收②：事件流累计态 == 清空后 dump 重建态（探针 5 P0 切面）。
+  it("event-stream terminal state equals dump-rebuilt state", () => {
+    const events = [
+      makeClaimEvent(makeTask({ task_id: "t1" }), makeClaim({ claim_id: "c1", task_id: "t1" })),
+      makeClaimEvent(
+        makeTask({ task_id: "t2", status: "delivered" }),
+        makeClaim({ claim_id: "c2", task_id: "t2", state: "verified" }),
+      ),
+    ];
+    const live = useTasksStore();
+    for (const event of events) live.onClaimEvent(EventType.TASK_DELIVERED, event);
+
+    setActivePinia(createPinia());
+    const rebuilt = useTasksStore();
+    const dump: TaskDumpResultPayload = {
+      tasks: events.map((event) => event.task),
+      claims: events.map((event) => event.claim),
+      evidence: events.flatMap((event) => event.claim.evidence),
+    };
+    rebuilt.replaceFromDump(dump);
+
+    expect([...rebuilt.tasks.keys()].sort()).toEqual([...live.tasks.keys()].sort());
+    expect([...rebuilt.claims.keys()].sort()).toEqual([...live.claims.keys()].sort());
+    for (const claimId of live.claims.keys()) {
+      expect(rebuilt.claims.get(claimId)).toEqual(live.claims.get(claimId));
+    }
+    for (const taskId of live.tasks.keys()) {
+      expect(rebuilt.tasks.get(taskId)).toEqual(live.tasks.get(taskId));
+    }
+    for (const claimId of live.claims.keys()) {
+      expect(rebuilt.evidenceForClaim(claimId)).toEqual(live.evidenceForClaim(claimId));
+    }
   });
 });

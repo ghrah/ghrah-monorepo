@@ -245,7 +245,10 @@ class PluginTrustConfig:
 
 @dataclass
 class TaskStoreConfig:
-    """任务归因内核切片（TaskStoreUnit 配置）。
+    """任务归因内核切片（TaskStoreUnit 配置；**可选组件**，非系统必要组件）。
+
+    目标装配形态是插件（经 ``ghrah.plugins`` 发现 + 信任闸 + Project 装配
+    清单挂载）；当前经 builtin 链挂载属待纠正偏离。
 
     Attributes:
         enabled: 是否挂载 TaskStoreUnit（False 时归因命令回落 Unknown command；

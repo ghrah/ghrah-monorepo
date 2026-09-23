@@ -4,7 +4,7 @@ import { useObserver } from "@/composables/useObserver";
 import Dashboard from "@/pages/dashboard.vue";
 import InstanceSettings from "@/pages/instance-settings.vue";
 
-type SettingsSection = "general" | "agents" | "abilities";
+type SettingsSection = "general" | "agents" | "abilities" | "plugins" | "tasks" | "archived";
 const { error, autoConnect, disconnect } = useObserver();
 const settingsOpen = ref(false);
 const settingsSection = ref<SettingsSection>("general");

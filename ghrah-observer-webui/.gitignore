@@ -41,3 +41,6 @@ __screenshots__/
 
 test-results/
 playwright-report/
+
+# 宿主装配生成物（assemble-plugins.mjs 产出；同时被 prettier/oxlint 忽略）
+packages/observer-web/public/plugins/

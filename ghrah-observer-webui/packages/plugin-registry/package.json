@@ -1,0 +1,54 @@
+{
+  "name": "@ghrah/plugin-registry",
+  "version": "0.1.0",
+  "description": "TS half plugin spec validation, host capability checks, bucketed registry, negotiation report builder and loader adapter for ghrah observer hosts",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ghrah/ghrah-monorepo.git",
+    "directory": "ghrah-observer-webui/packages/plugin-registry"
+  },
+  "homepage": "https://github.com/ghrah/ghrah-monorepo#readme",
+  "bugs": {
+    "url": "https://github.com/ghrah/ghrah-monorepo/issues"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "biome check src/"
+  },
+  "dependencies": {
+    "@ghrah/protocol": "workspace:*",
+    "zod": "^3.24.0"
+  },
+  "peerDependencies": {
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -13,6 +13,9 @@ import type {
   HITLResolvedPayload,
   ManifestAbilityEventPayload,
   ManifestAgentEventPayload,
+  PluginCrashedPayload,
+  PluginLifecyclePayload,
+  PluginNegotiateResultPayload,
   ProjectAgentEventPayload,
   ProjectEventPayload,
   ProjectInfoPayload,
@@ -29,7 +32,11 @@ import type {
   SessionDeletedPayload,
   SessionInfoPayload,
   SessionListResultPayload,
+  TaskClaimEventPayload,
+  TaskClaimListResultPayload,
+  TaskDumpResultPayload,
   TaskEventPayload,
+  TsHalfReport,
 } from "@ghrah/protocol";
 import { CommandType, EventType, SystemType } from "@ghrah/protocol";
 import { clearAgentDerived, clearProjectDerived, clearRoomDerived } from "./clear-derived.js";
@@ -52,6 +59,7 @@ import { useConnectionStore } from "./stores/connection.js";
 import { useContextUsageStore } from "./stores/context-usage.js";
 import { useHitlStore } from "./stores/hitl.js";
 import { useManifestsStore } from "./stores/manifests.js";
+import { usePluginsStore } from "./stores/plugins.js";
 import { useProjectsStore } from "./stores/projects.js";
 import { useRoomsStore } from "./stores/rooms.js";
 import { useSessionsStore } from "./stores/sessions.js";
@@ -60,6 +68,11 @@ import { useTasksStore } from "./stores/tasks.js";
 export interface ConnectStoresOptions {
   /** High-volume event batcher; defaults to requestAnimationFrame/microtask batching. */
   batcher?: FrameBatcher;
+  /**
+   * 宿主已装配的 TS 半清单（协商上报用）。必须在连接前就绪（快照语义）：
+   * 连接后补装不会重发协商。observer-core 不知道插件目录/URL/import map。
+   */
+  tsHalfProvider?: () => TsHalfReport[];
 }
 
 function stringField(value: unknown): string | null {
@@ -87,13 +100,30 @@ export function connectStores(
   const rooms = useRoomsStore();
   const projects = useProjectsStore();
   const tasks = useTasksStore();
+  const plugins = usePluginsStore();
   const batcher = options.batcher ?? createFrameBatcher();
 
-  client.onConnected(() => connection.setConnected());
+  /** 连接级协商 + 归因读通量（A10 连接半边；onConnected/onReconnected 互斥触发）。 */
+  function syncPluginAndTaskState() {
+    void client
+      .pluginNegotiate(options.tsHalfProvider ? options.tsHalfProvider() : [])
+      .then(() => undefined)
+      .catch(() => undefined);
+    void client
+      .taskDump({})
+      .then(() => undefined)
+      .catch(() => undefined);
+  }
+
+  client.onConnected(() => {
+    connection.setConnected();
+    syncPluginAndTaskState();
+  });
   client.onDisconnected(() => connection.setDisconnected());
   client.onReconnecting(() => connection.setReconnecting());
   client.onReconnected(() => {
     connection.setConnected();
+    syncPluginAndTaskState();
     // 重连即触发重同步（S3.1/M3b）：断线窗口内的事件已丢失，须从权威读通量
     // 重建投影。对全部已知 operable 项目重放 listAgents → syncAgentActionState
     // 链（后者 nextGeneration 使旧轮次结果全部逻辑过期）。
@@ -287,6 +317,22 @@ export function connectStores(
         if (!retained.has(projectId)) clearProjectDerived(projectId);
       }
     }
+
+    // 插件协商回执 → plugins store（权威结果，覆盖旧投影）。
+    if (command === CommandType.PLUGIN_NEGOTIATE) {
+      plugins.setNegotiationResult(data as unknown as PluginNegotiateResultPayload);
+    }
+
+    // task_dump 读通量 → tasks 归因投影重建（claims/evidence 全量替换）。
+    if (command === CommandType.TASK_DUMP) {
+      tasks.replaceFromDump(data as unknown as TaskDumpResultPayload);
+    }
+
+    // task_list_claims 查询回执 → claims 合并入 store（upsert，不触碰 tasks 投影）。
+    if (command === CommandType.TASK_LIST_CLAIMS && Array.isArray(data.claims)) {
+      const list = data as unknown as TaskClaimListResultPayload;
+      for (const claim of list.claims) tasks.upsertClaim(claim);
+    }
   });
 
   client.on(EventType.AGENT_ERROR, () => {
@@ -467,6 +513,34 @@ export function connectStores(
       tasks.onTaskEvent(eventType, msg.payload as TaskEventPayload),
     );
   }
+
+  // 归因切面：TASK_DELIVERED/VERIFIED/REJECTED（task + claim 信封）。
+  for (const eventType of [
+    EventType.TASK_DELIVERED,
+    EventType.TASK_VERIFIED,
+    EventType.TASK_REJECTED,
+  ]) {
+    client.on(eventType, (msg: ServerMessage) =>
+      tasks.onClaimEvent(eventType, msg.payload as TaskClaimEventPayload),
+    );
+  }
+
+  // 插件域事件：lifecycle/crashed 落 plugins store；negotiated → 重发协商（A10 变更半边）。
+  client.on(EventType.PLUGIN_ENABLED, (msg: ServerMessage) =>
+    plugins.onLifecycleEvent(msg.payload as PluginLifecyclePayload),
+  );
+  client.on(EventType.PLUGIN_DISABLED, (msg: ServerMessage) =>
+    plugins.onLifecycleEvent(msg.payload as PluginLifecyclePayload),
+  );
+  client.on(EventType.PLUGIN_CRASHED, (msg: ServerMessage) =>
+    plugins.onCrashed(msg.payload as PluginCrashedPayload),
+  );
+  client.on(EventType.PLUGIN_NEGOTIATED, (_msg: ServerMessage) => {
+    void client
+      .pluginNegotiate(options.tsHalfProvider ? options.tsHalfProvider() : [])
+      .then(() => undefined)
+      .catch(() => undefined);
+  });
 
   const eventTypes = [
     EventType.AGENT_SPAWNED,

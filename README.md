@@ -50,15 +50,17 @@ cd ghrah-observer-webui && pnpm dev -- --mock --scenario demo
 | 目录 | 语言 | 说明 | 发布 |
 | --- | --- | --- | --- |
 | `ghrah-core/` | Python | agent 认知核心（loop/上下文/能力/装配） | PyPI `ghrah-core` |
+| `ghrah-plugin/` | Python | 插件基础设施（plugin spec 契约/发现/注册/协商/离线验证） | 未发布（`publish.yml` 白名单未纳入） |
 | `ghrah-protocol/` | Python | 协议类型与消息定义 | PyPI `ghrah-protocol` |
 | `ghrah-subject/` | Python | 效果宿主（工作区/权限/HITL/Project/Room/恢复） | PyPI `ghrah-subject` |
+| `ghrah-taskstore/` | Python | 任务归因内核（**可选组件**、首个接入插件系统的插件；tasks/claims/evidence 三表权威 + checker 扩展点宿主） | 未发布（`publish.yml` 白名单未纳入） |
 | `ghrah-observer-webui/` | TypeScript | 观察端（`@ghrah/protocol`、`@ghrah/observer-core` 发 npm；`observer-web` 前端、`mock-server` 私有；`vscode-extension` 发 Marketplace） | npm / Marketplace |
 | `scripts/` | Python | 全栈启动入口（`start_all.py`） | — |
 
 ## 测试与质量
 
 ```sh
-uv run pytest ghrah-protocol ghrah-core ghrah-subject   # Python 三包
+uv run pytest ghrah-plugin ghrah-protocol ghrah-core ghrah-subject ghrah-taskstore  # Python 五包
 uv run ruff check . && uv run ruff format --check .     # Python lint/format
 pnpm -r test && pnpm type-check                          # TS 测试 + 类型检查（webui 内）
 pnpm lint                                                # TS biome + i18n/ui-token 门禁（webui 内）

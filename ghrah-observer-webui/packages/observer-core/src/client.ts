@@ -9,7 +9,10 @@ import {
   ServerClient,
   type ServerMessage,
   type SubscribePayload,
+  type TaskClaimListPayload,
+  type TaskDumpPayload,
   type TaskPriority,
+  type TsHalfReport,
 } from "@ghrah/protocol";
 import type { AgentTarget, ChainTarget, SessionTarget } from "./scope.js";
 
@@ -1015,6 +1018,50 @@ export class ObserverClient extends ServerClient {
     const msg: ServerMessage = {
       type: CommandType.TASK_GET,
       payload: { task_id: taskId },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  // ── Plugin / Task 归因 ──
+
+  /** 插件协商：上报宿主已装配的 TS 半清单，取回六字段协商结果。 */
+  async pluginNegotiate(enabledTs: TsHalfReport[]): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.PLUGIN_NEGOTIATE,
+      payload: { enabled_ts: enabledTs },
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  /** 任务归因快照：从权威读通量重建 claims/evidence 投影。 */
+  async taskDump(
+    payload: Partial<Pick<TaskDumpPayload, "project_id" | "include_deleted" | "limit">> = {},
+  ): Promise<CommandResultPayload> {
+    const msg: ServerMessage = {
+      type: CommandType.TASK_DUMP,
+      payload: payload as Record<string, unknown>,
+      request_id: generateRequestId(),
+      client_type: ClientType.OBSERVER,
+    };
+    return this.request(msg, 30_000);
+  }
+
+  /** 任务归因查询：按 task/claimant/state 过滤 claims（含内嵌 evidence）。 */
+  async taskListClaims(
+    filter: Partial<Omit<TaskClaimListPayload, "limit">> & { limit?: number } = {},
+  ): Promise<CommandResultPayload> {
+    const payload: Record<string, unknown> = {};
+    if (filter.task_id != null) payload["task_id"] = filter.task_id;
+    if (filter.claimant_id != null) payload["claimant_id"] = filter.claimant_id;
+    if (filter.state != null) payload["state"] = filter.state;
+    if (filter.limit != null) payload["limit"] = filter.limit;
+    const msg: ServerMessage = {
+      type: CommandType.TASK_LIST_CLAIMS,
+      payload,
       request_id: generateRequestId(),
       client_type: ClientType.OBSERVER,
     };

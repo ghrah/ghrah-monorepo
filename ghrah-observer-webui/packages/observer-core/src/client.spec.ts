@@ -757,6 +757,44 @@ describe("ObserverClient", () => {
       expect(parsed.type).toBe(CommandType.TASK_GET);
       expect(parsed.payload).toEqual({ task_id: "t1" });
     });
+
+    it("pluginNegotiate sends plugin_negotiate with enabled_ts", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(
+        client.pluginNegotiate([
+          {
+            plugin_id: "task-commit-attribution",
+            version: "0.1.0",
+            provides: ["badge-renderer/git_commit"],
+          },
+        ]),
+      );
+      expect(parsed.type).toBe(CommandType.PLUGIN_NEGOTIATE);
+      expect(parsed.payload).toEqual({
+        enabled_ts: [
+          {
+            plugin_id: "task-commit-attribution",
+            version: "0.1.0",
+            provides: ["badge-renderer/git_commit"],
+          },
+        ],
+      });
+      expect(typeof parsed.request_id).toBe("string");
+    });
+
+    it("taskDump sends task_dump (full dump, no limit)", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.taskDump());
+      expect(parsed.type).toBe(CommandType.TASK_DUMP);
+      expect(parsed.payload).toEqual({});
+    });
+
+    it("taskListClaims sends task_list_claims with filter", async () => {
+      await connectClient(client, mockWs);
+      const parsed = await runRequest(client.taskListClaims({ task_id: "t1", state: "verified" }));
+      expect(parsed.type).toBe(CommandType.TASK_LIST_CLAIMS);
+      expect(parsed.payload).toEqual({ task_id: "t1", state: "verified" });
+    });
   });
 
   describe("_syncInitialState", () => {

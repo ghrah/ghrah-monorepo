@@ -2,7 +2,13 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-"""任务归因内核 unit（builtin 链一等 unit，挂载 TaskStoreKernel）。
+"""任务归因内核 unit（当前经 builtin 链挂载 TaskStoreKernel）。
+
+TaskStore 是**可选组件**（非系统必要组件）：没有它系统仍能完成大部分工作，
+它只做加强。目标装配形态是**插件**（经 ``ghrah.plugins`` 发现 + 信任闸 +
+Project 装配清单挂载）；当前经 builtin 链挂载是对该目标形态的**待纠正偏离**
+——builtin 链不提供插件的发现/信任/协商/卸载语义。可选性目前只体现在
+``config.taskstore.enabled``，包依赖仍为硬依赖。
 
 仅注册 4 归因命令（TASK_ATTRIBUTION_COMMANDS）：submit/verify 走内核转移，
 list_claims / dump 走查询面。Denial 形状冻结（D18①）：``success=False`` +

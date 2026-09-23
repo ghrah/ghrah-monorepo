@@ -5,10 +5,10 @@
 ## 仓库结构
 
 - `ghrah-core/` — Python 核心包（PyPI: ghrah-core）
-- `ghrah-plugin/` — Python 插件基础设施包（PyPI: ghrah-plugin；plugin spec 契约/发现/注册/协商/离线验证）
+- `ghrah-plugin/` — Python 插件基础设施包（plugin spec 契约/发现/注册/协商/离线验证；**未纳入 `publish.yml` 白名单，暂无发布通道**）
 - `ghrah-protocol/` — Python 协议包（PyPI: ghrah-protocol）
 - `ghrah-subject/` — Python subject 包（PyPI: ghrah-subject）
-- `ghrah-taskstore/` — Python 任务归因内核包（PyPI: ghrah-taskstore；tasks/claims/evidence 三表权威 + checker 扩展点宿主）
+- `ghrah-taskstore/` — Python 任务归因内核包（**可选组件**、首个接入插件系统的插件；tasks/claims/evidence 三表权威 + checker 扩展点宿主；**未纳入 `publish.yml` 白名单，暂无发布通道**）
 - `ghrah-observer-webui/` — TS 观察端（pnpm workspace: packages/* + vscode-extension）
 - `scripts/start_all.py` — 全栈一键启动入口（subject :4112 内嵌 Core + webui dev :5173）
 
@@ -75,8 +75,8 @@ pnpm install                # TS 全量安装（webui 目录或根均可，works
 ## 测试与验收
 
 ```sh
-# Python 三包（根目录执行；成员目录跑测试须 env -u PYTHONPATH uv run pytest -q）
-uv run pytest ghrah-protocol ghrah-core ghrah-subject
+# Python 五包（根目录执行；成员目录跑测试须 env -u PYTHONPATH uv run pytest -q）
+uv run pytest ghrah-plugin ghrah-protocol ghrah-core ghrah-subject ghrah-taskstore
 
 # TS（webui 目录执行）
 pnpm vitest run        # 注意：根级无 test script，用 vitest run
