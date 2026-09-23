@@ -19,7 +19,7 @@ from ghrah.abilities.builtin.end_task import EndTaskAbility
 from ghrah.abilities.builtin.fs_permissions import FSPermissionChecker
 from ghrah.abilities.builtin.read_file import ReadFileAbility, ReadFileInput
 from ghrah.abilities.context import AbilityExecutionContext
-from ghrah.abilities.hooks import Hook
+from ghrah.abilities.hooks import Hook, HookPoint
 
 # ── 辅助 ──
 
@@ -149,9 +149,41 @@ class TestEndTaskAbility:
         assert isinstance(desc, str)
         assert "End" in desc or "end" in desc
 
-    def test_get_hooks_default_empty(self) -> None:
+    def test_get_hooks_default_has_done_hook(self) -> None:
+        """默认内置 EndTaskDoneHook（toolcall 模式终止循环所需）。"""
+        from ghrah.abilities.builtin.end_task import EndTaskDoneHook
+
         ability = EndTaskAbility()
-        assert ability.get_hooks() == []
+        hooks = ability.get_hooks()
+        assert len(hooks) == 1
+        assert isinstance(hooks[0], EndTaskDoneHook)
+
+    def test_get_hooks_with_hooks(self) -> None:
+        """用户传入的 hook 追加在内置 EndTaskDoneHook 之后。"""
+        hook = MagicMock(spec=Hook)
+        ability = EndTaskAbility(hooks=[hook])
+        hooks = ability.get_hooks()
+        assert len(hooks) == 2
+        assert hooks[1] is hook
+
+    async def test_done_hook_triggers_only_for_end_task(self) -> None:
+        """EndTaskDoneHook 仅在 current_ability_name == 'end_task' 时触发。"""
+        from ghrah.abilities.builtin.end_task import EndTaskDoneHook
+
+        hook = EndTaskDoneHook()
+        assert hook.hook_point == HookPoint.AFTER_ACTION
+        assert await hook.should_trigger(_make_context(current_ability_name="end_task")) is True
+        assert (
+            await hook.should_trigger(_make_context(current_ability_name="conversation")) is False
+        )
+
+    async def test_done_hook_execute_stops_loop(self) -> None:
+        """EndTaskDoneHook.execute 返回 should_continue=False。"""
+        from ghrah.abilities.builtin.end_task import EndTaskDoneHook
+
+        hook = EndTaskDoneHook()
+        result = await hook.execute(_make_context(current_ability_name="end_task"), None)
+        assert result.should_continue is False
 
     async def test_execute_with_last_action_result_response(self) -> None:
         """优先使用 last_action_result 中的 response。"""

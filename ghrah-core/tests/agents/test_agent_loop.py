@@ -459,8 +459,34 @@ class TestDriveLoop:
         assert agent._iteration_state.is_unlimited is True
 
     @pytest.mark.asyncio
+    async def test_toolcall_end_task_stops_loop(self) -> None:
+        """LLM 通过 toolcall 调用 end_task 后应只执行一次并终止循环。"""
+        from ghrah.abilities.builtin.end_task import EndTaskAbility
+
+        agent = _create_agent()
+        agent.register_ability(EndTaskAbility(mode="toolcall"))
+
+        mock_llm = AsyncMock()
+        mock_llm.generate.return_value = LLMResponse(
+            content_blocks=[ToolCallBlock(id="call_end", name="end_task", arguments={})]
+        )
+        mock_llm.configure_tools = MagicMock()
+        agent._llm = mock_llm
+
+        agent._iteration_state.max_iterations = 5
+        agent._iteration_state.reset()
+
+        await agent._drive_loop()
+
+        assert mock_llm.generate.call_count == 1
+        assert agent._iteration_state.iteration == 0
+        assert agent._iteration_state.last_action_result is not None
+        assert agent._iteration_state.last_action_result.data["response"] == "Task completed"
+
+    @pytest.mark.asyncio
     async def test_before_action_hook_stops_loop(self) -> None:
         """BEFORE_ACTION hook 返回 should_continue=False 应停止循环。"""
+
         block_hook = MockHook(
             hook_point=HookPoint.BEFORE_ACTION,
             result=HookResult.stop(message="blocked by policy"),

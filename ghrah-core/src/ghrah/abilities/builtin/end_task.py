@@ -17,6 +17,12 @@
 - mode 参数支持三种模式：auto / toolcall / verified
 - bind_tool() 方法在 mode="toolcall" 时返回 function calling schema
 - 当前最简版本只支持 mode="auto"（被 Hook 触发）
+
+内置 Hook：
+    EndTaskDoneHook：AFTER_ACTION 触发，执行后终止驱动循环。
+    toolcall 模式下 LLM 主动调用 end_task 后，返回值本身不控制循环
+    （驱动循环只消费 Hook 的 should_continue），必须由该 Hook 终止；
+    Hook 路由路径（_execute_routed_ability）不经 AFTER_ACTION，故不受影响。
 """
 
 from __future__ import annotations
@@ -25,15 +31,36 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ghrah.abilities.base import Ability
+from ghrah.abilities.hooks import Hook, HookPoint, HookResult
 from ghrah.types.results import ActionOutcome, ActionResult
 
 if TYPE_CHECKING:
     from ghrah.abilities.context import AbilityExecutionContext
-    from ghrah.abilities.hooks import Hook
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["EndTaskAbility"]
+__all__ = ["EndTaskAbility", "EndTaskDoneHook"]
+
+
+class EndTaskDoneHook(Hook):
+    """EndTaskAbility 执行完成后终止驱动循环。
+
+    与 ConversationDoneHook 对称：驱动循环只依据 Hook 的 should_continue
+    决定是否继续，Ability 返回的 next_action_hint 不被消费，因此 toolcall
+    模式的 end_task 需要一个 AFTER_ACTION Hook 来显式终止。
+    """
+
+    hook_point = HookPoint.AFTER_ACTION
+
+    async def should_trigger(self, context: AbilityExecutionContext) -> bool:
+        """只在当前 ability 是 end_task 时触发。"""
+        return context.current_ability_name == "end_task"
+
+    async def execute(
+        self, context: AbilityExecutionContext, result: ActionResult | None
+    ) -> HookResult:
+        """终止循环。"""
+        return HookResult.stop()
 
 
 class EndTaskAbility(Ability):
@@ -66,7 +93,9 @@ class EndTaskAbility(Ability):
     ) -> None:
         if mode not in ("auto", "toolcall", "verified"):
             raise ValueError(f"Invalid mode: {mode!r}, expected 'auto', 'toolcall', or 'verified'")
-        self._hooks = hooks or []
+        self._hooks: list[Hook] = [EndTaskDoneHook()]
+        if hooks:
+            self._hooks.extend(hooks)
         self._mode = mode
 
     @property
