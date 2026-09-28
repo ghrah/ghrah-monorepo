@@ -1,10 +1,15 @@
 import { createPinia, setActivePinia } from "pinia";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useConnectionStore } from "./connection.js";
 
 describe("useConnectionStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("initial state is disconnected", () => {
@@ -15,6 +20,19 @@ describe("useConnectionStore", () => {
   it("default serverUrl is ws://localhost:4112/ws", () => {
     const store = useConnectionStore();
     expect(store.serverUrl).toBe("ws://localhost:4112/ws");
+  });
+
+  it("falls back to injected global WS URL when env is unset", () => {
+    vi.stubGlobal("__GHRAH_SUBJECT_WS_URL__", "ws://127.0.0.1:4222/ws");
+    const store = useConnectionStore();
+    expect(store.serverUrl).toBe("ws://127.0.0.1:4222/ws");
+  });
+
+  it("env var wins over injected global", () => {
+    vi.stubEnv("VITE_GHRAH_SUBJECT_WS_URL", "ws://env:4113/ws");
+    vi.stubGlobal("__GHRAH_SUBJECT_WS_URL__", "ws://injected:4222/ws");
+    const store = useConnectionStore();
+    expect(store.serverUrl).toBe("ws://env:4113/ws");
   });
 
   it("setConnected changes state to connected", () => {

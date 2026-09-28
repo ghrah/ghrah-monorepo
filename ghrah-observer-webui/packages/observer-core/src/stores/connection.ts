@@ -6,7 +6,9 @@ export type ConnectionState = "disconnected" | "connecting" | "connected" | "rec
 export const useConnectionStore = defineStore("ghrah-connection", () => {
   const state = ref<ConnectionState>("disconnected");
   const serverUrl = ref(
-    (import.meta.env?.VITE_GHRAH_SUBJECT_WS_URL as string | undefined) ?? "ws://localhost:4112/ws",
+    (import.meta.env?.VITE_GHRAH_SUBJECT_WS_URL as string | undefined) ??
+      (globalThis as { __GHRAH_SUBJECT_WS_URL__?: string }).__GHRAH_SUBJECT_WS_URL__ ??
+      "ws://localhost:4112/ws",
   );
 
   function setConnected() {
