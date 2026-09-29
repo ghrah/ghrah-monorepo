@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -1716,3 +1717,137 @@ class TestCompactionDecisionSeam:
         assert status["compact_threshold"] == 0.7
         assert status["compact_keep_recent"] == 3
         assert status["compact_method"] == "ghrah.builtin"
+
+
+# ----------------------------------------------------------------
+# 测试：迭代事务兜底收尾（BaseException 逃逸防护）
+# ----------------------------------------------------------------
+
+
+class TestIterationForceCloseOnCancel:
+    """CancelledError（BaseException）逃逸 except Exception 捕获面的回归测试。
+
+    背景：MessageRouter 的 asyncio.wait_for 超时会取消内层 receive 协程，
+    CancelledError 不进 _drive_loop 的 except Exception 分支，逃逸后
+    ContextManager._in_iteration 残留 True，下一次 begin_iteration 抛
+    RuntimeError("Iteration already in progress")，agent 对后续消息永久失效。
+    """
+
+    @pytest.mark.asyncio
+    async def test_cancelled_error_leaving_drive_loop_keeps_agent_usable(self) -> None:
+        """LLM 生成期间被取消 → 逃逸后迭代事务已收尾，下一次 receive 正常。"""
+        agent = _create_agent()
+        agent.register_ability(MockAbility(name="conversation"))
+
+        async def cancelled_generate(messages):
+            raise asyncio.CancelledError()
+
+        mock_llm = AsyncMock()
+        mock_llm.generate = AsyncMock(side_effect=cancelled_generate)
+        mock_llm.configure_tools = MagicMock()
+        agent._llm = mock_llm
+
+        agent._iteration_state.reset()
+
+        with pytest.raises(asyncio.CancelledError):
+            await agent._drive_loop()
+
+        # 迭代事务已收尾：不残留开启状态
+        assert agent._context_manager.in_iteration is False
+
+        # agent 仍可处理后续消息（不再抛 Iteration already in progress）
+        mock_llm.generate = AsyncMock(
+            return_value=LLMResponse(content_blocks=[TextBlock(text="recovered")])
+        )
+        agent._all_hooks.append(StopAfterOneHook())
+        agent._iteration_state.reset()
+        await agent._drive_loop()
+        assert agent._iteration_state.last_action_result is not None
+
+    @pytest.mark.asyncio
+    async def test_cancelled_error_leaving_routed_ability_keeps_agent_usable(self) -> None:
+        """_execute_routed_ability 执行期间被取消 → 同样不污染迭代事务。"""
+        agent = _create_agent()
+
+        class CancelledAbility(Ability):
+            @property
+            def name(self) -> str:
+                return "end_task"
+
+            async def execute(self, context: AbilityExecutionContext) -> ActionResult:
+                raise asyncio.CancelledError()
+
+            def get_hooks(self) -> list[Hook]:
+                return []
+
+        agent.register_ability(CancelledAbility())
+
+        agent._iteration_state.reset()
+
+        with pytest.raises(asyncio.CancelledError):
+            await agent._execute_routed_ability({}, "end_task")
+
+        assert agent._context_manager.in_iteration is False
+
+        # 下一次迭代可正常开启
+        agent._context_manager.begin_iteration()
+        agent._context_manager.commit_iteration(ability_names=["probe"], action_results=[])
+        assert agent._context_manager.in_iteration is False
+
+    @pytest.mark.asyncio
+    async def test_receive_level_timeout_simulation_recovers(self) -> None:
+        """端到端模拟：wait_for 超时取消 receive → 再 receive 不抛 RuntimeError。"""
+        agent = _create_agent()
+        agent.register_ability(MockAbility(name="conversation"))
+
+        async def cancelled_generate(messages):
+            raise asyncio.CancelledError()
+
+        mock_llm = AsyncMock()
+        mock_llm.generate = AsyncMock(side_effect=cancelled_generate)
+        mock_llm.configure_tools = MagicMock()
+        agent._llm = mock_llm
+
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(agent.receive(_make_message("first")), timeout=0.1)
+
+        assert agent._context_manager.in_iteration is False
+
+        # 第二次 receive：不抛 "Iteration already in progress"，
+        # 正常走完驱动循环（conversation ability 执行成功）
+        mock_llm.generate = AsyncMock(
+            return_value=LLMResponse(content_blocks=[TextBlock(text="second ok")])
+        )
+        agent._all_hooks.append(StopAfterOneHook())
+        reply = await agent.receive(_make_message("second"))
+        # 回复来自 conversation ability 的 ActionResult（mock response），
+        # 关键断言是 receive 成功返回而非抛 RuntimeError
+        assert reply.type != MessageType.ERROR
+
+    @pytest.mark.asyncio
+    async def test_ensure_iteration_closed_idempotent_and_noop_when_closed(self) -> None:
+        """正常路径（commit/rollback 后）调用兜底为 no-op；重复调用幂等。"""
+        agent = _create_agent()
+        cm = agent._context_manager
+
+        # 空闲态：no-op
+        cm.ensure_iteration_closed()
+        assert cm.in_iteration is False
+
+        # 正常 commit 后：no-op（不产生额外副作用）
+        agent._llm = _make_mock_llm("normal")
+        agent._all_hooks.append(StopAfterOneHook())
+        agent._iteration_state.reset()
+        await agent._drive_loop()
+        cm.ensure_iteration_closed()
+        assert cm.in_iteration is False
+
+        # 残留开启态：强制收尾（含 state 事务复位）
+        cm.begin_iteration()
+        cm.apply_state_changes({"dirty": True})
+        cm.add_messages([ChatMessage.user("pending", source="human")])
+        cm.ensure_iteration_closed()
+        assert cm.in_iteration is False
+        assert cm.get_current_state().get("dirty") is None
+        cm.ensure_iteration_closed()  # 幂等
+        assert cm.in_iteration is False

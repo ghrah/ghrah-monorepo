@@ -712,6 +712,12 @@ class ActorAgent:
                 error_ctx = self._build_hook_context(accumulated_data)
                 await self._run_hooks(HookPoint.ON_ERROR, error_ctx)
                 raise AgentError(self.config.name, f"Action failed: {e}") from e
+            finally:
+                # 兜底：CancelledError 等 BaseException 不进上方 except Exception，
+                # 逃逸前强制收尾迭代事务，防止 _in_iteration 残留导致
+                # 下一次 begin_iteration 永久失败（ensure_iteration_closed 幂等，
+                # 正常 commit/rollback 路径为 no-op）。
+                cm.ensure_iteration_closed()
 
             # 5. AFTER_ACTION hook（drive_loop 级）
             # 从 action_results 提取最后一个 ActionResult 作为 last_action_result
@@ -1178,6 +1184,9 @@ class ActorAgent:
         except Exception as e:
             cm.rollback_iteration(e)
             raise
+        finally:
+            # 兜底：BaseException 逃逸时强制收尾迭代事务（同 _drive_loop）
+            cm.ensure_iteration_closed()
 
     # ----------------------------------------------------------------
     # Hook 运行机制

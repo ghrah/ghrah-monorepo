@@ -834,6 +834,37 @@ class ContextManager:
     # 回滚即分支
     # ----------------------------------------------------------------
 
+    def ensure_iteration_closed(self) -> None:
+        """兜底关闭未收尾的迭代事务（幂等）。
+
+        正常路径 commit_iteration / rollback_iteration 已复位迭代状态，
+        本方法为 no-op。调用场景是 BaseException（如 asyncio.CancelledError、
+        KeyboardInterrupt）逃逸驱动循环的 except Exception 捕获面：迭代标志
+        与状态事务可能残留开启，导致下一次 begin_iteration 抛
+        RuntimeError("Iteration already in progress")，agent 对后续消息
+        永久失效。
+
+        处理与 rollback_iteration 的差异：不创建重试 Branch（取消不是失败，
+        链上无对应节点，无处落错误元数据）、不落任何持久化——仅丢弃本轮
+        pending（从未进入 store，store 本就正确）并复位事务。窗口锚点若
+        计量的是已废弃的发送视图，同样失效。
+
+        调用方应置于 finally 兜底；非预期残留以 warning 计数，不静默。
+        """
+        if not self._in_iteration:
+            return
+        logger.warning(
+            "ContextManager[%s]: iteration left open (likely cancelled mid-flight) "
+            "— force-closing pending buffers and state transaction",
+            self._agent_name,
+        )
+        if self._state_manager.in_transaction:
+            self._state_manager.rollback()
+        self._pending_messages = []
+        self._pending_compaction = []
+        self._in_iteration = False
+        self._window_occupied = None
+
     def rollback_iteration(self, error: Exception) -> ActionBranch:
         """回滚未提交迭代，从当前 Head 创建并激活重试 Branch。
 
